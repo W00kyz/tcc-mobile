@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # O build de APK precisa de JDK; o runner traz o Android SDK.
+      - name: Set up Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: "3.44.6"
+          channel: stable
+          cache: true
+
+      # --enforce-lockfile falha se pubspec.lock divergir do pubspec.yaml.
+      - name: Install dependencies
+        run: flutter pub get --enforce-lockfile
+
+      - name: Check formatting
+        run: dart format --set-exit-if-changed .
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Test with coverage
+        run: flutter test --coverage
+
+      # RNF20: 70% nas regras de negócio críticas. Nesta etapa só existe o shell,
+      # então o corte é trivial de atingir — o que importa é o portão existir desde
+      # o começo, para a dívida nunca acumular.
+      - name: Enforce coverage floor
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends lcov
+          lcov --summary coverage/lcov.info 2>&1 | tee /tmp/coverage.txt
+          PERCENT=$(grep -oP 'lines\.*: \K[0-9.]+' /tmp/coverage.txt)
+          echo "Line coverage: ${PERCENT}%"
+          awk -v p="$PERCENT" 'BEGIN { exit (p + 0 >= 70) ? 0 : 1 }' \
+            || { echo "::error::Coverage ${PERCENT}% is below the 70% floor"; exit 1; }
+
+      - name: Build debug APK
+        run: flutter build apk --debug
