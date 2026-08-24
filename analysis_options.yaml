@@ -1,0 +1,16 @@
+include: package:very_good_analysis/analysis_options.10.3.0.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  errors:
+    # Falhar o build, não avisar: código morto e TODO solto não passam do lint.
+    dead_code: error
+    unused_import: error
+    unused_local_variable: error
+
+linter:
+  rules:
+    public_member_api_docs: false

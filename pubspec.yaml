@@ -1,0 +1,20 @@
+name: route_monitor
+description: "Aplicativo de campo do sistema de monitoramento de rotas da PU/UFCG"
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: 3.12.2
+  flutter: 3.44.6
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  very_good_analysis: 10.3.0
+
+flutter:
+  uses-material-design: true
