@@ -8,12 +8,21 @@ environment:
   flutter: 3.44.6
 
 dependencies:
+  cryptography: 2.9.0
+  dio: 5.11.0
   flutter:
     sdk: flutter
+  flutter_riverpod: 3.4.2
+  flutter_secure_storage: 11.0.0
+  geolocator: 14.0.3
+  go_router: 18.0.0
+  mobile_scanner: 7.4.0
+  permission_handler: 13.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  mocktail: 1.0.5
   very_good_analysis: 10.3.0
 
 flutter:
