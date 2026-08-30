@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:route_monitor/auth/login_screen.dart';
+import 'package:route_monitor/routing/route_screen.dart';
 
 void main() {
   runApp(const ProviderScope(child: RouteMonitorApp()));
@@ -11,8 +12,8 @@ void main() {
 final _router = GoRouter(
   initialLocation: '/entrar',
   routes: [
-    // RouteScreen arrives in Task 16.
     GoRoute(path: '/entrar', builder: (context, state) => const LoginScreen()),
+    GoRoute(path: '/rota', builder: (context, state) => const RouteScreen()),
   ],
 );
 
