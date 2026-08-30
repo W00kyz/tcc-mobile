@@ -30,6 +30,30 @@ flutter test --coverage
 flutter build apk --debug
 ```
 
+## Configuração de build (--dart-define)
+
+`flutter run` e `flutter build` exigem dois valores passados via `--dart-define`
+— sem eles, `lib/api/env.dart` lança `StateError` no primeiro uso (comportamento
+proposital: falhar alto e cedo, nunca degradar em silêncio):
+
+- `API_BASE_URL` — endereço do backend na LAN do teste de campo, ex.
+  `http://192.168.1.10:8000`. Muda a cada rede/local; nunca fixar no código.
+- `QR_PUBLIC_KEY_HEX` — chave pública Ed25519 do backend, gerada uma vez com
+  `uv run python -m app.scripts.generate_qr_keypair` (repositório `tcc-backend`).
+  **Não** é a chave de teste `"11"*32` usada em `flutter test` — essa só existe
+  para os testes automatizados, nunca para rodar em dispositivo.
+
+Exemplo completo:
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://192.168.1.10:8000 \
+             --dart-define=QR_PUBLIC_KEY_HEX=<valor gerado por generate_qr_keypair>
+```
+
+Os dois são obrigatórios: faltando qualquer um, o app sobe até a primeira tela que
+precisa de rede ou de leitura de QR e falha ali com um `StateError` claro, em vez de
+falhar em silêncio.
+
 QR Code e GPS **não funcionam em emulador**. Toda mudança nesses caminhos precisa de
 dispositivo Android físico, com o backend alcançável na LAN ou por túnel — o endereço
 base é configuração de build, nunca fixo em código.

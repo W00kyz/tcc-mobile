@@ -5,7 +5,7 @@ import 'package:cryptography/cryptography.dart';
 
 /// The Dart counterpart of app.domain.qr.crypto (backend Task 7) — same
 /// payload format `v1.<floor_id>.<version>.<signature_b64url>`, verified
-/// fully offline, no network call (RF29, RNF13: a subsolo has no signal).
+/// fully offline, no network call (RF29, RNF13: a basement has no signal).
 class QrPayload {
   const QrPayload({required this.floorId, required this.version});
   final String floorId;

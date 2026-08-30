@@ -95,13 +95,26 @@ class RouteScreen extends ConsumerWidget {
       return;
     }
 
-    await ref
-        .read(routeRepositoryProvider)
-        .startRoute(
-          routeId: routeId,
-          latitude: position.latitude,
-          longitude: position.longitude,
+    try {
+      await ref
+          .read(routeRepositoryProvider)
+          .startRoute(
+            routeId: routeId,
+            latitude: position.latitude,
+            longitude: position.longitude,
+          );
+      ref.invalidate(myRoutesProvider);
+      // Deliberately broad: the backend can reject this with 403 (route not
+      // yours), 404, or 409 (already started) — every DioException from this
+      // call must reach the user as feedback instead of propagating as an
+      // unhandled async error.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível iniciar a rota.')),
         );
-    ref.invalidate(myRoutesProvider);
+      }
+    }
   }
 }
