@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:route_monitor/auth/login_screen.dart';
+
 void main() {
   runApp(const ProviderScope(child: RouteMonitorApp()));
 }
@@ -9,11 +11,8 @@ void main() {
 final _router = GoRouter(
   initialLocation: '/entrar',
   routes: [
-    // LoginScreen arrives in Task 15; RouteScreen in Task 16.
-    GoRoute(
-      path: '/entrar',
-      builder: (context, state) => const _PlaceholderScreen(),
-    ),
+    // RouteScreen arrives in Task 16.
+    GoRoute(path: '/entrar', builder: (context, state) => const LoginScreen()),
   ],
 );
 
@@ -36,14 +35,5 @@ class RouteMonitorApp extends StatelessWidget {
       ),
       routerConfig: _router,
     );
-  }
-}
-
-class _PlaceholderScreen extends StatelessWidget {
-  const _PlaceholderScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(body: Center(child: Text('Monitoramento de Rotas')));
   }
 }
