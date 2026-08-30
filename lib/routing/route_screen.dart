@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 
@@ -41,9 +42,20 @@ class RouteScreen extends ConsumerWidget {
                     leading: Icon(
                       stop.status == 'DONE'
                           ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
+                          : Icons.qr_code_scanner,
                     ),
                     title: Text(stop.servicePointName),
+                    trailing: stop.status == 'DONE'
+                        ? null
+                        : TextButton(
+                            onPressed: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    ScanScreen(routeStopId: stop.id),
+                              ),
+                            ),
+                            child: const Text('Check-in'),
+                          ),
                   ),
                 const Spacer(),
                 if (route.startedAt == null)
