@@ -3,7 +3,38 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/routing/location_service.dart';
+import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
+import 'package:route_monitor/routing/route_repository.dart';
+
+/// Formats an arrival window as `HH:MM–HH:MM` (RF14). Returns `null` when
+/// neither bound is set, and a single `HH:MM` when only one bound is present.
+String? _formatWindow(DateTime? from, DateTime? to) {
+  if (from == null && to == null) return null;
+  if (from != null && to != null) {
+    return '${_hhmm(from)}–${_hhmm(to)}';
+  }
+  return _hhmm(from ?? to!);
+}
+
+String _hhmm(DateTime time) {
+  // INTENTIONAL: read .hour/.minute straight off the DateTime, no .toLocal().
+  // Arrival windows come from the backend as wall-clock times tagged UTC
+  // (system-wide convention — see dashboard RouteBuilderPage `extractTime`).
+  // Adding .toLocal() here would shift every window by the UTC offset.
+  final hour = time.hour.toString().padLeft(2, '0');
+  final minute = time.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
+/// Formats the travel-from-previous leg as `N m · N min` (RF12). Returns `null`
+/// when the distance is unknown; drops the time part when the duration is.
+String? _formatLeg(double? distanceM, double? durationS) {
+  if (distanceM == null) return null;
+  final distance = '${distanceM.round()} m';
+  if (durationS == null) return distance;
+  return '$distance · ${(durationS / 60).round()} min';
+}
 
 class RouteScreen extends ConsumerWidget {
   const RouteScreen({super.key});
@@ -30,34 +61,24 @@ class RouteScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  route.startedAt == null
-                      ? 'Rota não iniciada'
-                      : 'Rota iniciada',
-                  style: Theme.of(context).textTheme.titleMedium,
+                _RouteHeader(route: route),
+                const SizedBox(height: 12),
+                FilledButton.tonal(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => MapScreen(route: route),
+                    ),
+                  ),
+                  child: const Text('Ver no mapa'),
                 ),
                 const SizedBox(height: 16),
-                for (final stop in route.stops)
-                  ListTile(
-                    leading: Icon(
-                      stop.status == 'DONE'
-                          ? Icons.check_circle
-                          : Icons.qr_code_scanner,
-                    ),
-                    title: Text(stop.servicePointName),
-                    trailing: stop.status == 'DONE'
-                        ? null
-                        : TextButton(
-                            onPressed: () => Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) =>
-                                    ScanScreen(routeStopId: stop.id),
-                              ),
-                            ),
-                            child: const Text('Check-in'),
-                          ),
+                Expanded(
+                  child: ListView(
+                    children: [
+                      for (final stop in route.stops) _StopTile(stop: stop),
+                    ],
                   ),
-                const Spacer(),
+                ),
                 if (route.startedAt == null)
                   FilledButton(
                     onPressed: () => _startRoute(context, ref, route.id),
@@ -116,5 +137,92 @@ class RouteScreen extends ConsumerWidget {
         );
       }
     }
+  }
+}
+
+class _RouteHeader extends StatelessWidget {
+  const _RouteHeader({required this.route});
+
+  final RouteSummary route;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Flexible(
+          child: Text(
+            route.startedAt == null ? 'Rota não iniciada' : 'Rota iniciada',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+        ),
+        if (route.routeType == 'OCCASIONAL')
+          const Padding(
+            padding: EdgeInsets.only(left: 8),
+            child: Chip(label: Text('EVENTUAL')),
+          ),
+      ],
+    );
+  }
+}
+
+class _StopTile extends StatelessWidget {
+  const _StopTile({required this.stop});
+
+  final RouteStopSummary stop;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDone = stop.status == 'DONE';
+    final window = _formatWindow(
+      stop.expectedArrivalFrom,
+      stop.expectedArrivalTo,
+    );
+    final leg = _formatLeg(stop.distanceFromPrevM, stop.durationFromPrevS);
+
+    return ListTile(
+      leading: CircleAvatar(
+        radius: 14,
+        // Smaller than default so a 2-digit orderIndex (routes with >= 10
+        // stops) still fits inside the r=14 circle without clipping.
+        child: Text(
+          '${stop.orderIndex}',
+          style: const TextStyle(fontSize: 12),
+        ),
+      ),
+      title: Row(
+        children: [
+          Icon(
+            isDone ? Icons.check_circle : Icons.qr_code_scanner,
+            size: 18,
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(stop.servicePointName)),
+          if (stop.pointType == 'OCCASIONAL')
+            const Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: Chip(label: Text('Ponto eventual')),
+            ),
+        ],
+      ),
+      subtitle: window == null && leg == null
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (leg != null) Text('a $leg'),
+                if (window != null) Text('Janela: $window'),
+              ],
+            ),
+      trailing: isDone
+          ? null
+          : TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => ScanScreen(routeStopId: stop.id),
+                ),
+              ),
+              child: const Text('Check-in'),
+            ),
+    );
   }
 }
