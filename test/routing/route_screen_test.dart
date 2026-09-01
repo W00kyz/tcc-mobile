@@ -8,6 +8,8 @@ import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_screen.dart';
 
+import 'no_tiles_tile_provider.dart';
+
 final _unstartedRoute = RouteSummary(
   id: 'r1',
   fieldWorkerName: 'João',
@@ -354,7 +356,20 @@ void main() {
   testWidgets('navigates to the map when "Ver no mapa" is tapped', (
     tester,
   ) async {
-    await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
+    // MapScreen now hosts the real offline map; inject a no-op base-tile
+    // provider so navigating to it does not spin up vector_map_tiles' real
+    // pipeline (and its pending timers) under flutter_test. The map itself is
+    // covered by map_screen_test.dart.
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          routeRepositoryProvider.overrideWithValue(_FakeRouteRepository()),
+        ],
+        child: MaterialApp(
+          home: RouteScreen(mapTileProvider: NoTilesTileProvider()),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.widgetWithText(FilledButton, 'Ver no mapa'), findsOneWidget);

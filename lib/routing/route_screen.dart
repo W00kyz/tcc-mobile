@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart' show TileProvider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/checkin/scan_screen.dart';
@@ -37,7 +38,13 @@ String? _formatLeg(double? distanceM, double? durationS) {
 }
 
 class RouteScreen extends ConsumerWidget {
-  const RouteScreen({super.key});
+  const RouteScreen({super.key, this.mapTileProvider});
+
+  /// Forwarded to [MapScreen] as its base-tile override. Null in production, so
+  /// the map loads the bundled offline PMTiles. Widget tests inject a no-op
+  /// provider here to keep vector_map_tiles' real tile pipeline (and the timers
+  /// it schedules) out of `flutter_test` when they navigate to the map.
+  final TileProvider? mapTileProvider;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -66,7 +73,10 @@ class RouteScreen extends ConsumerWidget {
                 FilledButton.tonal(
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                      builder: (_) => MapScreen(route: route),
+                      builder: (_) => MapScreen(
+                        route: route,
+                        tileProviderOverride: mapTileProvider,
+                      ),
                     ),
                   ),
                   child: const Text('Ver no mapa'),
