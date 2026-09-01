@@ -9,7 +9,7 @@ import 'package:route_monitor/routing/route_repository.dart';
 
 class _FakeRouteRepository implements RouteRepository {
   @override
-  Future<List<RouteSummary>> fetchMyRoutes() async => const [];
+  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => const [];
 
   @override
   Future<RouteSummary> startRoute({

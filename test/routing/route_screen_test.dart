@@ -7,23 +7,31 @@ import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_screen.dart';
 
-const _unstartedRoute = RouteSummary(
+final _unstartedRoute = RouteSummary(
   id: 'r1',
   fieldWorkerName: 'João',
+  routeDate: DateTime(2026, 8, 25),
+  routeType: 'REGULAR',
+  status: 'PLANNED',
   startedAt: null,
-  stops: [
+  stops: const [
     RouteStopSummary(
       id: 's1',
       orderIndex: 1,
       status: 'PENDING',
       servicePointName: 'Sala 101',
+      latitude: -7.21,
+      longitude: -35.91,
+      pointType: 'REGULAR',
     ),
   ],
 );
 
 class _FakeRouteRepository implements RouteRepository {
   @override
-  Future<List<RouteSummary>> fetchMyRoutes() async => [_unstartedRoute];
+  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => [
+    _unstartedRoute,
+  ];
 
   @override
   Future<RouteSummary> startRoute({
@@ -37,7 +45,9 @@ class _FakeRouteRepository implements RouteRepository {
 
 class _FailingStartRouteRepository implements RouteRepository {
   @override
-  Future<List<RouteSummary>> fetchMyRoutes() async => [_unstartedRoute];
+  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => [
+    _unstartedRoute,
+  ];
 
   @override
   Future<RouteSummary> startRoute({
