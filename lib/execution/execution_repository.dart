@@ -12,16 +12,27 @@ class ExecutionRepository {
   final LocalWriteStore _store;
   static const _uuid = Uuid();
 
+  /// [idempotencyKey], when supplied, is reused instead of generating a
+  /// fresh one — Ruling 16: a single field-worker tap on "Fazer check-in" is
+  /// one logical attempt even when it needs a second network call to
+  /// resolve (the room-picker retry after a `409 AMBIGUOUS_ROOM`, with
+  /// [routeStopId] now set to the chosen candidate), so that retry must
+  /// reuse the first call's key rather than open a second
+  /// `PendingOperations` row / `Execution` for what the worker experienced
+  /// as one action. Omitted (the normal, first-attempt call) generates a
+  /// fresh one.
   Future<CheckInResult> checkIn({
     required String routeId,
     required String qrPayload,
     double? latitude,
     double? longitude,
+    String? idempotencyKey,
+    String? routeStopId,
   }) async {
-    final idempotencyKey = _uuid.v4();
+    final key = idempotencyKey ?? _uuid.v4();
     final scannedAt = DateTime.now().toUtc();
     await _store.enqueue(
-      id: idempotencyKey,
+      id: key,
       kind: PendingOpKind.checkIn,
       routeId: routeId,
       payload: {
@@ -31,7 +42,8 @@ class ExecutionRepository {
         // A String, never a DateTime — LocalWriteStore.enqueue jsonEncodes
         // this map, which throws on a raw DateTime value.
         'scanned_at': scannedAt.toIso8601String(),
-        'idempotency_key': idempotencyKey,
+        'idempotency_key': key,
+        'route_stop_id': routeStopId,
       },
     );
 
@@ -41,9 +53,10 @@ class ExecutionRepository {
         latitude: latitude,
         longitude: longitude,
         scannedAt: scannedAt,
-        idempotencyKey: idempotencyKey,
+        idempotencyKey: key,
+        routeStopId: routeStopId,
       );
-      await _store.markSynced(idempotencyKey);
+      await _store.markSynced(key);
       return result;
       // Deliberately broad: any failure here — DioException (network/HTTP)
       // or AmbiguousRoomException (the floor cross-reference found more than
@@ -51,7 +64,63 @@ class ExecutionRepository {
       // a later retryFailed replays it; AmbiguousRoomException itself must
       // still propagate unchanged so the caller can pattern-match on it.
     } catch (e) {
-      await _store.markFailed(idempotencyKey, e.toString());
+      await _store.markFailed(key, e.toString());
+      rethrow;
+    }
+  }
+
+  /// Check-out is always per-stop (Ruling 16 — unlike check-in, the UI
+  /// already knows which `IN_PROGRESS` stop it is concluding), so
+  /// [routeStopId] is required and sent from the first attempt as the
+  /// `route_stop_id` of `POST /check-outs`. This makes the `409
+  /// AMBIGUOUS_ROOM` response rare in practice (only two open check-ins on
+  /// the same floor could still trigger it) but not impossible, so the
+  /// caller still handles [AmbiguousRoomException] the same way as
+  /// `checkIn`'s.
+  ///
+  /// [checkoutIdempotencyKey] follows the same reuse-on-retry rule as
+  /// `checkIn`'s `idempotencyKey`: omitted generates a fresh one, supplied
+  /// reuses the first attempt's key for a same-tap resolution retry.
+  Future<CheckOutResult> checkOut({
+    required String routeId,
+    required String routeStopId,
+    required String qrPayload,
+    double? latitude,
+    double? longitude,
+    String? checkoutIdempotencyKey,
+  }) async {
+    final key = checkoutIdempotencyKey ?? _uuid.v4();
+    final scannedAt = DateTime.now().toUtc();
+    await _store.enqueue(
+      id: key,
+      kind: PendingOpKind.checkOut,
+      routeId: routeId,
+      payload: {
+        'qr_payload': qrPayload,
+        'latitude': latitude,
+        'longitude': longitude,
+        'scanned_at': scannedAt.toIso8601String(),
+        'checkout_idempotency_key': key,
+        'route_stop_id': routeStopId,
+      },
+    );
+
+    try {
+      final result = await _api.checkOut(
+        qrPayload: qrPayload,
+        latitude: latitude,
+        longitude: longitude,
+        scannedAt: scannedAt,
+        checkoutIdempotencyKey: key,
+        routeStopId: routeStopId,
+      );
+      await _store.markSynced(key);
+      return result;
+      // Deliberately broad: same rationale as checkIn above — any failure
+      // marks the row failed, and AmbiguousRoomException must still
+      // propagate unchanged.
+    } catch (e) {
+      await _store.markFailed(key, e.toString());
       rethrow;
     }
   }
@@ -72,6 +141,7 @@ class ExecutionRepository {
           longitude: (row.payload['longitude'] as num?)?.toDouble(),
           scannedAt: DateTime.parse(row.payload['scanned_at'] as String),
           idempotencyKey: row.payload['idempotency_key'] as String,
+          routeStopId: row.payload['route_stop_id'] as String?,
         );
         await _store.markSynced(row.id);
         // Deliberately broad: keep retrying the rest of the batch no matter

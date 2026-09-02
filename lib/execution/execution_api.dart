@@ -40,18 +40,37 @@ class AmbiguousRoomException implements Exception {
   final List<RoomCandidate> candidates;
 }
 
-// A single-method interface is deliberate here, not an oversight: it is the
-// seam that keeps ExecutionRepository's tests off the real HTTP client
-// (docs/CLAUDE.base.md — Dependencies: "wrap third-party libs behind a thin
-// interface"). check-out is Task 18's concern — declaring an unimplemented
-// method now would force every concrete class (including test fakes) to
-// stub a method nothing calls yet; Task 18 extends this interface instead.
-// ignore: one_member_abstracts
+/// The backend's response to a successful check-out (`app/api/checkouts.py`,
+/// `CheckOutResponse`).
+class CheckOutResult {
+  const CheckOutResult({
+    required this.routeStopId,
+    required this.checkedOutAt,
+    required this.flags,
+  });
+
+  final String routeStopId;
+  final DateTime checkedOutAt;
+  final List<String> flags;
+}
+
+// This interface is the seam that keeps ExecutionRepository's tests off the
+// real HTTP client (docs/CLAUDE.base.md — Dependencies: "wrap third-party
+// libs behind a thin interface").
 abstract class ExecutionApi {
   Future<CheckInResult> checkIn({
     required String qrPayload,
     required DateTime scannedAt,
     required String idempotencyKey,
+    double? latitude,
+    double? longitude,
+    String? routeStopId,
+  });
+
+  Future<CheckOutResult> checkOut({
+    required String qrPayload,
+    required DateTime scannedAt,
+    required String checkoutIdempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
@@ -96,15 +115,54 @@ class DioExecutionApi implements ExecutionApi {
       rethrow;
     }
   }
+
+  @override
+  Future<CheckOutResult> checkOut({
+    required String qrPayload,
+    required DateTime scannedAt,
+    required String checkoutIdempotencyKey,
+    double? latitude,
+    double? longitude,
+    String? routeStopId,
+  }) async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/check-outs',
+        data: {
+          'qr_payload': qrPayload,
+          'latitude': latitude,
+          'longitude': longitude,
+          'scanned_at': scannedAt.toUtc().toIso8601String(),
+          'checkout_idempotency_key': checkoutIdempotencyKey,
+          'route_stop_id': routeStopId,
+        },
+      );
+      final body = response.data!;
+      return CheckOutResult(
+        routeStopId: body['route_stop_id'] as String,
+        checkedOutAt: DateTime.parse(body['checked_out_at'] as String),
+        flags: (body['validation_flags'] as List).cast<String>(),
+      );
+    } on DioException catch (e) {
+      final candidates = _ambiguousRoomCandidates(e);
+      if (candidates != null) throw AmbiguousRoomException(candidates);
+      rethrow;
+    }
+  }
 }
 
-/// Parses the 409 "multiple service points on this floor" body
-/// (`backend/app/api/checkins.py`). FastAPI's `HTTPException(409,
+/// Parses the 409 "multiple service points on this floor" body, shared by
+/// `checkIn` (`backend/app/api/checkins.py`) and `checkOut`
+/// (`backend/app/api/checkouts.py`'s `_ambiguous_conflict`) — byte-for-byte
+/// the same nesting on both endpoints. FastAPI's `HTTPException(409,
 /// detail={...})` wraps our payload, so the actual response is
 /// `{"detail": {"detail": "...", "candidates": [...]}}` — the outer `detail`
 /// is FastAPI's own envelope, the inner `detail`+`candidates` is this app's.
 /// Returns null for every other 409 (RouteNotStarted, RouteCancelled, "no
-/// active route today" — all plain-string `detail`), which are left to
+/// active route today" — all plain-string `detail`) and for any non-409
+/// status (e.g. check-out's `422 NO_OPEN_CHECKIN`, also a plain string) —
+/// the `statusCode != 409` guard below is what keeps that 422 from ever
+/// being misparsed as ambiguous. Both are left to
 /// propagate as an unhandled DioException like every other repository here.
 List<RoomCandidate>? _ambiguousRoomCandidates(DioException error) {
   if (error.response?.statusCode != 409) return null;

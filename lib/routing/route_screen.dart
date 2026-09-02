@@ -5,10 +5,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/room_picker.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:uuid/uuid.dart';
+
+const _uuid = Uuid();
+
+/// A completed scan+GPS read, threaded from `_scanAndLocate` into a
+/// check-in/check-out attempt and any of its room-picker retries.
+class _Scan {
+  const _Scan(this.rawValue, this.coordinates);
+  final String rawValue;
+  final Coordinates? coordinates;
+}
 
 /// Formats an arrival window as `HH:MM–HH:MM` (RF14). Returns `null` when
 /// neither bound is set, and a single `HH:MM` when only one bound is present.
@@ -87,7 +99,13 @@ class RouteScreen extends ConsumerWidget {
                 Expanded(
                   child: ListView(
                     children: [
-                      for (final stop in route.stops) _StopTile(stop: stop),
+                      for (final stop in route.stops)
+                        _StopTile(
+                          stop: stop,
+                          onConcluir: stop.status == 'IN_PROGRESS'
+                              ? () => _checkOut(context, ref, route, stop)
+                              : null,
+                        ),
                     ],
                   ),
                 ),
@@ -124,21 +142,40 @@ class RouteScreen extends ConsumerWidget {
     WidgetRef ref,
     RouteSummary route,
   ) async {
-    final rawValue = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(builder: (_) => const ScanScreen()),
+    final scan = await _scanAndLocate(context, ref);
+    if (scan == null || !context.mounted) return;
+
+    // Generated once per tap, in scope for both the first attempt and any
+    // room-picker retry below — Ruling 16: one tap on "Fazer check-in" is
+    // one logical attempt, even when a 409 makes it take two network calls.
+    final idempotencyKey = _uuid.v4();
+    await _attemptCheckIn(
+      context,
+      ref,
+      route: route,
+      scan: scan,
+      idempotencyKey: idempotencyKey,
     );
-    if (rawValue == null || !context.mounted) return;
+  }
 
-    final coordinates = await _tryGetPosition(context, ref);
-
+  Future<void> _attemptCheckIn(
+    BuildContext context,
+    WidgetRef ref, {
+    required RouteSummary route,
+    required _Scan scan,
+    required String idempotencyKey,
+    String? routeStopId,
+  }) async {
     try {
       await ref
           .read(executionRepositoryProvider)
           .checkIn(
             routeId: route.id,
-            qrPayload: rawValue,
-            latitude: coordinates?.latitude,
-            longitude: coordinates?.longitude,
+            qrPayload: scan.rawValue,
+            latitude: scan.coordinates?.latitude,
+            longitude: scan.coordinates?.longitude,
+            idempotencyKey: idempotencyKey,
+            routeStopId: routeStopId,
           );
       ref.invalidate(myRoutesProvider);
       if (context.mounted) {
@@ -146,18 +183,18 @@ class RouteScreen extends ConsumerWidget {
           context,
         ).showSnackBar(const SnackBar(content: Text('Check-in registrado.')));
       }
-    } on AmbiguousRoomException {
-      // TODO(task-18): real room-picker UI — for now just tell the field
-      // worker the check-in did not resolve to a single stop.
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Ambiguidade de sala: escolha o ponto correto (Tarefa 18).',
-            ),
-          ),
-        );
-      }
+    } on AmbiguousRoomException catch (e) {
+      if (!context.mounted) return;
+      final chosen = await showRoomPicker(context, e.candidates);
+      if (chosen == null || !context.mounted) return;
+      await _attemptCheckIn(
+        context,
+        ref,
+        route: route,
+        scan: scan,
+        idempotencyKey: idempotencyKey,
+        routeStopId: chosen.routeStopId,
+      );
       // Deliberately broad: any other failure — DioException (network/HTTP)
       // or otherwise — maps to the same generic message here.
       // ignore: avoid_catches_without_on_clauses
@@ -170,6 +207,102 @@ class RouteScreen extends ConsumerWidget {
         );
       }
     }
+  }
+
+  Future<void> _checkOut(
+    BuildContext context,
+    WidgetRef ref,
+    RouteSummary route,
+    RouteStopSummary stop,
+  ) async {
+    final scan = await _scanAndLocate(context, ref);
+    if (scan == null || !context.mounted) return;
+
+    // Same one-tap-one-attempt rule as _checkIn's idempotencyKey above.
+    final checkoutIdempotencyKey = _uuid.v4();
+    await _attemptCheckOut(
+      context,
+      ref,
+      route: route,
+      scan: scan,
+      routeStopId: stop.id,
+      checkoutIdempotencyKey: checkoutIdempotencyKey,
+    );
+  }
+
+  Future<void> _attemptCheckOut(
+    BuildContext context,
+    WidgetRef ref, {
+    required RouteSummary route,
+    required _Scan scan,
+    required String routeStopId,
+    required String checkoutIdempotencyKey,
+  }) async {
+    try {
+      await ref
+          .read(executionRepositoryProvider)
+          .checkOut(
+            routeId: route.id,
+            routeStopId: routeStopId,
+            qrPayload: scan.rawValue,
+            latitude: scan.coordinates?.latitude,
+            longitude: scan.coordinates?.longitude,
+            checkoutIdempotencyKey: checkoutIdempotencyKey,
+          );
+      // A successful check-out flips the stop to DONE on the backend; this
+      // invalidate is what makes it "leave the list" (the Concluir button's
+      // visibility condition is status == 'IN_PROGRESS', and the existing
+      // done-icon rendering in _StopTile takes over) — no client-side
+      // filtering needed.
+      ref.invalidate(myRoutesProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Check-out registrado.')),
+        );
+      }
+    } on AmbiguousRoomException catch (e) {
+      // Defense in depth (Ruling 16) — check-out already sends its own stop
+      // as routeStopId, so this is rare, but two open check-ins on the same
+      // floor can still trigger it; handled identically to check-in's.
+      if (!context.mounted) return;
+      final chosen = await showRoomPicker(context, e.candidates);
+      if (chosen == null || !context.mounted) return;
+      await _attemptCheckOut(
+        context,
+        ref,
+        route: route,
+        scan: scan,
+        routeStopId: chosen.routeStopId,
+        checkoutIdempotencyKey: checkoutIdempotencyKey,
+      );
+      // Deliberately broad: every other failure — including the ordinary
+      // 422 NO_OPEN_CHECKIN DioException — maps to the same generic message,
+      // same discipline as every other error path in this file.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível registrar o check-out.'),
+          ),
+        );
+      }
+    }
+  }
+
+  /// Pushes [ScanScreen] and, if a value came back, pairs it with a
+  /// tolerant GPS read — the shared first half of both check-in and
+  /// check-out (Ruling 16: check-out reuses check-in's scan+GPS dance).
+  /// Returns null when the scan was dismissed or the context is no longer
+  /// mounted afterward.
+  Future<_Scan?> _scanAndLocate(BuildContext context, WidgetRef ref) async {
+    final rawValue = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(builder: (_) => const ScanScreen()),
+    );
+    if (rawValue == null || !context.mounted) return null;
+
+    final coordinates = await _tryGetPosition(context, ref);
+    return _Scan(rawValue, coordinates);
   }
 
   /// GPS is tolerated as unavailable here (RF29/RNF13 — a basement has no
@@ -275,9 +408,15 @@ class _RouteHeader extends StatelessWidget {
 }
 
 class _StopTile extends StatelessWidget {
-  const _StopTile({required this.stop});
+  const _StopTile({required this.stop, this.onConcluir});
 
   final RouteStopSummary stop;
+
+  /// The "Concluir" (check-out) action for this stop, or null to hide the
+  /// button. RouteScreen passes a callback only for an `IN_PROGRESS` stop —
+  /// this widget stays a plain StatelessWidget with no WidgetRef of its own,
+  /// leaving the execution-repository/room-picker wiring to RouteScreen.
+  final VoidCallback? onConcluir;
 
   @override
   Widget build(BuildContext context) {
@@ -321,6 +460,12 @@ class _StopTile extends StatelessWidget {
                 if (leg != null) Text('a $leg'),
                 if (window != null) Text('Janela: $window'),
               ],
+            ),
+      trailing: onConcluir == null
+          ? null
+          : TextButton(
+              onPressed: onConcluir,
+              child: const Text('Concluir'),
             ),
     );
   }

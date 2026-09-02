@@ -94,6 +94,31 @@ class _StaticRouteRepository implements RouteRepository {
   }
 }
 
+/// Counts `fetchMyRoutes` calls so a check-out test can assert
+/// `myRoutesProvider` was actually invalidated (a second fetch happened)
+/// rather than only checking the success snackbar.
+class _CountingRouteRepository implements RouteRepository {
+  _CountingRouteRepository(this.routes);
+
+  final List<RouteSummary> routes;
+  int fetchCount = 0;
+
+  @override
+  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async {
+    fetchCount++;
+    return routes;
+  }
+
+  @override
+  Future<RouteSummary> startRoute({
+    required String routeId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    throw UnimplementedError('not exercised in this test');
+  }
+}
+
 class _ThrowingRouteRepository implements RouteRepository {
   @override
   Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async {
@@ -130,13 +155,25 @@ class _FailingLocationService implements LocationService {
 /// throws whatever the test configures — the seam that lets RouteScreen's
 /// post-scan flow (GPS handling, snackbars, AmbiguousRoomException) be
 /// exercised without a real Dio client or camera.
+/// Records every checkIn/checkOut call instead of hitting the network, and
+/// returns or throws whatever the test configures — the seam that lets
+/// RouteScreen's post-scan flow (GPS handling, snackbars,
+/// AmbiguousRoomException, the room picker) be exercised without a real Dio
+/// client or camera. [error]/[checkOutError] are consumed once: after the
+/// first call they stop throwing, so a picker-driven retry within the same
+/// tap can be configured to succeed on its second call.
 class _FakeExecutionApi implements ExecutionApi {
-  _FakeExecutionApi({this.error});
+  _FakeExecutionApi({this.error, this.checkOutError});
 
-  final Exception? error;
+  Exception? error;
+  Exception? checkOutError;
   final List<String> qrPayloads = [];
+  final List<String?> checkInRouteStopIds = [];
+  final List<String> checkInIdempotencyKeys = [];
+  final List<String> checkOutIdempotencyKeys = [];
   double? capturedLatitude;
   double? capturedLongitude;
+  String? lastCheckOutRouteStopId;
 
   @override
   Future<CheckInResult> checkIn({
@@ -148,13 +185,45 @@ class _FakeExecutionApi implements ExecutionApi {
     String? routeStopId,
   }) async {
     qrPayloads.add(qrPayload);
+    checkInRouteStopIds.add(routeStopId);
+    checkInIdempotencyKeys.add(idempotencyKey);
     capturedLatitude = latitude;
     capturedLongitude = longitude;
-    if (error != null) throw error!;
+    if (error != null) {
+      final toThrow = error!;
+      error = null;
+      throw toThrow;
+    }
     return const CheckInResult(
       routeStopId: 's1',
       geoValidation: 'INSIDE',
       flags: [],
+    );
+  }
+
+  @override
+  Future<CheckOutResult> checkOut({
+    required String qrPayload,
+    required DateTime scannedAt,
+    required String checkoutIdempotencyKey,
+    double? latitude,
+    double? longitude,
+    String? routeStopId,
+  }) async {
+    qrPayloads.add(qrPayload);
+    checkOutIdempotencyKeys.add(checkoutIdempotencyKey);
+    lastCheckOutRouteStopId = routeStopId;
+    capturedLatitude = latitude;
+    capturedLongitude = longitude;
+    if (checkOutError != null) {
+      final toThrow = checkOutError!;
+      checkOutError = null;
+      throw toThrow;
+    }
+    return CheckOutResult(
+      routeStopId: routeStopId ?? 's1',
+      checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
+      flags: const [],
     );
   }
 }
@@ -627,6 +696,31 @@ void main() {
     Navigator.of(scanScreenContext).pop(rawValue);
   }
 
+  Future<void> tapConcluirAndScan(WidgetTester tester, String rawValue) async {
+    await tester.tap(find.widgetWithText(TextButton, 'Concluir'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ScanScreen), findsOneWidget);
+    final scanScreenContext = tester.element(find.byType(ScanScreen));
+    Navigator.of(scanScreenContext).pop(rawValue);
+  }
+
+  RouteSummary inProgressStopRoute() => _routeWith(
+    status: 'IN_PROGRESS',
+    startedAt: DateTime(2026, 8, 25, 8),
+    stops: const [
+      RouteStopSummary(
+        id: 's1',
+        orderIndex: 1,
+        status: 'IN_PROGRESS',
+        servicePointName: 'Sala 101',
+        latitude: -7.21,
+        longitude: -35.91,
+        pointType: 'REGULAR',
+      ),
+    ],
+  );
+
   testWidgets(
     'runs the check-in flow end-to-end: scans, checks in and shows success',
     (tester) async {
@@ -713,7 +807,59 @@ void main() {
   );
 
   testWidgets(
-    'shows a placeholder message on AmbiguousRoomException from check-in',
+    'on AmbiguousRoomException from check-in, shows the room picker and '
+    'retries checkIn with the chosen routeStopId and the same '
+    'idempotencyKey',
+    (tester) async {
+      final api = _FakeExecutionApi(
+        error: const AmbiguousRoomException([
+          RoomCandidate(
+            routeStopId: 's1',
+            servicePointId: 'sp1',
+            name: 'Sala 101',
+            distanceM: 3.2,
+          ),
+          RoomCandidate(
+            routeStopId: 's2',
+            servicePointId: 'sp2',
+            name: 'Sala 102',
+            distanceM: 8,
+          ),
+        ]),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressRoute()]),
+          locationService: _FakeLocationService(),
+          executionApi: api,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      // The picker is up, nearest ("Sala 101") pre-selected; choose the
+      // farther one instead, then confirm.
+      expect(
+        find.text('Vários pontos correspondem — escolha o certo:'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Sala 102'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
+      await tester.pumpAndSettle();
+
+      expect(api.checkInRouteStopIds, [null, 's2']);
+      expect(api.checkInIdempotencyKeys, hasLength(2));
+      expect(api.checkInIdempotencyKeys[0], api.checkInIdempotencyKeys[1]);
+      expect(find.text('Check-in registrado.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'dismissing the room picker without choosing leaves the failed check-in '
+    'as-is',
     (tester) async {
       final api = _FakeExecutionApi(
         error: const AmbiguousRoomException([
@@ -737,10 +883,12 @@ void main() {
       await tapCheckInAndScan(tester, 'v1.floor.1.sig');
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('Ambiguidade de sala: escolha o ponto correto (Tarefa 18).'),
-        findsOneWidget,
-      );
+      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
+      await tester.pumpAndSettle();
+
+      // Only the first (failed) attempt happened — no retry.
+      expect(api.checkInRouteStopIds, [null]);
+      expect(find.text('Check-in registrado.'), findsNothing);
     },
   );
 
@@ -766,6 +914,122 @@ void main() {
         find.text('Não foi possível registrar o check-in.'),
         findsOneWidget,
       );
+    },
+  );
+
+  testWidgets(
+    'shows a "Concluir" action only for an IN_PROGRESS stop, not a PENDING '
+    'one',
+    (tester) async {
+      await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextButton, 'Concluir'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'runs the check-out flow end-to-end: scans, checks out, invalidates '
+    'myRoutesProvider and shows success',
+    (tester) async {
+      final api = _FakeExecutionApi();
+      final repository = _CountingRouteRepository([inProgressStopRoute()]);
+      await tester.pumpWidget(
+        _screenWith(
+          repository,
+          locationService: _FakeLocationService(),
+          executionApi: api,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(repository.fetchCount, 1);
+
+      await tapConcluirAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      expect(api.qrPayloads, ['v1.floor.1.sig']);
+      expect(api.lastCheckOutRouteStopId, 's1');
+      expect(find.text('Check-out registrado.'), findsOneWidget);
+      expect(repository.fetchCount, 2);
+    },
+  );
+
+  testWidgets(
+    'shows a generic failure message when check-out fails with a plain '
+    'DioException (e.g. the 422 NO_OPEN_CHECKIN case), not the room picker',
+    (tester) async {
+      final api = _FakeExecutionApi(
+        checkOutError: DioException(
+          requestOptions: RequestOptions(path: '/check-outs'),
+          response: Response(
+            requestOptions: RequestOptions(path: '/check-outs'),
+            statusCode: 422,
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          locationService: _FakeLocationService(),
+          executionApi: api,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tapConcluirAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Não foi possível registrar o check-out.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Vários pontos correspondem — escolha o certo:'),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'on AmbiguousRoomException from check-out, shows the room picker and '
+    'retries with the chosen routeStopId and the same '
+    'checkoutIdempotencyKey',
+    (tester) async {
+      // Ruling 16: rare in practice (check-out already sends its own stop
+      // as routeStopId from the first attempt) but handled the same as
+      // check-in's ambiguity by defense in depth.
+      final api = _FakeExecutionApi(
+        checkOutError: const AmbiguousRoomException([
+          RoomCandidate(
+            routeStopId: 's1',
+            servicePointId: 'sp1',
+            name: 'Sala 101',
+            distanceM: 1,
+          ),
+        ]),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          locationService: _FakeLocationService(),
+          executionApi: api,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tapConcluirAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Vários pontos correspondem — escolha o certo:'),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
+      await tester.pumpAndSettle();
+
+      expect(api.checkOutIdempotencyKeys, hasLength(2));
+      expect(api.checkOutIdempotencyKeys[0], api.checkOutIdempotencyKeys[1]);
+      expect(find.text('Check-out registrado.'), findsOneWidget);
     },
   );
 }

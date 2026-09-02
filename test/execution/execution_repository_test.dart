@@ -9,11 +9,14 @@ import 'package:route_monitor/local/local_write_store.dart';
 /// single shared log (rather than separate call counters) is what lets a
 /// test assert "enqueue happened before the API call" directly.
 class _FakeExecutionApi implements ExecutionApi {
-  _FakeExecutionApi(this._log, {this._checkInImpl});
+  _FakeExecutionApi(this._log, {this._checkInImpl, this._checkOutImpl});
 
   final List<String> _log;
   final Future<CheckInResult> Function()? _checkInImpl;
+  final Future<CheckOutResult> Function()? _checkOutImpl;
   int callCount = 0;
+  final List<String> capturedIdempotencyKeys = [];
+  final List<String> capturedCheckoutIdempotencyKeys = [];
 
   @override
   Future<CheckInResult> checkIn({
@@ -25,12 +28,33 @@ class _FakeExecutionApi implements ExecutionApi {
     String? routeStopId,
   }) async {
     callCount++;
+    capturedIdempotencyKeys.add(idempotencyKey);
     _log.add('api:$idempotencyKey');
     if (_checkInImpl != null) return _checkInImpl();
     return const CheckInResult(
       routeStopId: 'stop-1',
       geoValidation: 'INSIDE',
       flags: [],
+    );
+  }
+
+  @override
+  Future<CheckOutResult> checkOut({
+    required String qrPayload,
+    required DateTime scannedAt,
+    required String checkoutIdempotencyKey,
+    double? latitude,
+    double? longitude,
+    String? routeStopId,
+  }) async {
+    callCount++;
+    capturedCheckoutIdempotencyKeys.add(checkoutIdempotencyKey);
+    _log.add('api:$checkoutIdempotencyKey');
+    if (_checkOutImpl != null) return _checkOutImpl();
+    return CheckOutResult(
+      routeStopId: 'stop-1',
+      checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
+      flags: const [],
     );
   }
 }
@@ -223,6 +247,174 @@ void main() {
         ['api:op-old', 'api:op-new'],
       );
       expect(await store.unsyncedForRoute('route-A'), isEmpty);
+    },
+  );
+
+  test(
+    'checkIn reuses a caller-supplied idempotencyKey instead of generating '
+    'a fresh one',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final api = _FakeExecutionApi(log);
+      final repository = ExecutionRepository(api, store);
+
+      await repository.checkIn(
+        routeId: 'route-A',
+        qrPayload: 'q',
+        idempotencyKey: 'retry-key-1',
+      );
+
+      expect(api.capturedIdempotencyKeys, ['retry-key-1']);
+      expect(log[0], 'enqueue:retry-key-1');
+    },
+  );
+
+  test(
+    'checkIn generates a fresh idempotencyKey per call when omitted',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final api = _FakeExecutionApi(log);
+      final repository = ExecutionRepository(api, store);
+
+      await repository.checkIn(routeId: 'route-A', qrPayload: 'q1');
+      await repository.checkIn(routeId: 'route-A', qrPayload: 'q2');
+
+      expect(api.capturedIdempotencyKeys.toSet(), hasLength(2));
+    },
+  );
+
+  test(
+    'checkOut enqueues the row before calling the API, then marks it synced',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final repository = ExecutionRepository(_FakeExecutionApi(log), store);
+
+      final result = await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'v1.floor.1.sig',
+        latitude: -7.2,
+        longitude: -35.9,
+      );
+
+      expect(result.routeStopId, 'stop-1');
+      expect(log, hasLength(3));
+      expect(log[0], startsWith('enqueue:'));
+      expect(log[1], startsWith('api:'));
+      expect(log[2], startsWith('markSynced:'));
+      expect(log[0].split(':')[1], log[1].split(':')[1]);
+      expect(await store.unsyncedForRoute('route-A'), isEmpty);
+    },
+  );
+
+  test(
+    'a network failure during checkOut marks the row failed and rethrows',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final networkError = DioException(
+        requestOptions: RequestOptions(path: '/check-outs'),
+      );
+      final repository = ExecutionRepository(
+        _FakeExecutionApi(log, checkOutImpl: () async => throw networkError),
+        store,
+      );
+
+      await expectLater(
+        repository.checkOut(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          qrPayload: 'q',
+        ),
+        throwsA(same(networkError)),
+      );
+
+      final rows = await store.unsyncedForRoute('route-A');
+      expect(rows, hasLength(1));
+      expect(rows.single.state, PendingOpState.failed);
+      expect(rows.single.lastError, contains('DioException'));
+    },
+  );
+
+  test(
+    'AmbiguousRoomException from checkOut marks the row failed and '
+    'propagates unchanged',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      const ambiguous = AmbiguousRoomException([
+        RoomCandidate(
+          routeStopId: 's1',
+          servicePointId: 'sp1',
+          name: 'Sala 101',
+          distanceM: 3.2,
+        ),
+      ]);
+      final repository = ExecutionRepository(
+        _FakeExecutionApi(log, checkOutImpl: () async => throw ambiguous),
+        store,
+      );
+
+      await expectLater(
+        repository.checkOut(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          qrPayload: 'q',
+        ),
+        throwsA(same(ambiguous)),
+      );
+
+      final rows = await store.unsyncedForRoute('route-A');
+      expect(rows, hasLength(1));
+      expect(rows.single.state, PendingOpState.failed);
+    },
+  );
+
+  test(
+    'checkOut reuses a caller-supplied checkoutIdempotencyKey instead of '
+    'generating a fresh one',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final api = _FakeExecutionApi(log);
+      final repository = ExecutionRepository(api, store);
+
+      await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'q',
+        checkoutIdempotencyKey: 'retry-key-1',
+      );
+
+      expect(api.capturedCheckoutIdempotencyKeys, ['retry-key-1']);
+      expect(log[0], 'enqueue:retry-key-1');
+    },
+  );
+
+  test(
+    'checkOut generates a fresh checkoutIdempotencyKey per call when '
+    'omitted',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final api = _FakeExecutionApi(log);
+      final repository = ExecutionRepository(api, store);
+
+      await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'q1',
+      );
+      await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'q2',
+      );
+
+      expect(api.capturedCheckoutIdempotencyKeys.toSet(), hasLength(2));
     },
   );
 }
