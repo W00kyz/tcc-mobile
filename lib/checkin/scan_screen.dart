@@ -4,13 +4,19 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'package:route_monitor/checkin/checkin_providers.dart';
 import 'package:route_monitor/checkin/qr_verifier.dart';
-import 'package:route_monitor/routing/location_service.dart';
-import 'package:route_monitor/routing/route_providers.dart';
 
+/// A pure scanner: verifies the QR signature offline (RF29, RNF13 — no
+/// network in a basement) and, on a valid QR, pops with the raw scanned
+/// string. It knows nothing about GPS or check-in — RouteScreen handles
+/// both once it gets the raw value back.
 class ScanScreen extends ConsumerStatefulWidget {
-  const ScanScreen({required this.routeStopId, super.key});
+  const ScanScreen({this.controller, super.key});
 
-  final String routeStopId;
+  /// Test-only override — production always lets [MobileScanner] build its
+  /// own controller (and start the real camera). Widget tests inject one
+  /// with `autoStart: false` so `flutter test` never touches a camera
+  /// platform channel (QR doesn't work in an emulator either — CLAUDE.md).
+  final MobileScannerController? controller;
 
   @override
   ConsumerState<ScanScreen> createState() => _ScanScreenState();
@@ -44,38 +50,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
       return;
     }
 
-    final Coordinates position;
-    try {
-      position = await ref.read(locationServiceProvider).getCurrentPosition();
-      // Deliberately broad: GeolocatorLocationService can fail with a
-      // StateError (permission denied), a platform exception, or a timeout
-      // — all of them map to the same user-facing message here.
-      // ignore: avoid_catches_without_on_clauses
-    } catch (_) {
-      _showMessage('Não foi possível obter sua localização.');
-      if (mounted) setState(() => _isProcessing = false);
-      return;
-    }
-
-    try {
-      await ref
-          .read(checkInRepositoryProvider)
-          .checkIn(
-            routeStopId: widget.routeStopId,
-            qrPayload: rawValue,
-            latitude: position.latitude,
-            longitude: position.longitude,
-          );
-      ref.invalidate(myRoutesProvider);
-      if (mounted) Navigator.of(context).pop();
-      // Deliberately broad: DioCheckInRepository can fail with a DioException
-      // (network/HTTP) or another unexpected error — all map to the same
-      // user-facing message here.
-      // ignore: avoid_catches_without_on_clauses
-    } catch (_) {
-      _showMessage('Não foi possível registrar o check-in.');
-      if (mounted) setState(() => _isProcessing = false);
-    }
+    if (mounted) Navigator.of(context).pop(rawValue);
   }
 
   void _showMessage(String message) {
@@ -89,7 +64,10 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Ler QR Code')),
-      body: MobileScanner(onDetect: _handleDetection),
+      body: MobileScanner(
+        controller: widget.controller,
+        onDetect: _handleDetection,
+      ),
     );
   }
 }

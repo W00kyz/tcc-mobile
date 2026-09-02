@@ -3,6 +3,8 @@ import 'package:flutter_map/flutter_map.dart' show TileProvider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/checkin/scan_screen.dart';
+import 'package:route_monitor/execution/execution_api.dart';
+import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -94,12 +96,106 @@ class RouteScreen extends ConsumerWidget {
                     onPressed: () => _startRoute(context, ref, route.id),
                     child: const Text('Iniciar rota'),
                   ),
+                if (_canCheckIn(route))
+                  FilledButton(
+                    onPressed: () => _checkIn(context, ref, route),
+                    child: const Text('Fazer check-in'),
+                  ),
               ],
             ),
           );
         },
       ),
     );
+  }
+
+  /// One route-level "Fazer check-in" action, not a per-stop button: the QR
+  /// scan resolves which stop it belongs to (and can be ambiguous, Task 18),
+  /// so the button only needs the route to be in progress with a stop left.
+  bool _canCheckIn(RouteSummary route) =>
+      route.status == 'IN_PROGRESS' &&
+      route.stops.any((stop) => stop.status != 'DONE');
+
+  Future<void> _checkIn(
+    BuildContext context,
+    WidgetRef ref,
+    RouteSummary route,
+  ) async {
+    final rawValue = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(builder: (_) => const ScanScreen()),
+    );
+    if (rawValue == null || !context.mounted) return;
+
+    final coordinates = await _tryGetPosition(context, ref);
+
+    try {
+      await ref
+          .read(executionRepositoryProvider)
+          .checkIn(
+            routeId: route.id,
+            qrPayload: rawValue,
+            latitude: coordinates?.latitude,
+            longitude: coordinates?.longitude,
+          );
+      ref.invalidate(myRoutesProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Check-in registrado.')));
+      }
+    } on AmbiguousRoomException {
+      // TODO(task-18): real room-picker UI — for now just tell the field
+      // worker the check-in did not resolve to a single stop.
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Ambiguidade de sala: escolha o ponto correto (Tarefa 18).',
+            ),
+          ),
+        );
+      }
+      // Deliberately broad: any other failure — DioException (network/HTTP)
+      // or otherwise — maps to the same generic message here.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível registrar o check-in.'),
+          ),
+        );
+      }
+    }
+  }
+
+  /// GPS is tolerated as unavailable here (RF29/RNF13 — a basement has no
+  /// signal): the backend's Layer 7 already treats a missing position as
+  /// ACCEPT+flag, so a failure here must not block the check-in, only note
+  /// it to the field worker.
+  Future<Coordinates?> _tryGetPosition(
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    try {
+      return await ref.read(locationServiceProvider).getCurrentPosition();
+      // Deliberately broad: GeolocatorLocationService can fail with a
+      // StateError (permission denied), a platform exception, or a timeout
+      // — all of them mean "proceed without GPS" here, never "block".
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Não foi possível obter sua localização; check-in seguirá '
+              'sem GPS.',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
   }
 
   Future<void> _startRoute(
@@ -222,16 +318,6 @@ class _StopTile extends StatelessWidget {
                 if (leg != null) Text('a $leg'),
                 if (window != null) Text('Janela: $window'),
               ],
-            ),
-      trailing: isDone
-          ? null
-          : TextButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => ScanScreen(routeStopId: stop.id),
-                ),
-              ),
-              child: const Text('Check-in'),
             ),
     );
   }
