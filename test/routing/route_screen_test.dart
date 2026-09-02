@@ -547,6 +547,44 @@ void main() {
     },
   );
 
+  testWidgets(
+    'hides the check-in button when the only remaining stop is already '
+    'IN_PROGRESS (checked in, awaiting checkout — Task 18), not PENDING',
+    (tester) async {
+      // Regression: _canCheckIn used to accept any stop.status != 'DONE',
+      // so it stayed visible here — the backend has no PENDING candidate to
+      // resolve on that floor any more, so scanning again would only get a
+      // confusing 422 FLOOR_NOT_ON_ROUTE dead end (task-17 review).
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([
+            _routeWith(
+              status: 'IN_PROGRESS',
+              startedAt: DateTime(2026, 8, 25, 8),
+              stops: const [
+                RouteStopSummary(
+                  id: 's1',
+                  orderIndex: 1,
+                  status: 'IN_PROGRESS',
+                  servicePointName: 'Sala 101',
+                  latitude: -7.21,
+                  longitude: -35.91,
+                  pointType: 'REGULAR',
+                ),
+              ],
+            ),
+          ]),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(FilledButton, 'Fazer check-in'),
+        findsNothing,
+      );
+    },
+  );
+
   RouteSummary inProgressRoute() => _routeWith(
     status: 'IN_PROGRESS',
     startedAt: DateTime(2026, 8, 25, 8),
@@ -563,6 +601,20 @@ void main() {
     ],
   );
 
+  // This pushes a real, uncontrolled ScanScreen() — no test controller, so
+  // MobileScanner builds its own default (autoStart: true) controller and
+  // tries to start the real camera. That is safe under flutter_test, but not
+  // because the platform-channel call fails and gets caught: it never
+  // resolves at all. MobileScanner._initializeController fires
+  // unawaited(controller.start()), which calls MethodChannelMobileScanner's
+  // _requestCameraPermission() -> methodChannel.invokeMethod(...) against a
+  // channel flutter_test never mocks; that call just hangs forever (traced
+  // and confirmed empirically in task-17 review — a direct `await
+  // controller.start()` times out rather than throwing or completing). It's
+  // safe here only because nothing in these tests ever awaits or observes
+  // that leaked future — a future mobile_scanner/engine version that changes
+  // channel-buffer draining could turn this into a real
+  // MissingPluginException surfacing mid-test.
   Future<void> tapCheckInAndScan(
     WidgetTester tester,
     String rawValue,

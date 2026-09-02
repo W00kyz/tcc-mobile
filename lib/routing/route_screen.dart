@@ -110,11 +110,14 @@ class RouteScreen extends ConsumerWidget {
   }
 
   /// One route-level "Fazer check-in" action, not a per-stop button: the QR
-  /// scan resolves which stop it belongs to (and can be ambiguous, Task 18),
-  /// so the button only needs the route to be in progress with a stop left.
+  /// scan resolves which stop it belongs to (and can be ambiguous, Task 18).
+  /// Checks for a `PENDING` stop specifically, not just "not DONE" — an
+  /// `IN_PROGRESS` stop (already checked in, awaiting checkout, Task 18) has
+  /// no `PENDING` candidate left on its floor, so scanning again would only
+  /// get a confusing 422 FLOOR_NOT_ON_ROUTE from the backend.
   bool _canCheckIn(RouteSummary route) =>
       route.status == 'IN_PROGRESS' &&
-      route.stops.any((stop) => stop.status != 'DONE');
+      route.stops.any((stop) => stop.status == 'PENDING');
 
   Future<void> _checkIn(
     BuildContext context,
