@@ -49,6 +49,10 @@ jobs:
       - name: Enforce coverage floor
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends lcov
+          # Generated sources (Drift's *.g.dart) are committed but not authored
+          # or tested by hand, so they must not count against the floor.
+          lcov --remove coverage/lcov.info '**/*.g.dart' \
+            -o coverage/lcov.info --ignore-errors unused
           lcov --summary coverage/lcov.info 2>&1 | tee /tmp/coverage.txt
           PERCENT=$(grep -oP 'lines\.*: \K[0-9.]+' /tmp/coverage.txt)
           echo "Line coverage: ${PERCENT}%"
