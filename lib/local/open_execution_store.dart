@@ -27,12 +27,18 @@ class DriftOpenExecutionStore implements OpenExecutionStore {
     // insertOnConflictUpdate: a stop only ever has one open execution, but a
     // re-check-in edge case (e.g. a retried attempt after a flaky mark) must
     // overwrite rather than throw on the existing primary key.
+    //
+    // Schema 3 (Etapa 6): `OpenExecutions` was folded into `StopProgress`. This
+    // store still speaks the Ruling 17 vocabulary; Task 5 replaces it with a
+    // `StopProgressStore` that also tracks the `DONE` transition.
     return _db
-        .into(_db.openExecutions)
+        .into(_db.stopProgress)
         .insertOnConflictUpdate(
-          OpenExecutionsCompanion.insert(
+          StopProgressCompanion.insert(
             routeStopId: routeStopId,
             executionId: executionId,
+            localStatus: 'IN_PROGRESS',
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
           ),
         );
   }
@@ -40,14 +46,14 @@ class DriftOpenExecutionStore implements OpenExecutionStore {
   @override
   Future<void> clearOpenExecution(String routeStopId) {
     return (_db.delete(
-      _db.openExecutions,
+      _db.stopProgress,
     )..where((row) => row.routeStopId.equals(routeStopId))).go();
   }
 
   @override
   Future<String?> openExecutionFor(String routeStopId) async {
     final row = await (_db.select(
-      _db.openExecutions,
+      _db.stopProgress,
     )..where((row) => row.routeStopId.equals(routeStopId))).getSingleOrNull();
     return row?.executionId;
   }

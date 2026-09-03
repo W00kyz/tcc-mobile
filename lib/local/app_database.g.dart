@@ -81,6 +81,29 @@ class $PendingOperationsTable extends PendingOperations
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _attemptsMeta = const VerificationMeta(
+    'attempts',
+  );
+  @override
+  late final GeneratedColumn<int> attempts = GeneratedColumn<int>(
+    'attempts',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _nextAttemptAtMeta = const VerificationMeta(
+    'nextAttemptAt',
+  );
+  @override
+  late final GeneratedColumn<int> nextAttemptAt = GeneratedColumn<int>(
+    'next_attempt_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -90,6 +113,8 @@ class $PendingOperationsTable extends PendingOperations
     createdAt,
     state,
     lastError,
+    attempts,
+    nextAttemptAt,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -155,6 +180,21 @@ class $PendingOperationsTable extends PendingOperations
         lastError.isAcceptableOrUnknown(data['last_error']!, _lastErrorMeta),
       );
     }
+    if (data.containsKey('attempts')) {
+      context.handle(
+        _attemptsMeta,
+        attempts.isAcceptableOrUnknown(data['attempts']!, _attemptsMeta),
+      );
+    }
+    if (data.containsKey('next_attempt_at')) {
+      context.handle(
+        _nextAttemptAtMeta,
+        nextAttemptAt.isAcceptableOrUnknown(
+          data['next_attempt_at']!,
+          _nextAttemptAtMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -192,6 +232,14 @@ class $PendingOperationsTable extends PendingOperations
         DriftSqlType.string,
         data['${effectivePrefix}last_error'],
       ),
+      attempts: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempts'],
+      )!,
+      nextAttemptAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}next_attempt_at'],
+      ),
     );
   }
 
@@ -213,6 +261,13 @@ class PendingOperation extends DataClass
   final int createdAt;
   final String state;
   final String? lastError;
+
+  /// How many sync attempts this row has already burned (spec Ruling 6).
+  final int attempts;
+
+  /// Epoch milliseconds before which the worker must not retry this row.
+  /// Null means "eligible now" (never attempted, or retry window elapsed).
+  final int? nextAttemptAt;
   const PendingOperation({
     required this.id,
     required this.kind,
@@ -221,6 +276,8 @@ class PendingOperation extends DataClass
     required this.createdAt,
     required this.state,
     this.lastError,
+    required this.attempts,
+    this.nextAttemptAt,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -233,6 +290,10 @@ class PendingOperation extends DataClass
     map['state'] = Variable<String>(state);
     if (!nullToAbsent || lastError != null) {
       map['last_error'] = Variable<String>(lastError);
+    }
+    map['attempts'] = Variable<int>(attempts);
+    if (!nullToAbsent || nextAttemptAt != null) {
+      map['next_attempt_at'] = Variable<int>(nextAttemptAt);
     }
     return map;
   }
@@ -248,6 +309,10 @@ class PendingOperation extends DataClass
       lastError: lastError == null && nullToAbsent
           ? const Value.absent()
           : Value(lastError),
+      attempts: Value(attempts),
+      nextAttemptAt: nextAttemptAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(nextAttemptAt),
     );
   }
 
@@ -264,6 +329,8 @@ class PendingOperation extends DataClass
       createdAt: serializer.fromJson<int>(json['createdAt']),
       state: serializer.fromJson<String>(json['state']),
       lastError: serializer.fromJson<String?>(json['lastError']),
+      attempts: serializer.fromJson<int>(json['attempts']),
+      nextAttemptAt: serializer.fromJson<int?>(json['nextAttemptAt']),
     );
   }
   @override
@@ -277,6 +344,8 @@ class PendingOperation extends DataClass
       'createdAt': serializer.toJson<int>(createdAt),
       'state': serializer.toJson<String>(state),
       'lastError': serializer.toJson<String?>(lastError),
+      'attempts': serializer.toJson<int>(attempts),
+      'nextAttemptAt': serializer.toJson<int?>(nextAttemptAt),
     };
   }
 
@@ -288,6 +357,8 @@ class PendingOperation extends DataClass
     int? createdAt,
     String? state,
     Value<String?> lastError = const Value.absent(),
+    int? attempts,
+    Value<int?> nextAttemptAt = const Value.absent(),
   }) => PendingOperation(
     id: id ?? this.id,
     kind: kind ?? this.kind,
@@ -296,6 +367,10 @@ class PendingOperation extends DataClass
     createdAt: createdAt ?? this.createdAt,
     state: state ?? this.state,
     lastError: lastError.present ? lastError.value : this.lastError,
+    attempts: attempts ?? this.attempts,
+    nextAttemptAt: nextAttemptAt.present
+        ? nextAttemptAt.value
+        : this.nextAttemptAt,
   );
   PendingOperation copyWithCompanion(PendingOperationsCompanion data) {
     return PendingOperation(
@@ -308,6 +383,10 @@ class PendingOperation extends DataClass
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       state: data.state.present ? data.state.value : this.state,
       lastError: data.lastError.present ? data.lastError.value : this.lastError,
+      attempts: data.attempts.present ? data.attempts.value : this.attempts,
+      nextAttemptAt: data.nextAttemptAt.present
+          ? data.nextAttemptAt.value
+          : this.nextAttemptAt,
     );
   }
 
@@ -320,14 +399,25 @@ class PendingOperation extends DataClass
           ..write('payloadJson: $payloadJson, ')
           ..write('createdAt: $createdAt, ')
           ..write('state: $state, ')
-          ..write('lastError: $lastError')
+          ..write('lastError: $lastError, ')
+          ..write('attempts: $attempts, ')
+          ..write('nextAttemptAt: $nextAttemptAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, kind, routeId, payloadJson, createdAt, state, lastError);
+  int get hashCode => Object.hash(
+    id,
+    kind,
+    routeId,
+    payloadJson,
+    createdAt,
+    state,
+    lastError,
+    attempts,
+    nextAttemptAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -338,7 +428,9 @@ class PendingOperation extends DataClass
           other.payloadJson == this.payloadJson &&
           other.createdAt == this.createdAt &&
           other.state == this.state &&
-          other.lastError == this.lastError);
+          other.lastError == this.lastError &&
+          other.attempts == this.attempts &&
+          other.nextAttemptAt == this.nextAttemptAt);
 }
 
 class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
@@ -349,6 +441,8 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
   final Value<int> createdAt;
   final Value<String> state;
   final Value<String?> lastError;
+  final Value<int> attempts;
+  final Value<int?> nextAttemptAt;
   final Value<int> rowid;
   const PendingOperationsCompanion({
     this.id = const Value.absent(),
@@ -358,6 +452,8 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     this.createdAt = const Value.absent(),
     this.state = const Value.absent(),
     this.lastError = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   PendingOperationsCompanion.insert({
@@ -368,6 +464,8 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     required int createdAt,
     this.state = const Value.absent(),
     this.lastError = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        kind = Value(kind),
@@ -382,6 +480,8 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     Expression<int>? createdAt,
     Expression<String>? state,
     Expression<String>? lastError,
+    Expression<int>? attempts,
+    Expression<int>? nextAttemptAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -392,6 +492,8 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
       if (createdAt != null) 'created_at': createdAt,
       if (state != null) 'state': state,
       if (lastError != null) 'last_error': lastError,
+      if (attempts != null) 'attempts': attempts,
+      if (nextAttemptAt != null) 'next_attempt_at': nextAttemptAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -404,6 +506,8 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     Value<int>? createdAt,
     Value<String>? state,
     Value<String?>? lastError,
+    Value<int>? attempts,
+    Value<int?>? nextAttemptAt,
     Value<int>? rowid,
   }) {
     return PendingOperationsCompanion(
@@ -414,6 +518,8 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
       createdAt: createdAt ?? this.createdAt,
       state: state ?? this.state,
       lastError: lastError ?? this.lastError,
+      attempts: attempts ?? this.attempts,
+      nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -442,6 +548,12 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
     if (lastError.present) {
       map['last_error'] = Variable<String>(lastError.value);
     }
+    if (attempts.present) {
+      map['attempts'] = Variable<int>(attempts.value);
+    }
+    if (nextAttemptAt.present) {
+      map['next_attempt_at'] = Variable<int>(nextAttemptAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -458,18 +570,20 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
           ..write('createdAt: $createdAt, ')
           ..write('state: $state, ')
           ..write('lastError: $lastError, ')
+          ..write('attempts: $attempts, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
   }
 }
 
-class $OpenExecutionsTable extends OpenExecutions
-    with TableInfo<$OpenExecutionsTable, OpenExecution> {
+class $StopProgressTable extends StopProgress
+    with TableInfo<$StopProgressTable, StopProgressData> {
   @override
   final GeneratedDatabase attachedDatabase;
   final String? _alias;
-  $OpenExecutionsTable(this.attachedDatabase, [this._alias]);
+  $StopProgressTable(this.attachedDatabase, [this._alias]);
   static const VerificationMeta _routeStopIdMeta = const VerificationMeta(
     'routeStopId',
   );
@@ -492,16 +606,43 @@ class $OpenExecutionsTable extends OpenExecutions
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _localStatusMeta = const VerificationMeta(
+    'localStatus',
+  );
   @override
-  List<GeneratedColumn> get $columns => [routeStopId, executionId];
+  late final GeneratedColumn<String> localStatus = GeneratedColumn<String>(
+    'local_status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    routeStopId,
+    executionId,
+    localStatus,
+    updatedAt,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
   String get actualTableName => $name;
-  static const String $name = 'open_executions';
+  static const String $name = 'stop_progress';
   @override
   VerificationContext validateIntegrity(
-    Insertable<OpenExecution> instance, {
+    Insertable<StopProgressData> instance, {
     bool isInserting = false,
   }) {
     final context = VerificationContext();
@@ -528,15 +669,34 @@ class $OpenExecutionsTable extends OpenExecutions
     } else if (isInserting) {
       context.missing(_executionIdMeta);
     }
+    if (data.containsKey('local_status')) {
+      context.handle(
+        _localStatusMeta,
+        localStatus.isAcceptableOrUnknown(
+          data['local_status']!,
+          _localStatusMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_localStatusMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
     return context;
   }
 
   @override
   Set<GeneratedColumn> get $primaryKey => {routeStopId};
   @override
-  OpenExecution map(Map<String, dynamic> data, {String? tablePrefix}) {
+  StopProgressData map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
-    return OpenExecution(
+    return StopProgressData(
       routeStopId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}route_stop_id'],
@@ -545,42 +705,68 @@ class $OpenExecutionsTable extends OpenExecutions
         DriftSqlType.string,
         data['${effectivePrefix}execution_id'],
       )!,
+      localStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_status'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
     );
   }
 
   @override
-  $OpenExecutionsTable createAlias(String alias) {
-    return $OpenExecutionsTable(attachedDatabase, alias);
+  $StopProgressTable createAlias(String alias) {
+    return $StopProgressTable(attachedDatabase, alias);
   }
 }
 
-class OpenExecution extends DataClass implements Insertable<OpenExecution> {
+class StopProgressData extends DataClass
+    implements Insertable<StopProgressData> {
   final String routeStopId;
   final String executionId;
-  const OpenExecution({required this.routeStopId, required this.executionId});
+
+  /// `'IN_PROGRESS'` | `'DONE'`.
+  final String localStatus;
+
+  /// Epoch milliseconds of the last local transition for this stop.
+  final int updatedAt;
+  const StopProgressData({
+    required this.routeStopId,
+    required this.executionId,
+    required this.localStatus,
+    required this.updatedAt,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['route_stop_id'] = Variable<String>(routeStopId);
     map['execution_id'] = Variable<String>(executionId);
+    map['local_status'] = Variable<String>(localStatus);
+    map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
 
-  OpenExecutionsCompanion toCompanion(bool nullToAbsent) {
-    return OpenExecutionsCompanion(
+  StopProgressCompanion toCompanion(bool nullToAbsent) {
+    return StopProgressCompanion(
       routeStopId: Value(routeStopId),
       executionId: Value(executionId),
+      localStatus: Value(localStatus),
+      updatedAt: Value(updatedAt),
     );
   }
 
-  factory OpenExecution.fromJson(
+  factory StopProgressData.fromJson(
     Map<String, dynamic> json, {
     ValueSerializer? serializer,
   }) {
     serializer ??= driftRuntimeOptions.defaultSerializer;
-    return OpenExecution(
+    return StopProgressData(
       routeStopId: serializer.fromJson<String>(json['routeStopId']),
       executionId: serializer.fromJson<String>(json['executionId']),
+      localStatus: serializer.fromJson<String>(json['localStatus']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
   @override
@@ -589,79 +775,112 @@ class OpenExecution extends DataClass implements Insertable<OpenExecution> {
     return <String, dynamic>{
       'routeStopId': serializer.toJson<String>(routeStopId),
       'executionId': serializer.toJson<String>(executionId),
+      'localStatus': serializer.toJson<String>(localStatus),
+      'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
 
-  OpenExecution copyWith({String? routeStopId, String? executionId}) =>
-      OpenExecution(
-        routeStopId: routeStopId ?? this.routeStopId,
-        executionId: executionId ?? this.executionId,
-      );
-  OpenExecution copyWithCompanion(OpenExecutionsCompanion data) {
-    return OpenExecution(
+  StopProgressData copyWith({
+    String? routeStopId,
+    String? executionId,
+    String? localStatus,
+    int? updatedAt,
+  }) => StopProgressData(
+    routeStopId: routeStopId ?? this.routeStopId,
+    executionId: executionId ?? this.executionId,
+    localStatus: localStatus ?? this.localStatus,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  StopProgressData copyWithCompanion(StopProgressCompanion data) {
+    return StopProgressData(
       routeStopId: data.routeStopId.present
           ? data.routeStopId.value
           : this.routeStopId,
       executionId: data.executionId.present
           ? data.executionId.value
           : this.executionId,
+      localStatus: data.localStatus.present
+          ? data.localStatus.value
+          : this.localStatus,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
 
   @override
   String toString() {
-    return (StringBuffer('OpenExecution(')
+    return (StringBuffer('StopProgressData(')
           ..write('routeStopId: $routeStopId, ')
-          ..write('executionId: $executionId')
+          ..write('executionId: $executionId, ')
+          ..write('localStatus: $localStatus, ')
+          ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(routeStopId, executionId);
+  int get hashCode =>
+      Object.hash(routeStopId, executionId, localStatus, updatedAt);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is OpenExecution &&
+      (other is StopProgressData &&
           other.routeStopId == this.routeStopId &&
-          other.executionId == this.executionId);
+          other.executionId == this.executionId &&
+          other.localStatus == this.localStatus &&
+          other.updatedAt == this.updatedAt);
 }
 
-class OpenExecutionsCompanion extends UpdateCompanion<OpenExecution> {
+class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
   final Value<String> routeStopId;
   final Value<String> executionId;
+  final Value<String> localStatus;
+  final Value<int> updatedAt;
   final Value<int> rowid;
-  const OpenExecutionsCompanion({
+  const StopProgressCompanion({
     this.routeStopId = const Value.absent(),
     this.executionId = const Value.absent(),
+    this.localStatus = const Value.absent(),
+    this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
-  OpenExecutionsCompanion.insert({
+  StopProgressCompanion.insert({
     required String routeStopId,
     required String executionId,
+    required String localStatus,
+    required int updatedAt,
     this.rowid = const Value.absent(),
   }) : routeStopId = Value(routeStopId),
-       executionId = Value(executionId);
-  static Insertable<OpenExecution> custom({
+       executionId = Value(executionId),
+       localStatus = Value(localStatus),
+       updatedAt = Value(updatedAt);
+  static Insertable<StopProgressData> custom({
     Expression<String>? routeStopId,
     Expression<String>? executionId,
+    Expression<String>? localStatus,
+    Expression<int>? updatedAt,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (routeStopId != null) 'route_stop_id': routeStopId,
       if (executionId != null) 'execution_id': executionId,
+      if (localStatus != null) 'local_status': localStatus,
+      if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
   }
 
-  OpenExecutionsCompanion copyWith({
+  StopProgressCompanion copyWith({
     Value<String>? routeStopId,
     Value<String>? executionId,
+    Value<String>? localStatus,
+    Value<int>? updatedAt,
     Value<int>? rowid,
   }) {
-    return OpenExecutionsCompanion(
+    return StopProgressCompanion(
       routeStopId: routeStopId ?? this.routeStopId,
       executionId: executionId ?? this.executionId,
+      localStatus: localStatus ?? this.localStatus,
+      updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -675,6 +894,12 @@ class OpenExecutionsCompanion extends UpdateCompanion<OpenExecution> {
     if (executionId.present) {
       map['execution_id'] = Variable<String>(executionId.value);
     }
+    if (localStatus.present) {
+      map['local_status'] = Variable<String>(localStatus.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -683,9 +908,219 @@ class OpenExecutionsCompanion extends UpdateCompanion<OpenExecution> {
 
   @override
   String toString() {
-    return (StringBuffer('OpenExecutionsCompanion(')
+    return (StringBuffer('StopProgressCompanion(')
           ..write('routeStopId: $routeStopId, ')
           ..write('executionId: $executionId, ')
+          ..write('localStatus: $localStatus, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SyncMetaTable extends SyncMeta
+    with TableInfo<$SyncMetaTable, SyncMetaData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SyncMetaTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _keyMeta = const VerificationMeta('key');
+  @override
+  late final GeneratedColumn<String> key = GeneratedColumn<String>(
+    'key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _valueMeta = const VerificationMeta('value');
+  @override
+  late final GeneratedColumn<String> value = GeneratedColumn<String>(
+    'value',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [key, value];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'sync_meta';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SyncMetaData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('key')) {
+      context.handle(
+        _keyMeta,
+        key.isAcceptableOrUnknown(data['key']!, _keyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_keyMeta);
+    }
+    if (data.containsKey('value')) {
+      context.handle(
+        _valueMeta,
+        value.isAcceptableOrUnknown(data['value']!, _valueMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_valueMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {key};
+  @override
+  SyncMetaData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SyncMetaData(
+      key: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}key'],
+      )!,
+      value: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}value'],
+      )!,
+    );
+  }
+
+  @override
+  $SyncMetaTable createAlias(String alias) {
+    return $SyncMetaTable(attachedDatabase, alias);
+  }
+}
+
+class SyncMetaData extends DataClass implements Insertable<SyncMetaData> {
+  final String key;
+  final String value;
+  const SyncMetaData({required this.key, required this.value});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['key'] = Variable<String>(key);
+    map['value'] = Variable<String>(value);
+    return map;
+  }
+
+  SyncMetaCompanion toCompanion(bool nullToAbsent) {
+    return SyncMetaCompanion(key: Value(key), value: Value(value));
+  }
+
+  factory SyncMetaData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SyncMetaData(
+      key: serializer.fromJson<String>(json['key']),
+      value: serializer.fromJson<String>(json['value']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'key': serializer.toJson<String>(key),
+      'value': serializer.toJson<String>(value),
+    };
+  }
+
+  SyncMetaData copyWith({String? key, String? value}) =>
+      SyncMetaData(key: key ?? this.key, value: value ?? this.value);
+  SyncMetaData copyWithCompanion(SyncMetaCompanion data) {
+    return SyncMetaData(
+      key: data.key.present ? data.key.value : this.key,
+      value: data.value.present ? data.value.value : this.value,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncMetaData(')
+          ..write('key: $key, ')
+          ..write('value: $value')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(key, value);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SyncMetaData &&
+          other.key == this.key &&
+          other.value == this.value);
+}
+
+class SyncMetaCompanion extends UpdateCompanion<SyncMetaData> {
+  final Value<String> key;
+  final Value<String> value;
+  final Value<int> rowid;
+  const SyncMetaCompanion({
+    this.key = const Value.absent(),
+    this.value = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SyncMetaCompanion.insert({
+    required String key,
+    required String value,
+    this.rowid = const Value.absent(),
+  }) : key = Value(key),
+       value = Value(value);
+  static Insertable<SyncMetaData> custom({
+    Expression<String>? key,
+    Expression<String>? value,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (key != null) 'key': key,
+      if (value != null) 'value': value,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SyncMetaCompanion copyWith({
+    Value<String>? key,
+    Value<String>? value,
+    Value<int>? rowid,
+  }) {
+    return SyncMetaCompanion(
+      key: key ?? this.key,
+      value: value ?? this.value,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (key.present) {
+      map['key'] = Variable<String>(key.value);
+    }
+    if (value.present) {
+      map['value'] = Variable<String>(value.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SyncMetaCompanion(')
+          ..write('key: $key, ')
+          ..write('value: $value, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -697,14 +1132,16 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $PendingOperationsTable pendingOperations =
       $PendingOperationsTable(this);
-  late final $OpenExecutionsTable openExecutions = $OpenExecutionsTable(this);
+  late final $StopProgressTable stopProgress = $StopProgressTable(this);
+  late final $SyncMetaTable syncMeta = $SyncMetaTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
     pendingOperations,
-    openExecutions,
+    stopProgress,
+    syncMeta,
   ];
 }
 
@@ -717,6 +1154,8 @@ typedef $$PendingOperationsTableCreateCompanionBuilder =
       required int createdAt,
       Value<String> state,
       Value<String?> lastError,
+      Value<int> attempts,
+      Value<int?> nextAttemptAt,
       Value<int> rowid,
     });
 typedef $$PendingOperationsTableUpdateCompanionBuilder =
@@ -728,6 +1167,8 @@ typedef $$PendingOperationsTableUpdateCompanionBuilder =
       Value<int> createdAt,
       Value<String> state,
       Value<String?> lastError,
+      Value<int> attempts,
+      Value<int?> nextAttemptAt,
       Value<int> rowid,
     });
 
@@ -772,6 +1213,16 @@ class $$PendingOperationsTableFilterComposer
 
   ColumnFilters<String> get lastError => $composableBuilder(
     column: $table.lastError,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -819,6 +1270,16 @@ class $$PendingOperationsTableOrderingComposer
     column: $table.lastError,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$PendingOperationsTableAnnotationComposer
@@ -852,6 +1313,14 @@ class $$PendingOperationsTableAnnotationComposer
 
   GeneratedColumn<String> get lastError =>
       $composableBuilder(column: $table.lastError, builder: (column) => column);
+
+  GeneratedColumn<int> get attempts =>
+      $composableBuilder(column: $table.attempts, builder: (column) => column);
+
+  GeneratedColumn<int> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => column,
+  );
 }
 
 class $$PendingOperationsTableTableManager
@@ -901,6 +1370,8 @@ class $$PendingOperationsTableTableManager
                 Value<int> createdAt = const Value.absent(),
                 Value<String> state = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<int?> nextAttemptAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => PendingOperationsCompanion(
                 id: id,
@@ -910,6 +1381,8 @@ class $$PendingOperationsTableTableManager
                 createdAt: createdAt,
                 state: state,
                 lastError: lastError,
+                attempts: attempts,
+                nextAttemptAt: nextAttemptAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -921,6 +1394,8 @@ class $$PendingOperationsTableTableManager
                 required int createdAt,
                 Value<String> state = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<int?> nextAttemptAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => PendingOperationsCompanion.insert(
                 id: id,
@@ -930,6 +1405,8 @@ class $$PendingOperationsTableTableManager
                 createdAt: createdAt,
                 state: state,
                 lastError: lastError,
+                attempts: attempts,
+                nextAttemptAt: nextAttemptAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -961,22 +1438,26 @@ typedef $$PendingOperationsTableProcessedTableManager =
       PendingOperation,
       PrefetchHooks Function()
     >;
-typedef $$OpenExecutionsTableCreateCompanionBuilder =
-    OpenExecutionsCompanion Function({
+typedef $$StopProgressTableCreateCompanionBuilder =
+    StopProgressCompanion Function({
       required String routeStopId,
       required String executionId,
+      required String localStatus,
+      required int updatedAt,
       Value<int> rowid,
     });
-typedef $$OpenExecutionsTableUpdateCompanionBuilder =
-    OpenExecutionsCompanion Function({
+typedef $$StopProgressTableUpdateCompanionBuilder =
+    StopProgressCompanion Function({
       Value<String> routeStopId,
       Value<String> executionId,
+      Value<String> localStatus,
+      Value<int> updatedAt,
       Value<int> rowid,
     });
 
-class $$OpenExecutionsTableFilterComposer
-    extends Composer<_$AppDatabase, $OpenExecutionsTable> {
-  $$OpenExecutionsTableFilterComposer({
+class $$StopProgressTableFilterComposer
+    extends Composer<_$AppDatabase, $StopProgressTable> {
+  $$StopProgressTableFilterComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -992,11 +1473,21 @@ class $$OpenExecutionsTableFilterComposer
     column: $table.executionId,
     builder: (column) => ColumnFilters(column),
   );
+
+  ColumnFilters<String> get localStatus => $composableBuilder(
+    column: $table.localStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
 }
 
-class $$OpenExecutionsTableOrderingComposer
-    extends Composer<_$AppDatabase, $OpenExecutionsTable> {
-  $$OpenExecutionsTableOrderingComposer({
+class $$StopProgressTableOrderingComposer
+    extends Composer<_$AppDatabase, $StopProgressTable> {
+  $$StopProgressTableOrderingComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -1012,11 +1503,21 @@ class $$OpenExecutionsTableOrderingComposer
     column: $table.executionId,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get localStatus => $composableBuilder(
+    column: $table.localStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
-class $$OpenExecutionsTableAnnotationComposer
-    extends Composer<_$AppDatabase, $OpenExecutionsTable> {
-  $$OpenExecutionsTableAnnotationComposer({
+class $$StopProgressTableAnnotationComposer
+    extends Composer<_$AppDatabase, $StopProgressTable> {
+  $$StopProgressTableAnnotationComposer({
     required super.$db,
     required super.$table,
     super.joinBuilder,
@@ -1032,57 +1533,71 @@ class $$OpenExecutionsTableAnnotationComposer
     column: $table.executionId,
     builder: (column) => column,
   );
+
+  GeneratedColumn<String> get localStatus => $composableBuilder(
+    column: $table.localStatus,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 }
 
-class $$OpenExecutionsTableTableManager
+class $$StopProgressTableTableManager
     extends
         RootTableManager<
           _$AppDatabase,
-          $OpenExecutionsTable,
-          OpenExecution,
-          $$OpenExecutionsTableFilterComposer,
-          $$OpenExecutionsTableOrderingComposer,
-          $$OpenExecutionsTableAnnotationComposer,
-          $$OpenExecutionsTableCreateCompanionBuilder,
-          $$OpenExecutionsTableUpdateCompanionBuilder,
+          $StopProgressTable,
+          StopProgressData,
+          $$StopProgressTableFilterComposer,
+          $$StopProgressTableOrderingComposer,
+          $$StopProgressTableAnnotationComposer,
+          $$StopProgressTableCreateCompanionBuilder,
+          $$StopProgressTableUpdateCompanionBuilder,
           (
-            OpenExecution,
-            BaseReferences<_$AppDatabase, $OpenExecutionsTable, OpenExecution>,
+            StopProgressData,
+            BaseReferences<_$AppDatabase, $StopProgressTable, StopProgressData>,
           ),
-          OpenExecution,
+          StopProgressData,
           PrefetchHooks Function()
         > {
-  $$OpenExecutionsTableTableManager(
-    _$AppDatabase db,
-    $OpenExecutionsTable table,
-  ) : super(
+  $$StopProgressTableTableManager(_$AppDatabase db, $StopProgressTable table)
+    : super(
         TableManagerState(
           db: db,
           table: table,
           createFilteringComposer: () =>
-              $$OpenExecutionsTableFilterComposer($db: db, $table: table),
+              $$StopProgressTableFilterComposer($db: db, $table: table),
           createOrderingComposer: () =>
-              $$OpenExecutionsTableOrderingComposer($db: db, $table: table),
+              $$StopProgressTableOrderingComposer($db: db, $table: table),
           createComputedFieldComposer: () =>
-              $$OpenExecutionsTableAnnotationComposer($db: db, $table: table),
+              $$StopProgressTableAnnotationComposer($db: db, $table: table),
           updateCompanionCallback:
               ({
                 Value<String> routeStopId = const Value.absent(),
                 Value<String> executionId = const Value.absent(),
+                Value<String> localStatus = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
-              }) => OpenExecutionsCompanion(
+              }) => StopProgressCompanion(
                 routeStopId: routeStopId,
                 executionId: executionId,
+                localStatus: localStatus,
+                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           createCompanionCallback:
               ({
                 required String routeStopId,
                 required String executionId,
+                required String localStatus,
+                required int updatedAt,
                 Value<int> rowid = const Value.absent(),
-              }) => OpenExecutionsCompanion.insert(
+              }) => StopProgressCompanion.insert(
                 routeStopId: routeStopId,
                 executionId: executionId,
+                localStatus: localStatus,
+                updatedAt: updatedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -1093,21 +1608,160 @@ class $$OpenExecutionsTableTableManager
       );
 }
 
-typedef $$OpenExecutionsTableProcessedTableManager =
+typedef $$StopProgressTableProcessedTableManager =
     ProcessedTableManager<
       _$AppDatabase,
-      $OpenExecutionsTable,
-      OpenExecution,
-      $$OpenExecutionsTableFilterComposer,
-      $$OpenExecutionsTableOrderingComposer,
-      $$OpenExecutionsTableAnnotationComposer,
-      $$OpenExecutionsTableCreateCompanionBuilder,
-      $$OpenExecutionsTableUpdateCompanionBuilder,
+      $StopProgressTable,
+      StopProgressData,
+      $$StopProgressTableFilterComposer,
+      $$StopProgressTableOrderingComposer,
+      $$StopProgressTableAnnotationComposer,
+      $$StopProgressTableCreateCompanionBuilder,
+      $$StopProgressTableUpdateCompanionBuilder,
       (
-        OpenExecution,
-        BaseReferences<_$AppDatabase, $OpenExecutionsTable, OpenExecution>,
+        StopProgressData,
+        BaseReferences<_$AppDatabase, $StopProgressTable, StopProgressData>,
       ),
-      OpenExecution,
+      StopProgressData,
+      PrefetchHooks Function()
+    >;
+typedef $$SyncMetaTableCreateCompanionBuilder =
+    SyncMetaCompanion Function({
+      required String key,
+      required String value,
+      Value<int> rowid,
+    });
+typedef $$SyncMetaTableUpdateCompanionBuilder =
+    SyncMetaCompanion Function({
+      Value<String> key,
+      Value<String> value,
+      Value<int> rowid,
+    });
+
+class $$SyncMetaTableFilterComposer
+    extends Composer<_$AppDatabase, $SyncMetaTable> {
+  $$SyncMetaTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get value => $composableBuilder(
+    column: $table.value,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SyncMetaTableOrderingComposer
+    extends Composer<_$AppDatabase, $SyncMetaTable> {
+  $$SyncMetaTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get key => $composableBuilder(
+    column: $table.key,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get value => $composableBuilder(
+    column: $table.value,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SyncMetaTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SyncMetaTable> {
+  $$SyncMetaTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get key =>
+      $composableBuilder(column: $table.key, builder: (column) => column);
+
+  GeneratedColumn<String> get value =>
+      $composableBuilder(column: $table.value, builder: (column) => column);
+}
+
+class $$SyncMetaTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SyncMetaTable,
+          SyncMetaData,
+          $$SyncMetaTableFilterComposer,
+          $$SyncMetaTableOrderingComposer,
+          $$SyncMetaTableAnnotationComposer,
+          $$SyncMetaTableCreateCompanionBuilder,
+          $$SyncMetaTableUpdateCompanionBuilder,
+          (
+            SyncMetaData,
+            BaseReferences<_$AppDatabase, $SyncMetaTable, SyncMetaData>,
+          ),
+          SyncMetaData,
+          PrefetchHooks Function()
+        > {
+  $$SyncMetaTableTableManager(_$AppDatabase db, $SyncMetaTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SyncMetaTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SyncMetaTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SyncMetaTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> key = const Value.absent(),
+                Value<String> value = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SyncMetaCompanion(key: key, value: value, rowid: rowid),
+          createCompanionCallback:
+              ({
+                required String key,
+                required String value,
+                Value<int> rowid = const Value.absent(),
+              }) => SyncMetaCompanion.insert(
+                key: key,
+                value: value,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SyncMetaTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SyncMetaTable,
+      SyncMetaData,
+      $$SyncMetaTableFilterComposer,
+      $$SyncMetaTableOrderingComposer,
+      $$SyncMetaTableAnnotationComposer,
+      $$SyncMetaTableCreateCompanionBuilder,
+      $$SyncMetaTableUpdateCompanionBuilder,
+      (
+        SyncMetaData,
+        BaseReferences<_$AppDatabase, $SyncMetaTable, SyncMetaData>,
+      ),
+      SyncMetaData,
       PrefetchHooks Function()
     >;
 
@@ -1116,6 +1770,8 @@ class $AppDatabaseManager {
   $AppDatabaseManager(this._db);
   $$PendingOperationsTableTableManager get pendingOperations =>
       $$PendingOperationsTableTableManager(_db, _db.pendingOperations);
-  $$OpenExecutionsTableTableManager get openExecutions =>
-      $$OpenExecutionsTableTableManager(_db, _db.openExecutions);
+  $$StopProgressTableTableManager get stopProgress =>
+      $$StopProgressTableTableManager(_db, _db.stopProgress);
+  $$SyncMetaTableTableManager get syncMeta =>
+      $$SyncMetaTableTableManager(_db, _db.syncMeta);
 }

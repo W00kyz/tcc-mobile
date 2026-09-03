@@ -6,9 +6,10 @@ part 'app_database.g.dart';
 /// Local write-ahead log for execution actions (check-in/out, evidence).
 ///
 /// Ruling 1 (Etapa 5 design §4.1): every execution write lands here as a
-/// `PENDING` row inside a Drift transaction *before* the UI confirms "saved",
-/// then a synchronous drain flips it to `SYNCED`/`FAILED`. Etapa 6 swaps only
-/// the drain policy — this table and the `LocalWriteStore` seam stay put.
+/// `PENDING` row inside a Drift transaction *before* the UI confirms "saved".
+/// Etapa 6 turns the synchronous drain into a background outbox worker — the
+/// `attempts` / `nextAttemptAt` columns carry the per-row retry schedule the
+/// worker reads (spec Ruling 6: capped exponential backoff).
 class PendingOperations extends Table {
   /// Equals the operation's idempotency key (UUID v4 generated on the device).
   TextColumn get id => text()();
@@ -21,25 +22,50 @@ class PendingOperations extends Table {
   TextColumn get state => text().withDefault(const Constant('pending'))();
   TextColumn get lastError => text().nullable()();
 
+  /// How many sync attempts this row has already burned (spec Ruling 6).
+  IntColumn get attempts => integer().withDefault(const Constant(0))();
+
+  /// Epoch milliseconds before which the worker must not retry this row.
+  /// Null means "eligible now" (never attempted, or retry window elapsed).
+  IntColumn get nextAttemptAt => integer().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
 
-/// One row per stop with an open (checked-in, not yet checked-out) execution
-/// — the app's own record of the `execution_id` the evidence endpoints need
-/// (spec §6.3b Ruling 17: `RouteStopOut` from `GET /routes/me` has no
-/// `execution_id` field, and the field worker has no access to the
-/// MANAGER/ADMIN-only `GET /executions`). Written on a successful check-in,
-/// deleted on a successful check-out.
-class OpenExecutions extends Table {
+/// One row per stop the worker has advanced locally — the app's own record of
+/// the `execution_id` the evidence endpoints need (spec §6.3b Ruling 17:
+/// `RouteStopOut` from `GET /routes/me` has no `execution_id`, and the field
+/// worker has no access to the MANAGER/ADMIN-only `GET /executions`).
+///
+/// Replaces Etapa 5's `OpenExecutions`: the 2→3 migration copies every
+/// `open_executions` row here with `local_status = 'IN_PROGRESS'` before
+/// dropping the old table.
+class StopProgress extends Table {
   TextColumn get routeStopId => text()();
   TextColumn get executionId => text()();
+
+  /// `'IN_PROGRESS'` | `'DONE'`.
+  TextColumn get localStatus => text()();
+
+  /// Epoch milliseconds of the last local transition for this stop.
+  IntColumn get updatedAt => integer()();
 
   @override
   Set<Column> get primaryKey => {routeStopId};
 }
 
-@DriftDatabase(tables: [PendingOperations, OpenExecutions])
+/// Flat key/value store for the sync worker's own bookkeeping (last full-sync
+/// timestamp, backoff ceiling markers, …). Spec Ruling 9.
+class SyncMeta extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
+@DriftDatabase(tables: [PendingOperations, StopProgress, SyncMeta])
 class AppDatabase extends _$AppDatabase {
   /// [executor] defaults to the on-device SQLite file; tests inject
   /// `NativeDatabase.memory()` so no suite ever touches real storage.
@@ -47,17 +73,33 @@ class AppDatabase extends _$AppDatabase {
     : super(executor ?? driftDatabase(name: 'route_monitor'));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
-  // Additive-only: nobody has schema 1 installed outside development (spec
-  // §6.3b Ruling 17), so onUpgrade only ever needs to add OpenExecutions —
-  // existing PendingOperations rows are left untouched.
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
     onUpgrade: (m, from, to) async {
-      if (from < 2) {
-        await m.createTable(openExecutions);
+      // No `from < 2` branch: Etapa 5 shipped at schema 2, so no released
+      // build is below it. A dev still on schema 1 wipes app data and reopens
+      // at schema 3 via onCreate (spec §6.3b Ruling 17 / Etapa 5 §6.3b
+      // precedent). Keeping a `from < 2` branch here is impossible anyway —
+      // it would have to `createTable(openExecutions)`, and that table object
+      // no longer exists in the generated code.
+      if (from < 3) {
+        await m.addColumn(pendingOperations, pendingOperations.attempts);
+        await m.addColumn(pendingOperations, pendingOperations.nextAttemptAt);
+        await m.createTable(stopProgress);
+        await m.createTable(syncMeta);
+        // Carry the Ruling 17 lookup rows forward, then retire the old table.
+        // Raw SQL: `open_executions` is no longer a drift table object.
+        await customStatement(
+          'INSERT INTO stop_progress '
+          '(route_stop_id, execution_id, local_status, updated_at) '
+          "SELECT route_stop_id, execution_id, 'IN_PROGRESS', "
+          "CAST(strftime('%s', 'now') AS INTEGER) * 1000 "
+          'FROM open_executions',
+        );
+        await customStatement('DROP TABLE open_executions');
       }
     },
   );
