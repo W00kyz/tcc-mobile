@@ -4,7 +4,7 @@ import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
-import 'package:route_monitor/local/open_execution_store.dart';
+import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:uuid/uuid.dart';
 
 /// Enqueues every check-in in [LocalWriteStore] before touching the network
@@ -15,13 +15,13 @@ class ExecutionRepository {
     this._api,
     this._store,
     this._evidenceApi,
-    this._openExecutions,
+    this._stopProgress,
   );
 
   final ExecutionApi _api;
   final LocalWriteStore _store;
   final EvidenceApi _evidenceApi;
-  final OpenExecutionStore _openExecutions;
+  final StopProgressStore _stopProgress;
   static const _uuid = Uuid();
 
   /// [idempotencyKey], when supplied, is reused instead of generating a
@@ -71,7 +71,7 @@ class ExecutionRepository {
       await _store.markSynced(key);
       // Ruling 17: the evidence endpoints need this execution_id and have no
       // other way to learn it — record it now while the response is at hand.
-      await _openExecutions.recordOpenExecution(
+      await _stopProgress.upsertInProgress(
         result.routeStopId,
         result.executionId,
       );
@@ -133,9 +133,10 @@ class ExecutionRepository {
         routeStopId: routeStopId,
       );
       await _store.markSynced(key);
-      // Ruling 17 counterpart to checkIn's record above: the stop's open
-      // execution is closed, so the evidence buttons must stop being offered.
-      await _openExecutions.clearOpenExecution(result.routeStopId);
+      // Ruling 17 counterpart to checkIn's record above: the stop is
+      // concluded, so the evidence buttons must stop being offered. Ruling 3:
+      // the row is marked DONE, not deleted.
+      await _stopProgress.markDone(result.routeStopId);
       return result;
       // Deliberately broad: same rationale as checkIn above — any failure
       // marks the row failed, and AmbiguousRoomException must still
@@ -245,7 +246,7 @@ class ExecutionRepository {
         // Same Ruling 17 bookkeeping as the primary checkIn path above — a
         // retry that succeeds here is a normal check-in success, not the
         // cold-start gap, so it must not leave the evidence buttons hidden.
-        await _openExecutions.recordOpenExecution(
+        await _stopProgress.upsertInProgress(
           result.routeStopId,
           result.executionId,
         );

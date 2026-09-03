@@ -51,6 +51,30 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   @override
   Future<List<PendingOperationRow>> unsyncedForRoute(String routeId) async =>
       rows;
+
+  @override
+  Future<void> markBlocked(String id, String error) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> markRetryScheduled(
+    String id, {
+    required int attempts,
+    required int nextAttemptAt,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<PendingOperationRow>> blockedForRoute(String routeId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<PendingOperationRow>> dueForRoute(
+    String routeId, {
+    required int now,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<String>> routeIdsWithWork() => throw UnimplementedError();
 }
 
 PendingOperationRow _row({
@@ -66,6 +90,8 @@ PendingOperationRow _row({
   createdAt: 0,
   state: state,
   lastError: null,
+  attempts: 0,
+  nextAttemptAt: null,
 );
 
 void main() {

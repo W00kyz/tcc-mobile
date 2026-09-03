@@ -9,6 +9,8 @@ import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/room_picker.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
+import 'package:route_monitor/local/stop_progress_store.dart'
+    show StopLocalStatus;
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -508,11 +510,14 @@ class _StopEvidenceSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final executionIdAsync = ref.watch(openExecutionForProvider(routeStopId));
-    return executionIdAsync.when(
-      data: (executionId) => executionId == null
+    final progressAsync = ref.watch(stopProgressForProvider(routeStopId));
+    return progressAsync.when(
+      // A `done` stop no longer offers evidence-add buttons (Etapa 5 §6.3):
+      // only an `inProgress` entry opens the section.
+      data: (entry) =>
+          entry == null || entry.status != StopLocalStatus.inProgress
           ? const SizedBox.shrink()
-          : _EvidenceSection(routeId: routeId, executionId: executionId),
+          : _EvidenceSection(routeId: routeId, executionId: entry.executionId),
       loading: () => const SizedBox.shrink(),
       error: (_, _) => const SizedBox.shrink(),
     );
@@ -743,6 +748,10 @@ class _EvidenceTile extends ConsumerWidget {
         return const Icon(Icons.cloud_upload, size: 16, color: Colors.orange);
       case PendingOpState.failed:
         return const Icon(Icons.error, size: 16, color: Colors.red);
+      case PendingOpState.blocked:
+        // Retry budget exhausted (Etapa 6 Ruling 6): needs manual action,
+        // not just another automatic attempt.
+        return const Icon(Icons.block, size: 16, color: Colors.red);
     }
   }
 }

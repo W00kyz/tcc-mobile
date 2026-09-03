@@ -7,7 +7,7 @@ import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/local_write_store.dart';
-import 'package:route_monitor/local/open_execution_store.dart';
+import 'package:route_monitor/local/stop_progress_store.dart';
 
 /// Records enqueue/API/mark calls in the order they happen, tagged with the
 /// idempotency key — the four invariants below are all about ordering, so a
@@ -91,6 +91,8 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       createdAt: _rows.length,
       state: PendingOpState.pending,
       lastError: null,
+      attempts: 0,
+      nextAttemptAt: null,
     );
   }
 
@@ -118,6 +120,35 @@ class _FakeLocalWriteStore implements LocalWriteStore {
           ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return rows;
   }
+
+  @override
+  Future<void> markBlocked(String id, String error) async {
+    _log.add('markBlocked:$id');
+    _rows[id] = _rows[id]!.copyWith(
+      state: PendingOpState.blocked,
+      error: error,
+    );
+  }
+
+  @override
+  Future<void> markRetryScheduled(
+    String id, {
+    required int attempts,
+    required int nextAttemptAt,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<PendingOperationRow>> blockedForRoute(String routeId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<PendingOperationRow>> dueForRoute(
+    String routeId, {
+    required int now,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<String>> routeIdsWithWork() => throw UnimplementedError();
 }
 
 extension on PendingOperationRow {
@@ -130,6 +161,8 @@ extension on PendingOperationRow {
         createdAt: createdAt,
         state: state ?? this.state,
         lastError: error ?? lastError,
+        attempts: attempts,
+        nextAttemptAt: nextAttemptAt,
       );
 }
 
@@ -181,31 +214,48 @@ class _FakeEvidenceApi implements EvidenceApi {
   Future<List<EvidenceItem>> listEvidence(String executionId) async => [];
 }
 
-/// In-memory stand-in for [DriftOpenExecutionStore] — real Drift behavior is
-/// proven by open_execution_store_test.dart; this just records calls so
+/// In-memory stand-in for [DriftStopProgressStore] — real Drift behavior is
+/// proven by stop_progress_store_test.dart; this just records calls so
 /// checkIn/checkOut's Ruling 17 wiring can be asserted directly.
-class _FakeOpenExecutionStore implements OpenExecutionStore {
+class _FakeStopProgressStore implements StopProgressStore {
   final List<String> calls = [];
-  final Map<String, String> _open = {};
+  final Map<String, StopProgressEntry> _rows = {};
 
   @override
-  Future<void> recordOpenExecution(
+  Future<void> upsertInProgress(
     String routeStopId,
     String executionId,
   ) async {
-    calls.add('record:$routeStopId:$executionId');
-    _open[routeStopId] = executionId;
+    calls.add('inProgress:$routeStopId:$executionId');
+    _rows[routeStopId] = StopProgressEntry(
+      routeStopId: routeStopId,
+      executionId: executionId,
+      status: StopLocalStatus.inProgress,
+    );
   }
 
   @override
-  Future<void> clearOpenExecution(String routeStopId) async {
-    calls.add('clear:$routeStopId');
-    _open.remove(routeStopId);
+  Future<void> markDone(String routeStopId) async {
+    calls.add('done:$routeStopId');
+    final existing = _rows[routeStopId];
+    if (existing == null) return;
+    _rows[routeStopId] = StopProgressEntry(
+      routeStopId: existing.routeStopId,
+      executionId: existing.executionId,
+      status: StopLocalStatus.done,
+    );
   }
 
   @override
-  Future<String?> openExecutionFor(String routeStopId) async =>
-      _open[routeStopId];
+  Future<StopProgressEntry?> progressFor(String routeStopId) async =>
+      _rows[routeStopId];
+
+  @override
+  Future<List<StopProgressEntry>> allForRoute(
+    Iterable<String> routeStopIds,
+  ) async => [
+    for (final id in routeStopIds) ?_rows[id],
+  ];
 }
 
 void main() {
@@ -218,7 +268,7 @@ void main() {
         _FakeExecutionApi(log),
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       final result = await repository.checkIn(
@@ -250,7 +300,7 @@ void main() {
         _FakeExecutionApi(log, checkInImpl: () async => throw networkError),
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await expectLater(
@@ -282,7 +332,7 @@ void main() {
         _FakeExecutionApi(log, checkInImpl: () async => throw ambiguous),
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await expectLater(
@@ -332,7 +382,7 @@ void main() {
         api,
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await repository.retryFailed('route-A');
@@ -347,7 +397,7 @@ void main() {
   );
 
   test(
-    'retryFailed records the OpenExecutions row for a checkIn that succeeds '
+    'retryFailed upserts the stop-progress row for a checkIn that succeeds '
     'on retry (Ruling 17 — a retry success is not the cold-start gap)',
     () async {
       final log = <String>[];
@@ -366,7 +416,7 @@ void main() {
         },
       );
       await store.markFailed('op-1', 'network down');
-      final openExecutions = _FakeOpenExecutionStore();
+      final openExecutions = _FakeStopProgressStore();
       final repository = ExecutionRepository(
         _FakeExecutionApi(log),
         store,
@@ -376,8 +426,11 @@ void main() {
 
       await repository.retryFailed('route-A');
 
-      expect(openExecutions.calls, ['record:stop-1:exec-1']);
-      expect(await openExecutions.openExecutionFor('stop-1'), 'exec-1');
+      expect(openExecutions.calls, ['inProgress:stop-1:exec-1']);
+      expect(
+        (await openExecutions.progressFor('stop-1'))?.executionId,
+        'exec-1',
+      );
     },
   );
 
@@ -392,7 +445,7 @@ void main() {
         api,
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await repository.checkIn(
@@ -416,7 +469,7 @@ void main() {
         api,
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await repository.checkIn(routeId: 'route-A', qrPayload: 'q1');
@@ -435,7 +488,7 @@ void main() {
         _FakeExecutionApi(log),
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       final result = await repository.checkOut(
@@ -468,7 +521,7 @@ void main() {
         _FakeExecutionApi(log, checkOutImpl: () async => throw networkError),
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await expectLater(
@@ -505,7 +558,7 @@ void main() {
         _FakeExecutionApi(log, checkOutImpl: () async => throw ambiguous),
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await expectLater(
@@ -534,7 +587,7 @@ void main() {
         api,
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await repository.checkOut(
@@ -560,7 +613,7 @@ void main() {
         api,
         store,
         _FakeEvidenceApi(),
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await repository.checkOut(
@@ -579,12 +632,12 @@ void main() {
   );
 
   test(
-    'checkIn records the returned execution_id in OpenExecutionStore, '
+    'checkIn records the returned execution_id in StopProgressStore, '
     'keyed by the resolved routeStopId (Ruling 17)',
     () async {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
-      final openExecutions = _FakeOpenExecutionStore();
+      final openExecutions = _FakeStopProgressStore();
       final repository = ExecutionRepository(
         _FakeExecutionApi(log),
         store,
@@ -594,17 +647,20 @@ void main() {
 
       await repository.checkIn(routeId: 'route-A', qrPayload: 'q');
 
-      expect(openExecutions.calls, ['record:stop-1:exec-1']);
-      expect(await openExecutions.openExecutionFor('stop-1'), 'exec-1');
+      expect(openExecutions.calls, ['inProgress:stop-1:exec-1']);
+      expect(
+        (await openExecutions.progressFor('stop-1'))?.executionId,
+        'exec-1',
+      );
     },
   );
 
   test(
-    'a checkIn failure never records an OpenExecutions row',
+    'a checkIn failure never records a stop-progress row',
     () async {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
-      final openExecutions = _FakeOpenExecutionStore();
+      final openExecutions = _FakeStopProgressStore();
       final networkError = DioException(
         requestOptions: RequestOptions(path: '/check-ins'),
       );
@@ -625,13 +681,13 @@ void main() {
   );
 
   test(
-    'checkOut clears the OpenExecutions row for the checked-out routeStopId '
+    'checkOut marks the stop-progress row done for the checked-out routeStopId '
     '(Ruling 17)',
     () async {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
-      final openExecutions = _FakeOpenExecutionStore();
-      await openExecutions.recordOpenExecution('stop-1', 'exec-1');
+      final openExecutions = _FakeStopProgressStore();
+      await openExecutions.upsertInProgress('stop-1', 'exec-1');
       openExecutions.calls.clear();
       final repository = ExecutionRepository(
         _FakeExecutionApi(log),
@@ -646,8 +702,11 @@ void main() {
         qrPayload: 'q',
       );
 
-      expect(openExecutions.calls, ['clear:stop-1']);
-      expect(await openExecutions.openExecutionFor('stop-1'), isNull);
+      expect(openExecutions.calls, ['done:stop-1']);
+      expect(
+        (await openExecutions.progressFor('stop-1'))?.status,
+        StopLocalStatus.done,
+      );
     },
   );
 
@@ -661,7 +720,7 @@ void main() {
         _FakeExecutionApi([]),
         store,
         evidenceApi,
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await repository.addPhoto(
@@ -689,7 +748,7 @@ void main() {
       _FakeExecutionApi([]),
       store,
       _FakeEvidenceApi(uploadPhotoError: uploadError),
-      _FakeOpenExecutionStore(),
+      _FakeStopProgressStore(),
     );
 
     await expectLater(
@@ -722,7 +781,7 @@ void main() {
         _FakeExecutionApi([]),
         store,
         evidenceApi,
-        _FakeOpenExecutionStore(),
+        _FakeStopProgressStore(),
       );
 
       await repository.addNote(
@@ -747,7 +806,7 @@ void main() {
       _FakeExecutionApi([]),
       store,
       _FakeEvidenceApi(uploadNoteError: uploadError),
-      _FakeOpenExecutionStore(),
+      _FakeStopProgressStore(),
     );
 
     await expectLater(

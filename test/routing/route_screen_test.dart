@@ -16,7 +16,7 @@ import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/local_write_store.dart';
-import 'package:route_monitor/local/open_execution_store.dart';
+import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -273,6 +273,8 @@ class _InMemoryLocalWriteStore implements LocalWriteStore {
       createdAt: _rows.length,
       state: PendingOpState.pending,
       lastError: null,
+      attempts: 0,
+      nextAttemptAt: null,
     );
   }
 
@@ -294,6 +296,8 @@ class _InMemoryLocalWriteStore implements LocalWriteStore {
       createdAt: row.createdAt,
       state: state,
       lastError: error,
+      attempts: row.attempts,
+      nextAttemptAt: row.nextAttemptAt,
     );
   }
 
@@ -305,51 +309,101 @@ class _InMemoryLocalWriteStore implements LocalWriteStore {
           )
           .toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+  @override
+  Future<void> markBlocked(String id, String error) async =>
+      _setState(id, PendingOpState.blocked, error: error);
+
+  @override
+  Future<void> markRetryScheduled(
+    String id, {
+    required int attempts,
+    required int nextAttemptAt,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<PendingOperationRow>> blockedForRoute(String routeId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<PendingOperationRow>> dueForRoute(
+    String routeId, {
+    required int now,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<List<String>> routeIdsWithWork() => throw UnimplementedError();
 }
 
-/// A no-op OpenExecutionStore — always reports no open execution (`null`),
-/// so a plain check-in/check-out test never triggers `_StopEvidenceSection`
-/// (Ruling 17: `null` hides the evidence buttons entirely). Evidence-specific
-/// tests use `_FakeOpenExecutionStore` instead.
-class _NoopOpenExecutionStore implements OpenExecutionStore {
+/// A no-op StopProgressStore — always reports no progress (`null`), so a plain
+/// check-in/check-out test never triggers `_StopEvidenceSection` (Ruling 17:
+/// `null` hides the evidence buttons entirely). Evidence-specific tests use
+/// `_FakeStopProgressStore` instead.
+class _NoopStopProgressStore implements StopProgressStore {
   @override
-  Future<void> recordOpenExecution(
-    String routeStopId,
-    String executionId,
-  ) async {}
+  Future<void> upsertInProgress(String routeStopId, String executionId) async {}
 
   @override
-  Future<void> clearOpenExecution(String routeStopId) async {}
+  Future<void> markDone(String routeStopId) async {}
 
   @override
-  Future<String?> openExecutionFor(String routeStopId) async => null;
+  Future<StopProgressEntry?> progressFor(String routeStopId) async => null;
+
+  @override
+  Future<List<StopProgressEntry>> allForRoute(
+    Iterable<String> routeStopIds,
+  ) async => const [];
 }
 
-/// An in-memory OpenExecutionStore for tests that need a stop's evidence
+/// An in-memory StopProgressStore for tests that need a stop's evidence
 /// section to actually render — pre-seed with `seed` (routeStopId ->
-/// executionId).
-class _FakeOpenExecutionStore implements OpenExecutionStore {
-  _FakeOpenExecutionStore([Map<String, String> seed = const {}])
-    : _open = Map.of(seed);
+/// executionId); every seeded stop starts `inProgress`.
+class _FakeStopProgressStore implements StopProgressStore {
+  _FakeStopProgressStore([Map<String, String> seed = const {}]) {
+    seed.forEach((routeStopId, executionId) {
+      _rows[routeStopId] = StopProgressEntry(
+        routeStopId: routeStopId,
+        executionId: executionId,
+        status: StopLocalStatus.inProgress,
+      );
+    });
+  }
 
-  final Map<String, String> _open;
+  final Map<String, StopProgressEntry> _rows = {};
 
   @override
-  Future<void> recordOpenExecution(
+  Future<void> upsertInProgress(
     String routeStopId,
     String executionId,
   ) async {
-    _open[routeStopId] = executionId;
+    _rows[routeStopId] = StopProgressEntry(
+      routeStopId: routeStopId,
+      executionId: executionId,
+      status: StopLocalStatus.inProgress,
+    );
   }
 
   @override
-  Future<void> clearOpenExecution(String routeStopId) async {
-    _open.remove(routeStopId);
+  Future<void> markDone(String routeStopId) async {
+    final existing = _rows[routeStopId];
+    if (existing == null) return;
+    _rows[routeStopId] = StopProgressEntry(
+      routeStopId: existing.routeStopId,
+      executionId: existing.executionId,
+      status: StopLocalStatus.done,
+    );
   }
 
   @override
-  Future<String?> openExecutionFor(String routeStopId) async =>
-      _open[routeStopId];
+  Future<StopProgressEntry?> progressFor(String routeStopId) async =>
+      _rows[routeStopId];
+
+  @override
+  Future<List<StopProgressEntry>> allForRoute(
+    Iterable<String> routeStopIds,
+  ) async => [
+    for (final id in routeStopIds) ?_rows[id],
+  ];
 }
 
 /// A no-op EvidenceApi — `listEvidence` returns no synced items and the
@@ -559,7 +613,7 @@ Widget _screenWith(
   ExecutionApi? executionApi,
   EvidenceApi? evidenceApi,
   EvidenceCapture? evidenceCapture,
-  OpenExecutionStore? openExecutionStore,
+  StopProgressStore? stopProgressStore,
   LocalWriteStore? localWriteStore,
   String? apiBaseUrl,
   Session? session,
@@ -570,8 +624,7 @@ Widget _screenWith(
   // and those must never fall through to the real Drift database or a real
   // Dio client under flutter_test (docs/CLAUDE.base.md — never touch the
   // network in a test).
-  final resolvedOpenExecutions =
-      openExecutionStore ?? _NoopOpenExecutionStore();
+  final resolvedOpenExecutions = stopProgressStore ?? _NoopStopProgressStore();
   final resolvedEvidenceApi = evidenceApi ?? _NoopEvidenceApi();
   final resolvedLocalStore = localWriteStore ?? _InMemoryLocalWriteStore();
   return ProviderScope(
@@ -579,7 +632,7 @@ Widget _screenWith(
       routeRepositoryProvider.overrideWithValue(repository),
       if (locationService != null)
         locationServiceProvider.overrideWithValue(locationService),
-      openExecutionStoreProvider.overrideWithValue(resolvedOpenExecutions),
+      stopProgressStoreProvider.overrideWithValue(resolvedOpenExecutions),
       evidenceApiProvider.overrideWithValue(resolvedEvidenceApi),
       localWriteStoreProvider.overrideWithValue(resolvedLocalStore),
       // Never the real apiBaseUrlFromEnvironment() under flutter_test (no
@@ -1385,7 +1438,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
         ),
       );
       await tester.pumpAndSettle();
@@ -1444,7 +1497,7 @@ void main() {
               ],
             ),
           ]),
-          openExecutionStore: _FakeOpenExecutionStore({'s2': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s2': 'exec-1'}),
         ),
       );
       await tester.pumpAndSettle();
@@ -1490,7 +1543,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           evidenceApi: evidenceApi,
           evidenceCapture: _FakeEvidenceCapture(
@@ -1519,7 +1572,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           evidenceApi: evidenceApi,
           evidenceCapture: _FakeEvidenceCapture(),
@@ -1552,7 +1605,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           evidenceApi: evidenceApi,
           evidenceCapture: _FakeEvidenceCapture(
@@ -1580,7 +1633,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           evidenceApi: evidenceApi,
           evidenceCapture: _FakeEvidenceCapture(
@@ -1611,7 +1664,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           evidenceApi: evidenceApi,
         ),
@@ -1641,7 +1694,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           evidenceApi: evidenceApi,
         ),
@@ -1670,7 +1723,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           evidenceApi: evidenceApi,
         ),
       );
@@ -1722,7 +1775,7 @@ void main() {
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
-          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           evidenceApi: evidenceApi,
           localWriteStore: localStore,
         ),
@@ -1757,7 +1810,7 @@ void main() {
         await tester.pumpWidget(
           _screenWith(
             _StaticRouteRepository([inProgressStopRoute()]),
-            openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+            stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
             evidenceApi: evidenceApi,
             apiBaseUrl: 'http://test-base',
             session: const Session(
@@ -1796,7 +1849,7 @@ void main() {
         await tester.pumpWidget(
           _screenWith(
             _StaticRouteRepository([inProgressStopRoute()]),
-            openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+            stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
             evidenceApi: evidenceApi,
             apiBaseUrl: 'http://test-base',
           ),

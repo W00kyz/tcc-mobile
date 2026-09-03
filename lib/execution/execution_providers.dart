@@ -11,7 +11,7 @@ import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
-import 'package:route_monitor/local/open_execution_store.dart';
+import 'package:route_monitor/local/stop_progress_store.dart';
 
 /// The on-device SQLite connection, as a true singleton — never construct a
 /// second [AppDatabase] for the same file (Task 16 review). Every provider
@@ -36,11 +36,11 @@ final Provider<String> apiBaseUrlProvider = Provider<String>(
   (ref) => apiBaseUrlFromEnvironment(),
 );
 
-/// The Ruling 17 lookup table (spec §6.3b) — see `OpenExecutionStore`'s
+/// The Ruling 17 lookup table (spec §6.3b) — see `StopProgressStore`'s
 /// docstring for why the app tracks this itself instead of asking the
 /// backend.
-final openExecutionStoreProvider = Provider<OpenExecutionStore>(
-  (ref) => DriftOpenExecutionStore(ref.watch(appDatabaseProvider)),
+final stopProgressStoreProvider = Provider<StopProgressStore>(
+  (ref) => DriftStopProgressStore(ref.watch(appDatabaseProvider)),
 );
 
 final executionApiProvider = Provider<ExecutionApi>((ref) {
@@ -72,18 +72,17 @@ final executionRepositoryProvider = Provider<ExecutionRepository>(
     ref.watch(executionApiProvider),
     ref.watch(localWriteStoreProvider),
     ref.watch(evidenceApiProvider),
-    ref.watch(openExecutionStoreProvider),
+    ref.watch(stopProgressStoreProvider),
   ),
 );
 
-/// Null both for a stop with no open execution and for the Ruling 17
-/// cold-start gap (a stop that turned `IN_PROGRESS` before `OpenExecutions`
-/// existed) — RouteScreen hides the evidence buttons entirely on null,
-/// rather than guessing.
-final FutureProviderFamily<String?, String> openExecutionForProvider =
-    FutureProvider.family<String?, String>(
+/// Null both for an untouched stop and for the Ruling 17 cold-start gap (a
+/// stop that turned `IN_PROGRESS` before `StopProgress` existed) — RouteScreen
+/// hides the evidence buttons entirely on null, and also on a `done` entry.
+final FutureProviderFamily<StopProgressEntry?, String> stopProgressForProvider =
+    FutureProvider.family<StopProgressEntry?, String>(
       (ref, routeStopId) =>
-          ref.watch(openExecutionStoreProvider).openExecutionFor(routeStopId),
+          ref.watch(stopProgressStoreProvider).progressFor(routeStopId),
     );
 
 /// One stop's evidence list — the backend's synced items plus this device's
