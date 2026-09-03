@@ -450,6 +450,69 @@ void main() {
   );
 
   test(
+    'a DioException with no response (type: unknown) is soft, not hard',
+    () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(type: DioExceptionType.unknown);
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+      await h.worker.syncRoute('route-R');
+
+      final row = h.store.rows['a']!;
+      expect(row.state, PendingOpState.failed);
+      expect(row.attempts, 1);
+      expect(row.nextAttemptAt, isNotNull);
+    },
+  );
+
+  test(
+    'a DioException with type: badCertificate and no response is soft',
+    () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(
+        type: DioExceptionType.badCertificate,
+      );
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+      await h.worker.syncRoute('route-R');
+
+      final row = h.store.rows['a']!;
+      expect(row.state, PendingOpState.failed);
+      expect(row.attempts, 1);
+      expect(row.nextAttemptAt, isNotNull);
+    },
+  );
+
+  test(
+    'AmbiguousRoomException blocks the row (RULING P5 — no picker in a drain)',
+    () async {
+      final h = _Harness();
+      h.executionApi.checkInError = const AmbiguousRoomException([
+        RoomCandidate(
+          routeStopId: 's1',
+          servicePointId: 'sp1',
+          name: 'Sala 101',
+        ),
+      ]);
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.store.rows['a']!.state, PendingOpState.blocked);
+    },
+  );
+
+  test('a non-Dio error blocks the row', () async {
+    final h = _Harness();
+    h.executionApi.checkInError = const FormatException('boom');
+    h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+    await h.worker.syncRoute('route-R');
+
+    expect(h.store.rows['a']!.state, PendingOpState.blocked);
+  });
+
+  test(
     'an "already applied" 409 counts as success and the queue continues',
     () async {
       final h = _Harness();

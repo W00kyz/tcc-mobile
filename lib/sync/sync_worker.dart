@@ -229,23 +229,22 @@ class SyncWorker {
     if (error is AmbiguousRoomException) return SyncErrorClass.hard;
     if (error is! DioException) return SyncErrorClass.hard;
 
-    const softTypes = {
-      DioExceptionType.connectionError,
-      DioExceptionType.connectionTimeout,
-      DioExceptionType.receiveTimeout,
-      DioExceptionType.sendTimeout,
-    };
-    if (softTypes.contains(error.type)) return SyncErrorClass.soft;
+    final response = error.response;
+    // No HTTP response at all — a pure transport/network failure (timeout,
+    // DNS blip, TLS handshake abort wrapped as `type: unknown`, a non-socket
+    // IOException mid-request). All recoverable: retry with backoff rather
+    // than block the route forever.
+    if (response == null) return SyncErrorClass.soft;
 
-    final status = error.response?.statusCode;
+    final status = response.statusCode;
     if (status != null && const {500, 502, 503, 504, 429}.contains(status)) {
       return SyncErrorClass.soft;
     }
     if (status == 409 &&
-        _bodyText(error.response?.data).toLowerCase().contains('already')) {
+        _bodyText(response.data).toLowerCase().contains('already')) {
       return SyncErrorClass.alreadyApplied;
     }
-    // 422 / 403 / 404 and every other unclassified Dio failure: permanent.
+    // 422 / 403 / 404 and every other non-retryable HTTP status: permanent.
     return SyncErrorClass.hard;
   }
 
