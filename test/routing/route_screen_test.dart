@@ -1224,12 +1224,200 @@ void main() {
     },
   );
 
-  // NOTE (Etapa 6 Task 8): the check-in/check-out room-picker and
-  // generic-failure widget tests were removed here. The repository no longer
-  // calls the network or throws `AmbiguousRoomException`/`DioException` (spec
-  // Ruling 2), so RouteScreen can no longer surface a picker or an error
-  // snackbar from an enqueue. Task 10 re-adds room resolution locally, before
-  // the enqueue, and brings its own widget tests for that flow.
+  // The GPS fix _FakeLocationService reports; the stops below are positioned
+  // relative to it so the offline room resolution (spec Ruling 4) lands on a
+  // known branch.
+  RouteSummary oneRoomInRadiusRoute() => _routeWith(
+    status: 'IN_PROGRESS',
+    startedAt: DateTime(2026, 8, 25, 8),
+    stops: const [
+      RouteStopSummary(
+        id: 's1',
+        orderIndex: 1,
+        status: 'PENDING',
+        servicePointName: 'Sala 101',
+        latitude: -7.23,
+        longitude: -35.88,
+        pointType: 'REGULAR',
+      ),
+      RouteStopSummary(
+        id: 's2',
+        orderIndex: 2,
+        status: 'PENDING',
+        servicePointName: 'Sala 102',
+        // ~2.5 km away — well outside the 50 m check radius.
+        latitude: -7.25,
+        longitude: -35.90,
+        pointType: 'REGULAR',
+      ),
+    ],
+  );
+
+  RouteSummary twoRoomsInRadiusRoute() => _routeWith(
+    status: 'IN_PROGRESS',
+    startedAt: DateTime(2026, 8, 25, 8),
+    stops: const [
+      RouteStopSummary(
+        id: 's1',
+        orderIndex: 1,
+        status: 'PENDING',
+        servicePointName: 'Sala 101',
+        latitude: -7.23,
+        longitude: -35.88,
+        pointType: 'REGULAR',
+      ),
+      RouteStopSummary(
+        id: 's2',
+        orderIndex: 2,
+        status: 'PENDING',
+        servicePointName: 'Sala 102',
+        // ~11 m from the GPS fix — inside the radius, but farther than s1.
+        latitude: -7.2301,
+        longitude: -35.88,
+        pointType: 'REGULAR',
+      ),
+    ],
+  );
+
+  testWidgets(
+    'check-in with GPS placing one pending stop in radius resolves to it '
+    'and enqueues that routeStopId',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([oneRoomInRadiusRoute()]),
+          locationService: _FakeLocationService(),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Vários pontos correspondem — escolha o certo:'),
+        findsNothing,
+      );
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.checkIn);
+      expect(rows.single.payload['route_stop_id'], 's1');
+      expect(find.text('Check-in registrado.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'check-in with two pending stops in radius shows the picker (nearest '
+    'pre-selected); choosing the second enqueues its routeStopId',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([twoRoomsInRadiusRoute()]),
+          locationService: _FakeLocationService(),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Vários pontos correspondem — escolha o certo:'),
+        findsOneWidget,
+      );
+      // Nearest ("Sala 101", s1) renders first and pre-selected; pick the
+      // farther one instead. Scope to the sheet — the stop list behind it
+      // also renders a "Sala 102" tile.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomSheet),
+          matching: find.text('Sala 102'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
+      await tester.pumpAndSettle();
+
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.payload['route_stop_id'], 's2');
+      expect(find.text('Check-in registrado.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'dismissing the room picker enqueues nothing and shows no snackbar',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([twoRoomsInRadiusRoute()]),
+          locationService: _FakeLocationService(),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
+      await tester.pumpAndSettle();
+
+      expect(await store.unsyncedForRoute('r1'), isEmpty);
+      expect(find.text('Check-in registrado.'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'no GPS with a single pending stop resolves to it and enqueues the '
+    'check-in with a null distance',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      // A route with a single PENDING stop — with no GPS the resolution
+      // falls to the "lone pending stop resolves anyway" path (Ruling 4 /
+      // validation.py:117).
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressRoute()]),
+          locationService: _FailingLocationService(),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Vários pontos correspondem — escolha o certo:'),
+        findsNothing,
+      );
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.payload['route_stop_id'], 's1');
+      expect(rows.single.payload['latitude'], isNull);
+    },
+  );
+
+  // NOTE (Etapa 6 Task 8, updated Task 10): Task 8 deleted seven
+  // server-`409`-driven widget tests here. Task 10 moved room resolution onto
+  // the device (spec Ruling 4), so it restored the four that map to the local
+  // flow: one-stop-in-radius auto-resolve, two-stops-in-radius picker,
+  // picker-dismissed, and no-GPS lone-stop resolve (all just above). The
+  // three "generic network failure snackbar" tests (check-in, check-out,
+  // check-out 422-not-picker) genuinely can't come back — the enqueue can't
+  // fail that way; failure classification is a `SyncWorker` concern now,
+  // covered by sync_worker_test.dart.
 
   testWidgets(
     'shows a "Concluir" action only for an IN_PROGRESS stop, not a PENDING '

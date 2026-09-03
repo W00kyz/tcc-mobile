@@ -5,9 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
-import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/room_picker.dart';
+import 'package:route_monitor/execution/room_resolution.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart'
     show StopLocalStatus;
@@ -20,7 +20,7 @@ import 'package:uuid/uuid.dart';
 const _uuid = Uuid();
 
 /// A completed scan+GPS read, threaded from `_scanAndLocate` into a
-/// check-in/check-out attempt and any of its room-picker retries.
+/// check-in or check-out attempt.
 class _Scan {
   const _Scan(this.rawValue, this.coordinates);
   final String rawValue;
@@ -160,67 +160,50 @@ class RouteScreen extends ConsumerWidget {
     final scan = await _scanAndLocate(context, ref);
     if (scan == null || !context.mounted) return;
 
-    // Generated once per tap, in scope for both the first attempt and any
-    // room-picker retry below — Ruling 16: one tap on "Fazer check-in" is
-    // one logical attempt, even when a 409 makes it take two network calls.
-    final idempotencyKey = _uuid.v4();
-    await _attemptCheckIn(
-      context,
-      ref,
-      route: route,
-      scan: scan,
-      idempotencyKey: idempotencyKey,
+    // Since Etapa 6 the room is resolved on the device, before the enqueue
+    // (spec Ruling 4) — the check-in flow is offline-first and there is no
+    // server 409 to lean on. `resolveRoomLocally` always lands on a concrete
+    // route_stop_id: either it resolves one automatically or the field
+    // worker picks from the pending stops (Ruling P8 — nothing is ever
+    // enqueued with a null route_stop_id).
+    final pendingStops = route.stops
+        .where((stop) => stop.status == 'PENDING')
+        .toList();
+    final resolution = resolveRoomLocally(
+      pendingStops: pendingStops,
+      latitude: scan.coordinates?.latitude,
+      longitude: scan.coordinates?.longitude,
     );
-  }
 
-  Future<void> _attemptCheckIn(
-    BuildContext context,
-    WidgetRef ref, {
-    required RouteSummary route,
-    required _Scan scan,
-    required String idempotencyKey,
-    String? routeStopId,
-  }) async {
-    try {
-      await ref
-          .read(executionRepositoryProvider)
-          .checkIn(
-            routeId: route.id,
-            qrPayload: scan.rawValue,
-            latitude: scan.coordinates?.latitude,
-            longitude: scan.coordinates?.longitude,
-            idempotencyKey: idempotencyKey,
-            routeStopId: routeStopId,
-          );
-      ref.invalidate(myRoutesProvider);
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Check-in registrado.')));
-      }
-    } on AmbiguousRoomException catch (e) {
-      if (!context.mounted) return;
-      final chosen = await showRoomPicker(context, e.candidates);
-      if (chosen == null || !context.mounted) return;
-      await _attemptCheckIn(
-        context,
-        ref,
-        route: route,
-        scan: scan,
-        idempotencyKey: idempotencyKey,
-        routeStopId: chosen.routeStopId,
-      );
-      // Deliberately broad: any other failure — DioException (network/HTTP)
-      // or otherwise — maps to the same generic message here.
-      // ignore: avoid_catches_without_on_clauses
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Não foi possível registrar o check-in.'),
-          ),
+    final String routeStopId;
+    switch (resolution) {
+      case ResolvedRoom(routeStopId: final resolved):
+        routeStopId = resolved;
+      case AmbiguousRooms(:final candidates):
+        final chosen = await showRoomPicker(context, candidates);
+        // Dismissed without choosing → the check-in is cancelled, nothing is
+        // written (Etapa 5's behaviour).
+        if (chosen == null || !context.mounted) return;
+        routeStopId = chosen.routeStopId;
+    }
+
+    // The repository only enqueues + writes local state now (spec Ruling 2):
+    // it never throws `AmbiguousRoomException` or a network error, so there
+    // is nothing to catch here.
+    await ref
+        .read(executionRepositoryProvider)
+        .checkIn(
+          routeId: route.id,
+          routeStopId: routeStopId,
+          qrPayload: scan.rawValue,
+          latitude: scan.coordinates?.latitude,
+          longitude: scan.coordinates?.longitude,
         );
-      }
+    ref.invalidate(myRoutesProvider);
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Check-in registrado.')));
     }
   }
 
@@ -233,75 +216,29 @@ class RouteScreen extends ConsumerWidget {
     final scan = await _scanAndLocate(context, ref);
     if (scan == null || !context.mounted) return;
 
-    // Same one-tap-one-attempt rule as _checkIn's idempotencyKey above.
-    final checkoutIdempotencyKey = _uuid.v4();
-    await _attemptCheckOut(
-      context,
-      ref,
-      route: route,
-      scan: scan,
-      routeStopId: stop.id,
-      checkoutIdempotencyKey: checkoutIdempotencyKey,
-    );
-  }
-
-  Future<void> _attemptCheckOut(
-    BuildContext context,
-    WidgetRef ref, {
-    required RouteSummary route,
-    required _Scan scan,
-    required String routeStopId,
-    required String checkoutIdempotencyKey,
-  }) async {
-    try {
-      await ref
-          .read(executionRepositoryProvider)
-          .checkOut(
-            routeId: route.id,
-            routeStopId: routeStopId,
-            qrPayload: scan.rawValue,
-            latitude: scan.coordinates?.latitude,
-            longitude: scan.coordinates?.longitude,
-            checkoutIdempotencyKey: checkoutIdempotencyKey,
-          );
-      // A successful check-out flips the stop to DONE on the backend; this
-      // invalidate is what makes it "leave the list" (the Concluir button's
-      // visibility condition is status == 'IN_PROGRESS', and the existing
-      // done-icon rendering in _StopTile takes over) — no client-side
-      // filtering needed.
-      ref.invalidate(myRoutesProvider);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Check-out registrado.')),
+    // Check-out is always per-stop — the UI already knows which IN_PROGRESS
+    // stop it is concluding, so there is no room to resolve. The repository
+    // only enqueues + writes local state (spec Ruling 2): no
+    // `AmbiguousRoomException`, no network error, nothing to catch.
+    await ref
+        .read(executionRepositoryProvider)
+        .checkOut(
+          routeId: route.id,
+          routeStopId: stop.id,
+          qrPayload: scan.rawValue,
+          latitude: scan.coordinates?.latitude,
+          longitude: scan.coordinates?.longitude,
+          checkoutIdempotencyKey: _uuid.v4(),
         );
-      }
-    } on AmbiguousRoomException catch (e) {
-      // Defense in depth (Ruling 16) — check-out already sends its own stop
-      // as routeStopId, so this is rare, but two open check-ins on the same
-      // floor can still trigger it; handled identically to check-in's.
-      if (!context.mounted) return;
-      final chosen = await showRoomPicker(context, e.candidates);
-      if (chosen == null || !context.mounted) return;
-      await _attemptCheckOut(
-        context,
-        ref,
-        route: route,
-        scan: scan,
-        routeStopId: chosen.routeStopId,
-        checkoutIdempotencyKey: checkoutIdempotencyKey,
+    // A local check-out flips the stop to DONE now (spec Ruling 5); this
+    // invalidate re-reads myRoutesProvider so the server view catches up too
+    // — the "Concluir" button's visibility is status == 'IN_PROGRESS', and
+    // the done-icon rendering in _StopTile takes over.
+    ref.invalidate(myRoutesProvider);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Check-out registrado.')),
       );
-      // Deliberately broad: every other failure — including the ordinary
-      // 422 NO_OPEN_CHECKIN DioException — maps to the same generic message,
-      // same discipline as every other error path in this file.
-      // ignore: avoid_catches_without_on_clauses
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Não foi possível registrar o check-out.'),
-          ),
-        );
-      }
     }
   }
 

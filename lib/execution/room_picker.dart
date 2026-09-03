@@ -1,29 +1,29 @@
 import 'package:flutter/material.dart';
 
-import 'package:route_monitor/execution/execution_api.dart';
+import 'package:route_monitor/execution/room_resolution.dart';
 
-/// Shows the room-disambiguation bottom sheet for a `409 AMBIGUOUS_ROOM`
-/// response (spec §4.4 Ruling 4 / §6.5 Ruling 16). [candidates] are shown
-/// nearest-first, with the nearest one pre-selected. Backend ordering is
-/// already nearest-first (`app/api/checkins.py`'s `_ambiguous_conflict`
-/// sorts by `distance_m`), but that ordering is not a documented contract
-/// here — sort defensively rather than trust it.
+/// Shows the room-disambiguation bottom sheet when the offline resolution
+/// (spec §4.4 Ruling 4 / §6.5 Ruling 16) finds more than one plausible
+/// PENDING stop. [candidates] are shown nearest-first, with the nearest one
+/// pre-selected. `resolveRoomLocally` already sorts nearest-first, but that
+/// ordering is not a documented contract here — sort defensively.
 ///
 /// Returns the candidate the field worker confirmed, or `null` if the sheet
-/// was dismissed (back gesture, tap outside, or "Cancelar") without one.
-Future<RoomCandidate?> showRoomPicker(
+/// was dismissed (back gesture, tap outside, or "Cancelar") without one — a
+/// `null` means the check-in is cancelled and nothing is enqueued.
+Future<RoomCandidateLocal?> showRoomPicker(
   BuildContext context,
-  List<RoomCandidate> candidates,
+  List<RoomCandidateLocal> candidates,
 ) {
   final sorted = [...candidates]..sort(_byDistanceNullsLast);
-  return showModalBottomSheet<RoomCandidate>(
+  return showModalBottomSheet<RoomCandidateLocal>(
     context: context,
     isScrollControlled: true,
     builder: (context) => _RoomPickerSheet(candidates: sorted),
   );
 }
 
-int _byDistanceNullsLast(RoomCandidate a, RoomCandidate b) {
+int _byDistanceNullsLast(RoomCandidateLocal a, RoomCandidateLocal b) {
   if (a.distanceM == null) return b.distanceM == null ? 0 : 1;
   if (b.distanceM == null) return -1;
   return a.distanceM!.compareTo(b.distanceM!);
@@ -33,7 +33,7 @@ class _RoomPickerSheet extends StatefulWidget {
   const _RoomPickerSheet({required this.candidates});
 
   /// Already sorted nearest-first by [showRoomPicker].
-  final List<RoomCandidate> candidates;
+  final List<RoomCandidateLocal> candidates;
 
   @override
   State<_RoomPickerSheet> createState() => _RoomPickerSheetState();
@@ -42,7 +42,7 @@ class _RoomPickerSheet extends StatefulWidget {
 class _RoomPickerSheetState extends State<_RoomPickerSheet> {
   // The nearest candidate (index 0, post-sort) is pre-selected — Ruling 4:
   // "mais próximo pré-selecionado".
-  late RoomCandidate _selected = widget.candidates.first;
+  late RoomCandidateLocal _selected = widget.candidates.first;
 
   @override
   Widget build(BuildContext context) {
@@ -72,13 +72,13 @@ class _RoomPickerSheetState extends State<_RoomPickerSheet> {
   // RadioGroup ancestor, which is more machinery than a 2-choice list needs
   // here — a manual selected/unselected icon with onTap is simpler and
   // equally testable (tap the row to select it).
-  Widget _candidateTile(RoomCandidate candidate) {
+  Widget _candidateTile(RoomCandidateLocal candidate) {
     final isSelected = candidate == _selected;
     return ListTile(
       leading: Icon(
         isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
       ),
-      title: Text(candidate.name),
+      title: Text(candidate.servicePointName),
       subtitle: candidate.distanceM == null
           ? null
           : Text('${candidate.distanceM!.round()} m'),

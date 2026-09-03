@@ -1,24 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/room_picker.dart';
+import 'package:route_monitor/execution/room_resolution.dart';
 
-const _far = RoomCandidate(
+const _far = RoomCandidateLocal(
   routeStopId: 's-far',
-  servicePointId: 'sp-far',
-  name: 'Sala 202',
+  servicePointName: 'Sala 202',
   distanceM: 9.5,
 );
-const _near = RoomCandidate(
+const _near = RoomCandidateLocal(
   routeStopId: 's-near',
-  servicePointId: 'sp-near',
-  name: 'Sala 101',
+  servicePointName: 'Sala 101',
   distanceM: 1.1,
 );
-const _unknown = RoomCandidate(
+const _unknown = RoomCandidateLocal(
   routeStopId: 's-unknown',
-  servicePointId: 'sp-unknown',
-  name: 'Sala 303',
+  servicePointName: 'Sala 303',
 );
 
 /// Pumps a host screen with a button that opens the picker and stashes
@@ -26,8 +23,8 @@ const _unknown = RoomCandidate(
 /// some interaction, then reads [captured].
 Future<void> _openPicker(
   WidgetTester tester,
-  List<RoomCandidate> candidates,
-  List<RoomCandidate?> captured,
+  List<RoomCandidateLocal> candidates,
+  List<RoomCandidateLocal?> captured,
 ) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -89,7 +86,7 @@ void main() {
   testWidgets('confirming without changing selection returns the nearest', (
     tester,
   ) async {
-    final captured = <RoomCandidate?>[];
+    final captured = <RoomCandidateLocal?>[];
     await _openPicker(tester, [_far, _near], captured);
 
     await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
@@ -101,7 +98,7 @@ void main() {
   testWidgets('tapping a different row then confirming returns that one', (
     tester,
   ) async {
-    final captured = <RoomCandidate?>[];
+    final captured = <RoomCandidateLocal?>[];
     await _openPicker(tester, [_far, _near], captured);
 
     await tester.tap(find.text('Sala 202'));
@@ -113,7 +110,7 @@ void main() {
   });
 
   testWidgets('dismissing without choosing returns null', (tester) async {
-    final captured = <RoomCandidate?>[];
+    final captured = <RoomCandidateLocal?>[];
     await _openPicker(tester, [_far, _near], captured);
 
     await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
