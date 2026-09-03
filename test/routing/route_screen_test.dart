@@ -2045,4 +2045,102 @@ void main() {
       expect(find.text('Bloqueado'), findsNothing);
     },
   );
+
+  testWidgets(
+    'a stop with a pending evidence row (matched by its StopProgress '
+    'executionId) shows the "Pendente" chip',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await store.enqueue(
+        id: 'op-photo',
+        kind: PendingOpKind.evidencePhoto,
+        routeId: 'r1',
+        payload: {'execution_id': 'exec-1'},
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pendente'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a stop whose only outbox row is blocked shows the "Bloqueado" chip',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await store.enqueue(
+        id: 'op-1',
+        kind: PendingOpKind.checkIn,
+        routeId: 'r1',
+        payload: {'route_stop_id': 's1'},
+      );
+      await store.markBlocked('op-1', 'HTTP 422');
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressRoute()]),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Bloqueado'), findsOneWidget);
+      expect(find.text('Pendente'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a stop with both a blocked and a pending row shows "Bloqueado" — '
+    'blocked wins pending',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await store.enqueue(
+        id: 'op-checkin',
+        kind: PendingOpKind.checkIn,
+        routeId: 'r1',
+        payload: {'route_stop_id': 's1'},
+      );
+      await store.markBlocked('op-checkin', 'HTTP 422');
+      await store.enqueue(
+        id: 'op-photo',
+        kind: PendingOpKind.evidencePhoto,
+        routeId: 'r1',
+        payload: {'execution_id': 'exec-1'},
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Bloqueado'), findsOneWidget);
+      expect(find.text('Pendente'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'the waiting banner uses the singular "ação" for a single pending row',
+    (tester) async {
+      final worker = _RecordingSyncWorker(
+        statusStream: Stream<RouteSyncStatus>.value(statusOf(pending: 1)),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressRoute()]),
+          syncWorker: worker,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 ação aguardando sincronização'), findsOneWidget);
+    },
+  );
 }

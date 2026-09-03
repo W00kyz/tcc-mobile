@@ -425,10 +425,13 @@ class _SyncBanner extends ConsumerWidget {
     }
 
     if (status.pending > 0) {
+      final noun = status.pending == 1 ? 'ação' : 'ações';
       return Row(
         children: [
           Expanded(
-            child: Text('${status.pending} ações aguardando sincronização'),
+            child: Text(
+              '${status.pending} $noun aguardando sincronização',
+            ),
           ),
           const SizedBox(width: 8),
           FilledButton.tonal(
