@@ -7,7 +7,13 @@ import 'package:route_monitor/local/app_database.dart';
 ///
 /// The `.name` of each value is what lands in the `kind` column, so renaming a
 /// value is a schema-visible change.
-enum PendingOpKind { checkIn, checkOut, evidencePhoto, evidenceNote }
+enum PendingOpKind {
+  checkIn,
+  checkOut,
+  evidencePhoto,
+  evidenceNote,
+  startRoute,
+}
 
 /// Drain state of a buffered write. `.name` is persisted in the `state` column.
 ///

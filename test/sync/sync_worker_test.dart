@@ -8,6 +8,7 @@ import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -173,12 +174,65 @@ class _FakeStopProgressStore implements StopProgressStore {
 
 class _FakeSyncMetaStore implements SyncMetaStore {
   double? offset;
+  final Map<String, DateTime> routeStartedAt = {};
 
   @override
   Future<double?> getClockOffsetSeconds() async => offset;
 
   @override
   Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
+
+  @override
+  Future<DateTime?> getRouteStartedAt(String routeId) async =>
+      routeStartedAt[routeId];
+
+  @override
+  Future<void> setRouteStartedAt(String routeId, DateTime startedAt) async =>
+      routeStartedAt[routeId] = startedAt;
+}
+
+class _FakeRouteRepository implements RouteRepository {
+  _FakeRouteRepository(this.log);
+
+  final List<String> log;
+  Exception? startError;
+
+  ({String routeId, double latitude, double longitude, DateTime startedAt})?
+  lastStart;
+
+  @override
+  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<RouteSummary> startRoute({
+    required String routeId,
+    required double latitude,
+    required double longitude,
+    required DateTime startedAt,
+  }) async {
+    log.add('start:$routeId');
+    lastStart = (
+      routeId: routeId,
+      latitude: latitude,
+      longitude: longitude,
+      startedAt: startedAt,
+    );
+    final error = startError;
+    if (error != null) {
+      startError = null;
+      throw error;
+    }
+    return RouteSummary(
+      id: routeId,
+      fieldWorkerName: 'João',
+      routeDate: DateTime.utc(2026, 6),
+      routeType: 'REGULAR',
+      status: 'IN_PROGRESS',
+      startedAt: startedAt,
+      stops: const [],
+    );
+  }
 }
 
 class _FakeLocalWriteStore implements LocalWriteStore {
@@ -343,6 +397,7 @@ class _Harness {
       connectivity,
       executionApi,
       evidenceApi,
+      routeApi,
       now: () => now,
       random: _ZeroRandom(),
     );
@@ -355,6 +410,7 @@ class _Harness {
   final connectivity = FakeConnectivity(isOnline: true);
   late final executionApi = _FakeExecutionApi(log);
   late final evidenceApi = _FakeEvidenceApi(log);
+  late final routeApi = _FakeRouteRepository(log);
   DateTime now = DateTime.utc(2026, 6, 1, 12);
   late final SyncWorker worker;
 }
@@ -633,6 +689,77 @@ void main() {
       await h.worker.syncRoute('route-R');
 
       expect(h.store.rows['a']!.state, PendingOpState.blocked);
+    },
+  );
+
+  Map<String, dynamic> startPayload(DateTime startedAt) => {
+    'route_id': 'route-R',
+    'latitude': -7.21,
+    'longitude': -35.91,
+    'started_at': startedAt.toIso8601String(),
+  };
+
+  test(
+    'a startRoute row dispatches via RouteRepository.startRoute with the '
+    'payload values including the exact started_at',
+    () async {
+      final h = _Harness();
+      final startedAt = DateTime.utc(2026, 6, 1, 7, 30);
+      h.store.seed(
+        's',
+        kind: PendingOpKind.startRoute,
+        createdAt: 1,
+        payload: startPayload(startedAt),
+      );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['start:route-R']);
+      expect(h.store.rows['s']!.state, PendingOpState.synced);
+      expect(h.routeApi.lastStart, isNotNull);
+      expect(h.routeApi.lastStart!.latitude, -7.21);
+      expect(h.routeApi.lastStart!.longitude, -35.91);
+      expect(h.routeApi.lastStart!.startedAt, startedAt);
+    },
+  );
+
+  test(
+    'a 409 "already started" on a startRoute row counts as success',
+    () async {
+      final h = _Harness();
+      h.routeApi.startError = _dio(
+        status: 409,
+        body: {'detail': 'Route "route-R" was already started at ...'},
+      );
+      h.store.seed(
+        's',
+        kind: PendingOpKind.startRoute,
+        createdAt: 1,
+        payload: startPayload(DateTime.utc(2026, 6, 1, 7, 30)),
+      );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.store.rows['s']!.state, PendingOpState.synced);
+    },
+  );
+
+  test(
+    'a startRoute row before a check-in row dispatches first (FIFO)',
+    () async {
+      final h = _Harness();
+      h.store
+        ..seed(
+          's',
+          kind: PendingOpKind.startRoute,
+          createdAt: 1,
+          payload: startPayload(DateTime.utc(2026, 6, 1, 7, 30)),
+        )
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 2);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['start:route-R', 'checkIn:a']);
     },
   );
 }

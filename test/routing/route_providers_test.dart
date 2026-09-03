@@ -16,6 +16,7 @@ class _FakeRouteRepository implements RouteRepository {
     required String routeId,
     required double latitude,
     required double longitude,
+    required DateTime startedAt,
   }) async {
     throw UnimplementedError('not exercised in this test');
   }

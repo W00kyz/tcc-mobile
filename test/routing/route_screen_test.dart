@@ -17,11 +17,13 @@ import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_screen.dart';
+import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -87,34 +89,32 @@ class _FakeRouteRepository implements RouteRepository {
     required String routeId,
     required double latitude,
     required double longitude,
+    required DateTime startedAt,
   }) async {
     throw UnimplementedError('not exercised in this test');
   }
 }
 
-class _FailingStartRouteRepository implements RouteRepository {
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => [
-    _unstartedRoute,
-  ];
+/// In-memory [SyncMetaStore] — RouteScreen watches
+/// `routeStartedLocallyProvider` on every render now (Etapa 6 Task 9), so
+/// every test needs this instead of the real Drift-backed store.
+class _InMemorySyncMetaStore implements SyncMetaStore {
+  double? offset;
+  final Map<String, DateTime> routeStartedAt = {};
 
   @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-  }) async {
-    // Mirrors a real backend rejection (403 route-not-yours, 404, or 409
-    // already-started) surfacing as a DioException from dio's own stack —
-    // any thrown error must be handled the same way by _startRoute.
-    throw DioException(
-      requestOptions: RequestOptions(path: '/routes/$routeId/start'),
-      response: Response(
-        requestOptions: RequestOptions(path: '/routes/$routeId/start'),
-        statusCode: 409,
-      ),
-    );
-  }
+  Future<double?> getClockOffsetSeconds() async => offset;
+
+  @override
+  Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
+
+  @override
+  Future<DateTime?> getRouteStartedAt(String routeId) async =>
+      routeStartedAt[routeId];
+
+  @override
+  Future<void> setRouteStartedAt(String routeId, DateTime startedAt) async =>
+      routeStartedAt[routeId] = startedAt;
 }
 
 class _StaticRouteRepository implements RouteRepository {
@@ -130,6 +130,7 @@ class _StaticRouteRepository implements RouteRepository {
     required String routeId,
     required double latitude,
     required double longitude,
+    required DateTime startedAt,
   }) async {
     throw UnimplementedError('not exercised in this test');
   }
@@ -155,6 +156,7 @@ class _CountingRouteRepository implements RouteRepository {
     required String routeId,
     required double latitude,
     required double longitude,
+    required DateTime startedAt,
   }) async {
     throw UnimplementedError('not exercised in this test');
   }
@@ -171,6 +173,7 @@ class _ThrowingRouteRepository implements RouteRepository {
     required String routeId,
     required double latitude,
     required double longitude,
+    required DateTime startedAt,
   }) async {
     throw UnimplementedError('not exercised in this test');
   }
@@ -599,6 +602,7 @@ Widget _screenWith(
   EvidenceCapture? evidenceCapture,
   StopProgressStore? stopProgressStore,
   LocalWriteStore? localWriteStore,
+  SyncMetaStore? syncMetaStore,
   String? apiBaseUrl,
   Session? session,
 }) {
@@ -611,6 +615,7 @@ Widget _screenWith(
   final resolvedOpenExecutions = stopProgressStore ?? _NoopStopProgressStore();
   final resolvedEvidenceApi = evidenceApi ?? _NoopEvidenceApi();
   final resolvedLocalStore = localWriteStore ?? _InMemoryLocalWriteStore();
+  final resolvedSyncMeta = syncMetaStore ?? _InMemorySyncMetaStore();
   return ProviderScope(
     overrides: [
       routeRepositoryProvider.overrideWithValue(repository),
@@ -619,6 +624,7 @@ Widget _screenWith(
       stopProgressStoreProvider.overrideWithValue(resolvedOpenExecutions),
       evidenceApiProvider.overrideWithValue(resolvedEvidenceApi),
       localWriteStoreProvider.overrideWithValue(resolvedLocalStore),
+      syncMetaStoreProvider.overrideWithValue(resolvedSyncMeta),
       // Never the real apiBaseUrlFromEnvironment() under flutter_test (no
       // --dart-define here) — a fixed value unless a test needs a specific
       // one (the synced-photo thumbnail URL/header test).
@@ -637,6 +643,7 @@ Widget _screenWith(
           ExecutionRepository(
             resolvedLocalStore,
             resolvedOpenExecutions,
+            resolvedSyncMeta,
             _RecordingSyncWorker(),
           ),
         ),
@@ -658,14 +665,7 @@ class _FixedSession extends SessionNotifier {
 
 void main() {
   testWidgets('shows the assigned stop and a start button', (tester) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          routeRepositoryProvider.overrideWithValue(_FakeRouteRepository()),
-        ],
-        child: const MaterialApp(home: RouteScreen()),
-      ),
-    );
+    await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
     await tester.pumpAndSettle();
 
     expect(find.text('Sala 101'), findsOneWidget);
@@ -673,17 +673,50 @@ void main() {
   });
 
   testWidgets(
-    'shows a snackbar instead of crashing when startRoute fails',
+    'tapping "Iniciar rota" enqueues a startRoute row and flips the UI to '
+    '"iniciada" immediately, without a myRoutesProvider refetch',
     (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      final syncMeta = _InMemorySyncMetaStore();
+      final repository = _CountingRouteRepository([_unstartedRoute]);
       await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            routeRepositoryProvider.overrideWithValue(
-              _FailingStartRouteRepository(),
-            ),
-            locationServiceProvider.overrideWithValue(_FakeLocationService()),
-          ],
-          child: const MaterialApp(home: RouteScreen()),
+        _screenWith(
+          repository,
+          locationService: _FakeLocationService(),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+          syncMetaStore: syncMeta,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(repository.fetchCount, 1);
+
+      await tester.tap(find.widgetWithText(FilledButton, 'Iniciar rota'));
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(FilledButton, 'Iniciar rota'), findsNothing);
+      expect(find.text('Rota iniciada'), findsOneWidget);
+      expect(repository.fetchCount, 1);
+
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.startRoute);
+      expect(rows.single.payload['latitude'], -7.23);
+      expect(await syncMeta.getRouteStartedAt('r1'), isNotNull);
+    },
+  );
+
+  testWidgets(
+    'a GPS failure on "Iniciar rota" shows the location snackbar and '
+    'enqueues nothing',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([_unstartedRoute]),
+          locationService: _FailingLocationService(),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
         ),
       );
       await tester.pumpAndSettle();
@@ -691,7 +724,11 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Iniciar rota'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Não foi possível iniciar a rota.'), findsOneWidget);
+      expect(
+        find.text('Não foi possível obter sua localização.'),
+        findsOneWidget,
+      );
+      expect(await store.unsyncedForRoute('r1'), isEmpty);
     },
   );
 
@@ -891,6 +928,7 @@ void main() {
       ProviderScope(
         overrides: [
           routeRepositoryProvider.overrideWithValue(_FakeRouteRepository()),
+          syncMetaStoreProvider.overrideWithValue(_InMemorySyncMetaStore()),
         ],
         child: MaterialApp(
           home: RouteScreen(mapTileProvider: NoTilesTileProvider()),

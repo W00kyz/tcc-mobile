@@ -8,6 +8,7 @@ import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 
@@ -35,7 +36,8 @@ class SyncWorker {
     this._syncMeta,
     this._connectivity,
     this._executionApi,
-    this._evidenceApi, {
+    this._evidenceApi,
+    this._routeApi, {
     DateTime Function() now = DateTime.now,
     math.Random? random,
     // A private field can't be an initializing formal with a public param
@@ -50,6 +52,7 @@ class SyncWorker {
   final Connectivity _connectivity;
   final ExecutionApi _executionApi;
   final EvidenceApi _evidenceApi;
+  final RouteRepository _routeApi;
   final DateTime Function() _now;
   final math.Random _random;
 
@@ -168,6 +171,7 @@ class SyncWorker {
     return switch (row.kind) {
       PendingOpKind.checkIn => _performCheckIn(payload),
       PendingOpKind.checkOut => _performCheckOut(payload),
+      PendingOpKind.startRoute => _performStartRoute(payload),
       PendingOpKind.evidencePhoto => _evidenceApi.uploadPhoto(
         executionId: payload['execution_id'] as String,
         bytes: base64Decode(payload['bytes_b64'] as String),
@@ -215,6 +219,19 @@ class SyncWorker {
     );
     await _stopProgress.markDone(response.result.routeStopId);
     return response.serverDate;
+  }
+
+  Future<DateTime?> _performStartRoute(Map<String, dynamic> payload) async {
+    await _routeApi.startRoute(
+      routeId: payload['route_id'] as String,
+      latitude: (payload['latitude'] as num).toDouble(),
+      longitude: (payload['longitude'] as num).toDouble(),
+      startedAt: DateTime.parse(payload['started_at'] as String),
+    );
+    // No serverDate to return: `start` carries a client-supplied
+    // `started_at` and the response body is a RouteSummary, not a bare
+    // instant. Check-in/out already measure the clock offset (Ruling 7).
+    return null;
   }
 
   Future<void> _recordOffset(DateTime? serverDate) async {

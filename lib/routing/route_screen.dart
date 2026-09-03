@@ -82,12 +82,16 @@ class RouteScreen extends ConsumerWidget {
             );
           }
           final route = routes.first;
+          final startedLocally =
+              ref.watch(routeStartedLocallyProvider(route.id)).asData?.value ??
+              false;
+          final started = route.startedAt != null || startedLocally;
           return Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _RouteHeader(route: route),
+                _RouteHeader(route: route, started: started),
                 const SizedBox(height: 12),
                 FilledButton.tonal(
                   onPressed: () => Navigator.of(context).push(
@@ -120,7 +124,7 @@ class RouteScreen extends ConsumerWidget {
                     ],
                   ),
                 ),
-                if (route.startedAt == null)
+                if (!started)
                   FilledButton(
                     onPressed: () => _startRoute(context, ref, route.id),
                     child: const Text('Iniciar rota'),
@@ -369,34 +373,31 @@ class RouteScreen extends ConsumerWidget {
       return;
     }
 
-    try {
-      await ref
-          .read(routeRepositoryProvider)
-          .startRoute(
-            routeId: routeId,
-            latitude: position.latitude,
-            longitude: position.longitude,
-          );
-      ref.invalidate(myRoutesProvider);
-      // Deliberately broad: the backend can reject this with 403 (route not
-      // yours), 404, or 409 (already started) — every DioException from this
-      // call must reach the user as feedback instead of propagating as an
-      // unhandled async error.
-      // ignore: avoid_catches_without_on_clauses
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível iniciar a rota.')),
+    // No network call and no try/catch here any more (Etapa 6 Task 9): the
+    // write only enqueues an outbox row + a local "started" marker and kicks
+    // the sync worker. The SyncWorker owns the dispatch, the 409
+    // "already started" handling (spec Ruling 8) and every failure class.
+    await ref
+        .read(executionRepositoryProvider)
+        .startRoute(
+          routeId: routeId,
+          latitude: position.latitude,
+          longitude: position.longitude,
         );
-      }
-    }
+    // Re-read the optimistic marker so the button flips now, without waiting
+    // on a myRoutesProvider refetch (spec Ruling 5).
+    ref.invalidate(routeStartedLocallyProvider(routeId));
   }
 }
 
 class _RouteHeader extends StatelessWidget {
-  const _RouteHeader({required this.route});
+  const _RouteHeader({required this.route, required this.started});
 
   final RouteSummary route;
+
+  /// True when the server says the route is started OR this device has a
+  /// local optimistic marker from a not-yet-synced "Iniciar rota" tap.
+  final bool started;
 
   @override
   Widget build(BuildContext context) {
@@ -404,7 +405,7 @@ class _RouteHeader extends StatelessWidget {
       children: [
         Flexible(
           child: Text(
-            route.startedAt == null ? 'Rota não iniciada' : 'Rota iniciada',
+            started ? 'Rota iniciada' : 'Rota não iniciada',
             style: Theme.of(context).textTheme.titleMedium,
           ),
         ),

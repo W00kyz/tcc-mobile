@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:uuid/uuid.dart';
 
@@ -16,10 +17,16 @@ import 'package:uuid/uuid.dart';
 /// marks each row's state. Nothing here throws `AmbiguousRoomException` or
 /// `DioException` any more.
 class ExecutionRepository {
-  ExecutionRepository(this._store, this._stopProgress, this._syncWorker);
+  ExecutionRepository(
+    this._store,
+    this._stopProgress,
+    this._syncMeta,
+    this._syncWorker,
+  );
 
   final LocalWriteStore _store;
   final StopProgressStore _stopProgress;
+  final SyncMetaStore _syncMeta;
   final SyncWorker _syncWorker;
   static const _uuid = Uuid();
 
@@ -72,6 +79,39 @@ class ExecutionRepository {
     }
     unawaited(_syncWorker.syncRoute(routeId));
     return executionId;
+  }
+
+  /// Starts [routeId] through the outbox — same drift-first shape as
+  /// [checkIn]: a `pending` [PendingOpKind.startRoute] row plus a local
+  /// optimistic marker, then a non-blocking [SyncWorker] kick. Never touches
+  /// the network. `started_at` is captured here, at tap time, so a late sync
+  /// still records when the field worker actually started (spec Ruling 8).
+  /// `start` gets no idempotency key — there is no picker retry — and the
+  /// worker treats the backend's 409 "already started" as success.
+  Future<void> startRoute({
+    required String routeId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    final startedAt = DateTime.now().toUtc();
+    final key = _uuid.v4();
+    await _store.enqueue(
+      id: key,
+      kind: PendingOpKind.startRoute,
+      routeId: routeId,
+      payload: {
+        'route_id': routeId,
+        'latitude': latitude,
+        'longitude': longitude,
+        // A String, never a DateTime — LocalWriteStore.enqueue jsonEncodes
+        // this map, which throws on a raw DateTime value.
+        'started_at': startedAt.toIso8601String(),
+      },
+    );
+    // Ruling 5: the route reads as "iniciada" on device now, not after the
+    // 200 — RouteScreen watches this marker alongside the server value.
+    await _syncMeta.setRouteStartedAt(routeId, startedAt);
+    unawaited(_syncWorker.syncRoute(routeId));
   }
 
   /// Check-out is always per-stop (Ruling 16 — the UI already knows which

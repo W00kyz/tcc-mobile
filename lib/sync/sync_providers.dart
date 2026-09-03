@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -28,6 +29,7 @@ final syncWorkerProvider = Provider<SyncWorker>((ref) {
     ref.watch(connectivityProvider),
     ref.watch(executionApiProvider),
     ref.watch(evidenceApiProvider),
+    ref.watch(routeRepositoryProvider),
   );
   ref.onDispose(worker.dispose);
   return worker;

@@ -196,11 +196,39 @@ void main() {
       routeId: 'r1',
       latitude: -7.2,
       longitude: -35.9,
+      startedAt: DateTime.utc(2026, 8, 25, 8, 15),
     );
 
     expect(capturedRequest.path, '/routes/r1/start');
     expect((capturedRequest.data as Map)['latitude'], -7.2);
   });
+
+  test(
+    'startRoute sends the caller-supplied started_at, not DateTime.now',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'));
+      late RequestOptions capturedRequest;
+      dio.httpClientAdapter = _FakeAdapter(
+        statusCode: 200,
+        body: _routePayload(),
+        onRequest: (options) => capturedRequest = options,
+      );
+      final repository = DioRouteRepository(dio);
+      final startedAt = DateTime.utc(2026, 8, 25, 8, 15);
+
+      await repository.startRoute(
+        routeId: 'r1',
+        latitude: -7.2,
+        longitude: -35.9,
+        startedAt: startedAt,
+      );
+
+      expect(
+        (capturedRequest.data as Map)['started_at'],
+        startedAt.toIso8601String(),
+      );
+    },
+  );
 }
 
 class _FakeAdapter implements HttpClientAdapter {

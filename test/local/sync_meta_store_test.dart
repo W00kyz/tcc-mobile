@@ -31,4 +31,20 @@ void main() {
 
     expect(await store.getClockOffsetSeconds(), 0.25);
   });
+
+  test('getRouteStartedAt is null before it is ever set', () async {
+    expect(await store.getRouteStartedAt('r1'), isNull);
+  });
+
+  test(
+    'setRouteStartedAt then getRouteStartedAt round-trips the instant, '
+    'keyed per route',
+    () async {
+      final startedAt = DateTime.utc(2026, 8, 25, 8, 15);
+      await store.setRouteStartedAt('r1', startedAt);
+
+      expect(await store.getRouteStartedAt('r1'), startedAt);
+      expect(await store.getRouteStartedAt('r2'), isNull);
+    },
+  );
 }

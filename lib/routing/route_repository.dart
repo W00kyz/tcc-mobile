@@ -99,6 +99,7 @@ abstract class RouteRepository {
     required String routeId,
     required double latitude,
     required double longitude,
+    required DateTime startedAt,
   });
 }
 
@@ -125,13 +126,17 @@ class DioRouteRepository implements RouteRepository {
     required String routeId,
     required double latitude,
     required double longitude,
+    required DateTime startedAt,
   }) async {
     final response = await _dio.post<Map<String, dynamic>>(
       '/routes/$routeId/start',
       data: {
         'latitude': latitude,
         'longitude': longitude,
-        'started_at': DateTime.now().toUtc().toIso8601String(),
+        // Client-supplied (spec Ruling 8): the outbox worker passes the
+        // tap-time instant so a late sync still records when the field
+        // worker actually started, not when the row happened to drain.
+        'started_at': startedAt.toUtc().toIso8601String(),
       },
     );
     return RouteSummary.fromJson(response.data!);
