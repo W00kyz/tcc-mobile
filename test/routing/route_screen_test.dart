@@ -1,10 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/auth/auth_providers.dart';
+import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
@@ -440,6 +444,100 @@ class _FakeEvidenceCapture implements EvidenceCapture {
   }
 }
 
+/// Makes every `NetworkImage` load inside [body] resolve to [bytes] instead
+/// of hitting the real (fake-400-under-`flutter_test`) network — installed
+/// via Flutter's own `debugNetworkImageHttpClientProvider` test hook.
+/// Without this, a synced photo's `NetworkImage` throws a
+/// `NetworkImageLoadException` mid-test (flutter_test's default `HttpClient`
+/// returns 400 for everything). Reset happens in a `finally`, synchronously
+/// before this function returns — `addTearDown` runs too late here:
+/// `TestWidgetsFlutterBinding._verifyInvariants` (which asserts every debug
+/// painting variable is back to null) runs right after the test body
+/// returns but before `package:test`'s own tearDown queue.
+Future<void> _withMockedNetworkImages(
+  Uint8List bytes,
+  Future<void> Function() body,
+) async {
+  debugNetworkImageHttpClientProvider = () => _FakeHttpClient(bytes);
+  try {
+    await body();
+  } finally {
+    debugNetworkImageHttpClientProvider = null;
+  }
+}
+
+class _FakeHttpClient implements HttpClient {
+  _FakeHttpClient(this._bytes);
+  final Uint8List _bytes;
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async =>
+      _FakeHttpClientRequest(_bytes);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpClientRequest implements HttpClientRequest {
+  _FakeHttpClientRequest(this._bytes);
+  final Uint8List _bytes;
+
+  @override
+  final HttpHeaders headers = _FakeHttpHeaders();
+
+  @override
+  Future<HttpClientResponse> close() async => _FakeHttpClientResponse(_bytes);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpHeaders implements HttpHeaders {
+  @override
+  void add(
+    String name,
+    Object value, {
+    bool preserveHeaderCase = false,
+  }) {}
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _FakeHttpClientResponse extends Stream<List<int>>
+    implements HttpClientResponse {
+  _FakeHttpClientResponse(this._bytes);
+  final Uint8List _bytes;
+
+  @override
+  int get statusCode => HttpStatus.ok;
+
+  @override
+  int get contentLength => _bytes.length;
+
+  @override
+  HttpClientResponseCompressionState get compressionState =>
+      HttpClientResponseCompressionState.notCompressed;
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int> event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
+    return Stream<List<int>>.fromIterable([_bytes]).listen(
+      onData,
+      onError: onError,
+      onDone: onDone,
+      cancelOnError: cancelOnError,
+    );
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 RouteSummary _routeWith({
   required List<RouteStopSummary> stops,
   String routeType = 'REGULAR',
@@ -463,6 +561,8 @@ Widget _screenWith(
   EvidenceCapture? evidenceCapture,
   OpenExecutionStore? openExecutionStore,
   LocalWriteStore? localWriteStore,
+  String? apiBaseUrl,
+  Session? session,
 }) {
   // Always overridden, regardless of whether the test cares about evidence:
   // any IN_PROGRESS stop builds a _StopEvidenceSection that watches
@@ -482,6 +582,12 @@ Widget _screenWith(
       openExecutionStoreProvider.overrideWithValue(resolvedOpenExecutions),
       evidenceApiProvider.overrideWithValue(resolvedEvidenceApi),
       localWriteStoreProvider.overrideWithValue(resolvedLocalStore),
+      // Never the real apiBaseUrlFromEnvironment() under flutter_test (no
+      // --dart-define here) — a fixed value unless a test needs a specific
+      // one (the synced-photo thumbnail URL/header test).
+      apiBaseUrlProvider.overrideWithValue(apiBaseUrl ?? 'http://test-base'),
+      if (session != null)
+        sessionProvider.overrideWith(() => _FixedSession(session)),
       if (evidenceCapture != null)
         evidenceCaptureProvider.overrideWithValue(evidenceCapture),
       if (executionApi != null)
@@ -496,6 +602,17 @@ Widget _screenWith(
     ],
     child: const MaterialApp(home: RouteScreen()),
   );
+}
+
+/// Overrides `sessionProvider` with a fixed, non-null `Session` — the
+/// synced-photo thumbnail test needs a real access token to assert the
+/// `Authorization` header.
+class _FixedSession extends SessionNotifier {
+  _FixedSession(this._session);
+  final Session _session;
+
+  @override
+  Session? build() => _session;
 }
 
 void main() {
@@ -1535,6 +1652,80 @@ void main() {
       expect(find.byIcon(Icons.cloud_done), findsOneWidget);
       expect(find.byIcon(Icons.cloud_upload), findsOneWidget);
       expect(find.byType(Image), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'renders a synced PHOTO evidence item as a NetworkImage built from the '
+    'configured base URL + contentUrl, with a bearer-token Authorization '
+    'header',
+    (tester) async {
+      await _withMockedNetworkImages(_onePixelPng, () async {
+        final evidenceApi = _FakeEvidenceApi(
+          syncedItems: [
+            EvidenceItem(
+              id: 'e1',
+              kind: 'PHOTO',
+              capturedAt: DateTime.utc(2026, 8, 25, 8),
+              createdAt: DateTime.utc(2026, 8, 25, 8, 1),
+              contentUrl: '/evidence/e1/content',
+            ),
+          ],
+        );
+        await tester.pumpWidget(
+          _screenWith(
+            _StaticRouteRepository([inProgressStopRoute()]),
+            openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+            evidenceApi: evidenceApi,
+            apiBaseUrl: 'http://test-base',
+            session: const Session(
+              accessToken: 'test-token',
+              refreshToken: 'test-refresh-token',
+              role: 'FIELD_WORKER',
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final image = tester.widget<Image>(find.byType(Image));
+        final provider = image.image as NetworkImage;
+        expect(provider.url, 'http://test-base/evidence/e1/content');
+        expect(provider.headers, {'Authorization': 'Bearer test-token'});
+      });
+    },
+  );
+
+  testWidgets(
+    'renders a synced PHOTO evidence item with no headers when there is no '
+    'session (no Authorization key, not a null-token crash)',
+    (tester) async {
+      await _withMockedNetworkImages(_onePixelPng, () async {
+        final evidenceApi = _FakeEvidenceApi(
+          syncedItems: [
+            EvidenceItem(
+              id: 'e1',
+              kind: 'PHOTO',
+              capturedAt: DateTime.utc(2026, 8, 25, 8),
+              createdAt: DateTime.utc(2026, 8, 25, 8, 1),
+              contentUrl: '/evidence/e1/content',
+            ),
+          ],
+        );
+        await tester.pumpWidget(
+          _screenWith(
+            _StaticRouteRepository([inProgressStopRoute()]),
+            openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+            evidenceApi: evidenceApi,
+            apiBaseUrl: 'http://test-base',
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final image = tester.widget<Image>(find.byType(Image));
+        final provider = image.image as NetworkImage;
+        expect(provider.url, 'http://test-base/evidence/e1/content');
+        expect(provider.headers, isNull);
+      });
     },
   );
 }

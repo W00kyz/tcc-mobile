@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' show TileProvider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:route_monitor/api/env.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
@@ -717,11 +716,15 @@ class _EvidenceTile extends ConsumerWidget {
       // NetworkImage's own `headers` map is enough for the bearer token here
       // — simpler than a custom Dio-backed ImageProvider, and the offline
       // map screen already established that a plain network fetch (no
-      // redirect handling needed) is fine for this backend.
+      // redirect handling needed) is fine for this backend. Reads the base
+      // URL through apiBaseUrlProvider (not apiBaseUrlFromEnvironment()
+      // directly) so a test can override it with a fixed value instead of
+      // requiring a real --dart-define.
       final token = ref.watch(sessionProvider)?.accessToken;
+      final baseUrl = ref.watch(apiBaseUrlProvider);
       return Image(
         image: NetworkImage(
-          '${apiBaseUrlFromEnvironment()}${item.contentUrl}',
+          '$baseUrl${item.contentUrl}',
           headers: token == null ? null : {'Authorization': 'Bearer $token'},
         ),
         width: 40,

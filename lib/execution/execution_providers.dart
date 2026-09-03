@@ -26,6 +26,16 @@ final localWriteStoreProvider = Provider<LocalWriteStore>(
   (ref) => DriftLocalWriteStore(ref.watch(appDatabaseProvider)),
 );
 
+/// Wraps `apiBaseUrlFromEnvironment()` for widgets that need the raw base
+/// URL rather than a whole `Dio` client — e.g. `route_screen.dart`'s
+/// synced-photo thumbnail, which builds a `NetworkImage` URL by hand. Going
+/// through a provider (instead of calling the env function directly from
+/// build()) lets a test override it with a fixed value, rather than
+/// requiring a real `--dart-define=API_BASE_URL=...` under `flutter test`.
+final Provider<String> apiBaseUrlProvider = Provider<String>(
+  (ref) => apiBaseUrlFromEnvironment(),
+);
+
 /// The Ruling 17 lookup table (spec §6.3b) — see `OpenExecutionStore`'s
 /// docstring for why the app tracks this itself instead of asking the
 /// backend.

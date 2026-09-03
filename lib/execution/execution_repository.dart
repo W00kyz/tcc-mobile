@@ -233,7 +233,7 @@ class ExecutionRepository {
       // knows check-in rows for now.
       if (row.kind != PendingOpKind.checkIn) continue;
       try {
-        await _api.checkIn(
+        final result = await _api.checkIn(
           qrPayload: row.payload['qr_payload'] as String,
           latitude: (row.payload['latitude'] as num?)?.toDouble(),
           longitude: (row.payload['longitude'] as num?)?.toDouble(),
@@ -242,6 +242,13 @@ class ExecutionRepository {
           routeStopId: row.payload['route_stop_id'] as String?,
         );
         await _store.markSynced(row.id);
+        // Same Ruling 17 bookkeeping as the primary checkIn path above — a
+        // retry that succeeds here is a normal check-in success, not the
+        // cold-start gap, so it must not leave the evidence buttons hidden.
+        await _openExecutions.recordOpenExecution(
+          result.routeStopId,
+          result.executionId,
+        );
         // Deliberately broad: keep retrying the rest of the batch no matter
         // why this one row failed again (still offline, still ambiguous...).
         // ignore: avoid_catches_without_on_clauses

@@ -347,6 +347,41 @@ void main() {
   );
 
   test(
+    'retryFailed records the OpenExecutions row for a checkIn that succeeds '
+    'on retry (Ruling 17 — a retry success is not the cold-start gap)',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      await store.enqueue(
+        id: 'op-1',
+        kind: PendingOpKind.checkIn,
+        routeId: 'route-A',
+        payload: {
+          'qr_payload': 'q',
+          'latitude': null,
+          'longitude': null,
+          'scanned_at': DateTime(2026, 8, 25).toIso8601String(),
+          'idempotency_key': 'op-1',
+          'route_stop_id': 'stop-1',
+        },
+      );
+      await store.markFailed('op-1', 'network down');
+      final openExecutions = _FakeOpenExecutionStore();
+      final repository = ExecutionRepository(
+        _FakeExecutionApi(log),
+        store,
+        _FakeEvidenceApi(),
+        openExecutions,
+      );
+
+      await repository.retryFailed('route-A');
+
+      expect(openExecutions.calls, ['record:stop-1:exec-1']);
+      expect(await openExecutions.openExecutionFor('stop-1'), 'exec-1');
+    },
+  );
+
+  test(
     'checkIn reuses a caller-supplied idempotencyKey instead of generating '
     'a fresh one',
     () async {
