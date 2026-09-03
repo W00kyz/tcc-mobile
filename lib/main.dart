@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:route_monitor/auth/login_screen.dart';
 import 'package:route_monitor/routing/route_screen.dart';
+import 'package:route_monitor/sync/sync_triggers.dart';
 
 void main() {
   runApp(const ProviderScope(child: RouteMonitorApp()));
@@ -35,6 +36,8 @@ class RouteMonitorApp extends StatelessWidget {
         useMaterial3: true,
       ),
       routerConfig: _router,
+      builder: (context, child) =>
+          SyncTriggers(child: child ?? const SizedBox.shrink()),
     );
   }
 }
