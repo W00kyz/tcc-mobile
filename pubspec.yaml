@@ -49,5 +49,3 @@ flutter:
   assets:
     - assets/campus.pmtiles
     - assets/campus-style.json
-    - assets/glyphs/
-    - assets/glyphs/Noto Sans Regular/

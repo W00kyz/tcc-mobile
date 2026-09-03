@@ -1402,6 +1402,88 @@ void main() {
   );
 
   testWidgets(
+    'renders all three stop states side by side with the right affordances '
+    '(Task 20): DONE gets the check icon and no actions, IN_PROGRESS gets '
+    '"Concluir" plus evidence actions, PENDING gets neither and only the '
+    'route-level "Fazer check-in" entry applies',
+    (tester) async {
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([
+            _routeWith(
+              status: 'IN_PROGRESS',
+              startedAt: DateTime(2026, 8, 25, 8),
+              stops: const [
+                RouteStopSummary(
+                  id: 's1',
+                  orderIndex: 1,
+                  status: 'DONE',
+                  servicePointName: 'Sala 101',
+                  latitude: -7.21,
+                  longitude: -35.91,
+                  pointType: 'REGULAR',
+                ),
+                RouteStopSummary(
+                  id: 's2',
+                  orderIndex: 2,
+                  status: 'IN_PROGRESS',
+                  servicePointName: 'Sala 102',
+                  latitude: -7.22,
+                  longitude: -35.92,
+                  pointType: 'REGULAR',
+                ),
+                RouteStopSummary(
+                  id: 's3',
+                  orderIndex: 3,
+                  status: 'PENDING',
+                  servicePointName: 'Sala 103',
+                  latitude: -7.23,
+                  longitude: -35.93,
+                  pointType: 'REGULAR',
+                ),
+              ],
+            ),
+          ]),
+          openExecutionStore: _FakeOpenExecutionStore({'s2': 'exec-1'}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // All three stops render.
+      expect(find.text('Sala 101'), findsOneWidget);
+      expect(find.text('Sala 102'), findsOneWidget);
+      expect(find.text('Sala 103'), findsOneWidget);
+
+      // DONE (s1): check icon, no Concluir on its tile, no evidence actions
+      // for it — only s2 (IN_PROGRESS) resolves an OpenExecutions row above.
+      expect(find.byIcon(Icons.check_circle), findsOneWidget);
+
+      // IN_PROGRESS (s2): "Concluir" plus both evidence actions, and exactly
+      // one of each across the whole list — s1/s3 get neither.
+      expect(find.widgetWithText(TextButton, 'Concluir'), findsOneWidget);
+      expect(
+        find.widgetWithText(TextButton, 'Adicionar foto'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(TextButton, 'Adicionar observação'),
+        findsOneWidget,
+      );
+
+      // PENDING (s3) and IN_PROGRESS (s2) both fall back to the scan icon;
+      // only DONE (s1) gets the check icon.
+      expect(find.byIcon(Icons.qr_code_scanner), findsNWidgets(2));
+
+      // PENDING stop has a route-level entry point, not a per-stop button —
+      // the single "Fazer check-in" button below the list.
+      expect(
+        find.widgetWithText(FilledButton, 'Fazer check-in'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
     'tapping "Adicionar foto" captures, uploads the photo and shows success',
     (tester) async {
       final evidenceApi = _FakeEvidenceApi();

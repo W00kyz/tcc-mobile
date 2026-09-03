@@ -128,6 +128,27 @@ void main() {
   );
 
   test(
+    'fetchMyRoutes parses an IN_PROGRESS stop status the same way as '
+    'PENDING/DONE — plain string pass-through, no enum mapping (Task 20)',
+    () async {
+      final payload = _routePayload();
+      final stopsJson = (payload['stops'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      stopsJson[0]['status'] = 'IN_PROGRESS';
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _FakeAdapter(
+          statusCode: 200,
+          body: [payload],
+        );
+      final repository = DioRouteRepository(dio);
+
+      final stops = (await repository.fetchMyRoutes()).first.stops;
+
+      expect(stops[0].status, 'IN_PROGRESS');
+    },
+  );
+
+  test(
     'fetchMyRoutes forwards the date filter as a YYYY-MM-DD query',
     () async {
       late RequestOptions capturedRequest;

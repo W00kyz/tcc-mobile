@@ -266,10 +266,11 @@ class CampusTiles {
 /// path/URL constructors cannot see an asset. `assets/campus-style.json` is a
 /// MapLibre style whose single `campus` vector source is filled in here by
 /// name via [TileProviders]. The style's `glyphs` entry is left untouched
-/// because vector_map_tiles 8.0.0 / vector_tile_renderer 5.2.1 renders labels
-/// with Flutter's own text engine (the `text-font` name becomes a
-/// `fontFamily`) and never fetches glyph PBFs — the bundled `assets/glyphs/**`
-/// are dead weight for this stack.
+/// (inert) because vector_map_tiles 8.0.0 / vector_tile_renderer 5.2.1 renders
+/// labels with Flutter's own text engine (the `text-font` name becomes a
+/// `fontFamily`) and never fetches glyph PBFs — confirmed in Etapa 4, and the
+/// once-bundled `assets/glyphs/**` were removed as dead weight in Etapa 5
+/// Task 20 (Ruling 14).
 Future<CampusTiles> loadCampusTiles() async {
   final styleText = await rootBundle.loadString('assets/campus-style.json');
   final styleJson = json.decode(styleText) as Map<String, dynamic>;
