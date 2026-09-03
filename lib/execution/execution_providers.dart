@@ -12,6 +12,7 @@ import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/sync/sync_providers.dart';
 
 /// The on-device SQLite connection, as a true singleton — never construct a
 /// second [AppDatabase] for the same file (Task 16 review). Every provider
@@ -69,10 +70,9 @@ final evidenceCaptureProvider = Provider<EvidenceCapture>(
 
 final executionRepositoryProvider = Provider<ExecutionRepository>(
   (ref) => ExecutionRepository(
-    ref.watch(executionApiProvider),
     ref.watch(localWriteStoreProvider),
-    ref.watch(evidenceApiProvider),
     ref.watch(stopProgressStoreProvider),
+    ref.watch(syncWorkerProvider),
   ),
 );
 

@@ -1,39 +1,43 @@
+import 'dart:async';
 import 'dart:convert';
 
-import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
-import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:uuid/uuid.dart';
 
-/// Enqueues every check-in in [LocalWriteStore] before touching the network
-/// (Ruling 1, Etapa 5 design §4.1/§6.1 — RNF06: no pending write may exist
-/// only in memory), then marks the row synced or failed from the outcome.
+/// Records every field action in [LocalWriteStore] and updates local state
+/// (RNF06 / spec Ruling 2 — no pending write may exist only in memory), then
+/// fires a non-blocking [SyncWorker] kick so the UI reflects the action at
+/// once (spec Ruling 5, optimistic UI). The write methods never touch the
+/// network: the [SyncWorker] is the only owner of write network I/O — it
+/// drains the outbox, dispatches, classifies failures (spec Ruling 6) and
+/// marks each row's state. Nothing here throws `AmbiguousRoomException` or
+/// `DioException` any more.
 class ExecutionRepository {
-  ExecutionRepository(
-    this._api,
-    this._store,
-    this._evidenceApi,
-    this._stopProgress,
-  );
+  ExecutionRepository(this._store, this._stopProgress, this._syncWorker);
 
-  final ExecutionApi _api;
   final LocalWriteStore _store;
-  final EvidenceApi _evidenceApi;
   final StopProgressStore _stopProgress;
+  final SyncWorker _syncWorker;
   static const _uuid = Uuid();
 
   /// [idempotencyKey], when supplied, is reused instead of generating a
   /// fresh one — Ruling 16: a single field-worker tap on "Fazer check-in" is
-  /// one logical attempt even when it needs a second network call to
-  /// resolve (the room-picker retry after a `409 AMBIGUOUS_ROOM`, with
-  /// [routeStopId] now set to the chosen candidate), so that retry must
-  /// reuse the first call's key rather than open a second
-  /// `PendingOperations` row / `Execution` for what the worker experienced
-  /// as one action. Omitted (the normal, first-attempt call) generates a
-  /// fresh one.
-  Future<CheckInResult> checkIn({
+  /// one logical attempt even when the room picker makes the caller retry
+  /// with a resolved [routeStopId], so that retry must reuse the first call's
+  /// key rather than open a second `PendingOperations` row / `Execution` for
+  /// what the worker experienced as one action. The store's `insertOrIgnore`
+  /// then makes the retry's enqueue a no-op. Omitted (the normal,
+  /// first-attempt call) generates a fresh one.
+  ///
+  /// Returns the generated `executionId` (spec Ruling 4 — the app owns this
+  /// id now; offline there is no 201 response to learn it from). The evidence
+  /// endpoints need it and a caller may want to keep it. [routeStopId] may be
+  /// null: `null` means "let the server resolve the room on sync" (spec
+  /// Ruling 4).
+  Future<String> checkIn({
     required String routeId,
     required String qrPayload,
     double? latitude,
@@ -42,8 +46,6 @@ class ExecutionRepository {
     String? routeStopId,
   }) async {
     final key = idempotencyKey ?? _uuid.v4();
-    // The app now supplies the execution id (spec Ruling 8 / Etapa 6): a
-    // stable id per logical attempt, reused across a same-tap picker retry.
     final executionId = _uuid.v4();
     final scannedAt = DateTime.now().toUtc();
     await _store.enqueue(
@@ -62,49 +64,26 @@ class ExecutionRepository {
         'route_stop_id': routeStopId,
       },
     );
-
-    try {
-      final result = (await _api.checkIn(
-        executionId: executionId,
-        qrPayload: qrPayload,
-        latitude: latitude,
-        longitude: longitude,
-        scannedAt: scannedAt,
-        idempotencyKey: key,
-        routeStopId: routeStopId,
-      )).result;
-      await _store.markSynced(key);
-      // Ruling 17: the evidence endpoints need this execution_id and have no
-      // other way to learn it — record it now while the response is at hand.
-      await _stopProgress.upsertInProgress(
-        result.routeStopId,
-        result.executionId,
-      );
-      return result;
-      // Deliberately broad: any failure here — DioException (network/HTTP)
-      // or AmbiguousRoomException (the floor cross-reference found more than
-      // one candidate room, Task 18's picker) — must mark the row failed so
-      // a later retryFailed replays it; AmbiguousRoomException itself must
-      // still propagate unchanged so the caller can pattern-match on it.
-    } catch (e) {
-      await _store.markFailed(key, e.toString());
-      rethrow;
+    // Ruling 5: the stop turns IN_PROGRESS on device now, not after the 201.
+    // A null routeStopId can't key a StopProgress row — the server resolves
+    // the room on sync and the worker records it then (Ruling 4).
+    if (routeStopId != null) {
+      await _stopProgress.upsertInProgress(routeStopId, executionId);
     }
+    unawaited(_syncWorker.syncRoute(routeId));
+    return executionId;
   }
 
-  /// Check-out is always per-stop (Ruling 16 — unlike check-in, the UI
-  /// already knows which `IN_PROGRESS` stop it is concluding), so
-  /// [routeStopId] is required and sent from the first attempt as the
-  /// `route_stop_id` of `POST /check-outs`. This makes the `409
-  /// AMBIGUOUS_ROOM` response rare in practice (only two open check-ins on
-  /// the same floor could still trigger it) but not impossible, so the
-  /// caller still handles [AmbiguousRoomException] the same way as
-  /// `checkIn`'s.
+  /// Check-out is always per-stop (Ruling 16 — the UI already knows which
+  /// `IN_PROGRESS` stop it is concluding), so [routeStopId] is required and
+  /// travels in the payload as the `route_stop_id` of `POST /check-outs`.
   ///
   /// [checkoutIdempotencyKey] follows the same reuse-on-retry rule as
   /// `checkIn`'s `idempotencyKey`: omitted generates a fresh one, supplied
-  /// reuses the first attempt's key for a same-tap resolution retry.
-  Future<CheckOutResult> checkOut({
+  /// reuses the first attempt's key. `execution_id` is a generated UUID the
+  /// worker forwards in the dispatch call (the backend accepts and ignores
+  /// it for a check-out).
+  Future<void> checkOut({
     required String routeId,
     required String routeStopId,
     required String qrPayload,
@@ -129,39 +108,19 @@ class ExecutionRepository {
         'route_stop_id': routeStopId,
       },
     );
-
-    try {
-      final result = (await _api.checkOut(
-        executionId: executionId,
-        qrPayload: qrPayload,
-        latitude: latitude,
-        longitude: longitude,
-        scannedAt: scannedAt,
-        checkoutIdempotencyKey: key,
-        routeStopId: routeStopId,
-      )).result;
-      await _store.markSynced(key);
-      // Ruling 17 counterpart to checkIn's record above: the stop is
-      // concluded, so the evidence buttons must stop being offered. Ruling 3:
-      // the row is marked DONE, not deleted.
-      await _stopProgress.markDone(result.routeStopId);
-      return result;
-      // Deliberately broad: same rationale as checkIn above — any failure
-      // marks the row failed, and AmbiguousRoomException must still
-      // propagate unchanged.
-    } catch (e) {
-      await _store.markFailed(key, e.toString());
-      rethrow;
-    }
+    // Ruling 5 counterpart to checkIn's upsert above; Ruling 3: the row is
+    // marked DONE, not deleted.
+    await _stopProgress.markDone(routeStopId);
+    unawaited(_syncWorker.syncRoute(routeId));
   }
 
   /// Adds a photo to [executionId]'s evidence list — same drift-first
   /// discipline as `checkIn`/`checkOut`: enqueued as a `pending` row
-  /// ([PendingOpKind.evidencePhoto]) before the upload, marked
-  /// synced/failed from the outcome. [photo]'s bytes are base64-encoded into
-  /// the payload (never a raw `Uint8List` — `LocalWriteStore.enqueue`
-  /// `jsonEncode`s the map) so a `pending`/`failed` row still has what it
-  /// needs to render a local thumbnail before the backend has a copy.
+  /// ([PendingOpKind.evidencePhoto]) that the [SyncWorker] uploads later.
+  /// [photo]'s bytes are base64-encoded into the payload (never a raw
+  /// `Uint8List` — `LocalWriteStore.enqueue` `jsonEncode`s the map) so a
+  /// `pending`/`failed` row still has what it needs to render a local
+  /// thumbnail before the backend has a copy.
   Future<void> addPhoto({
     required String routeId,
     required String executionId,
@@ -181,22 +140,7 @@ class ExecutionRepository {
         'idempotency_key': key,
       },
     );
-
-    try {
-      await _evidenceApi.uploadPhoto(
-        executionId: executionId,
-        bytes: photo.bytes,
-        sha256: photo.sha256,
-        capturedAt: capturedAt,
-        idempotencyKey: key,
-      );
-      await _store.markSynced(key);
-      // Deliberately broad: any upload failure marks the row failed so a
-      // later retry can replay it.
-    } catch (e) {
-      await _store.markFailed(key, e.toString());
-      rethrow;
-    }
+    unawaited(_syncWorker.syncRoute(routeId));
   }
 
   /// Adds a text note to [executionId]'s evidence list — same lifecycle as
@@ -219,56 +163,6 @@ class ExecutionRepository {
         'idempotency_key': key,
       },
     );
-
-    try {
-      await _evidenceApi.uploadNote(
-        executionId: executionId,
-        textBody: text,
-        capturedAt: capturedAt,
-        idempotencyKey: key,
-      );
-      await _store.markSynced(key);
-      // Deliberately broad: same rationale as addPhoto above.
-    } catch (e) {
-      await _store.markFailed(key, e.toString());
-      rethrow;
-    }
-  }
-
-  /// Replays every `pending`/`failed` check-in row for [routeId], oldest
-  /// first (per [LocalWriteStore.unsyncedForRoute]'s contract), marking each
-  /// synced on success. One row failing again must not abort the batch.
-  Future<void> retryFailed(String routeId) async {
-    final rows = await _store.unsyncedForRoute(routeId);
-    for (final row in rows) {
-      // checkOut/evidence retry (PendingOpKind.checkOut/evidencePhoto/
-      // evidenceNote) is still deferred to a future task; this drain only
-      // knows check-in rows for now.
-      if (row.kind != PendingOpKind.checkIn) continue;
-      try {
-        final result = (await _api.checkIn(
-          executionId: row.payload['execution_id'] as String? ?? _uuid.v4(),
-          qrPayload: row.payload['qr_payload'] as String,
-          latitude: (row.payload['latitude'] as num?)?.toDouble(),
-          longitude: (row.payload['longitude'] as num?)?.toDouble(),
-          scannedAt: DateTime.parse(row.payload['scanned_at'] as String),
-          idempotencyKey: row.payload['idempotency_key'] as String,
-          routeStopId: row.payload['route_stop_id'] as String?,
-        )).result;
-        await _store.markSynced(row.id);
-        // Same Ruling 17 bookkeeping as the primary checkIn path above — a
-        // retry that succeeds here is a normal check-in success, not the
-        // cold-start gap, so it must not leave the evidence buttons hidden.
-        await _stopProgress.upsertInProgress(
-          result.routeStopId,
-          result.executionId,
-        );
-        // Deliberately broad: keep retrying the rest of the batch no matter
-        // why this one row failed again (still offline, still ambiguous...).
-        // ignore: avoid_catches_without_on_clauses
-      } catch (e) {
-        await _store.markFailed(row.id, e.toString());
-      }
-    }
+    unawaited(_syncWorker.syncRoute(routeId));
   }
 }

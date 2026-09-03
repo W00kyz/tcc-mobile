@@ -22,8 +22,32 @@ import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_screen.dart';
+import 'package:route_monitor/sync/sync_status.dart';
+import 'package:route_monitor/sync/sync_worker.dart';
 
 import 'no_tiles_tile_provider.dart';
+
+/// A [SyncWorker] that records every `syncRoute` kick and never drains — the
+/// repository fires this fire-and-forget after each enqueue (spec Ruling 2);
+/// RouteScreen tests only care that the enqueue happened, not the network.
+class _RecordingSyncWorker implements SyncWorker {
+  final List<String> syncedRoutes = [];
+
+  @override
+  Future<void> syncRoute(String routeId) async => syncedRoutes.add(routeId);
+
+  @override
+  Future<void> syncAll() async {}
+
+  @override
+  Stream<RouteSyncStatus> statusFor(String routeId) => const Stream.empty();
+
+  @override
+  Future<void> unblock(String operationId) async {}
+
+  @override
+  Future<void> dispose() async {}
+}
 
 /// A real, decodable 1x1 transparent PNG — used wherever a test needs
 /// `Image.memory` to actually succeed instead of throwing mid-decode.
@@ -168,30 +192,11 @@ class _FailingLocationService implements LocationService {
   }
 }
 
-/// Records every checkIn call instead of hitting the network, and returns or
-/// throws whatever the test configures — the seam that lets RouteScreen's
-/// post-scan flow (GPS handling, snackbars, AmbiguousRoomException) be
-/// exercised without a real Dio client or camera.
-/// Records every checkIn/checkOut call instead of hitting the network, and
-/// returns or throws whatever the test configures — the seam that lets
-/// RouteScreen's post-scan flow (GPS handling, snackbars,
-/// AmbiguousRoomException, the room picker) be exercised without a real Dio
-/// client or camera. [error]/[checkOutError] are consumed once: after the
-/// first call they stop throwing, so a picker-driven retry within the same
-/// tap can be configured to succeed on its second call.
+/// A no-op [ExecutionApi] — since Etapa 6 Task 8 the repository never calls
+/// the network (spec Ruling 2), so `_screenWith` only uses an instance of
+/// this as the trigger that swaps in a test `ExecutionRepository`. The
+/// dispatch path itself is covered by sync_worker_test.dart.
 class _FakeExecutionApi implements ExecutionApi {
-  _FakeExecutionApi({this.error, this.checkOutError});
-
-  Exception? error;
-  Exception? checkOutError;
-  final List<String> qrPayloads = [];
-  final List<String?> checkInRouteStopIds = [];
-  final List<String> checkInIdempotencyKeys = [];
-  final List<String> checkOutIdempotencyKeys = [];
-  double? capturedLatitude;
-  double? capturedLongitude;
-  String? lastCheckOutRouteStopId;
-
   @override
   Future<({CheckInResult result, DateTime? serverDate})> checkIn({
     required String executionId,
@@ -202,27 +207,15 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-  }) async {
-    qrPayloads.add(qrPayload);
-    checkInRouteStopIds.add(routeStopId);
-    checkInIdempotencyKeys.add(idempotencyKey);
-    capturedLatitude = latitude;
-    capturedLongitude = longitude;
-    if (error != null) {
-      final toThrow = error!;
-      error = null;
-      throw toThrow;
-    }
-    return (
-      result: const CheckInResult(
-        routeStopId: 's1',
-        executionId: 'exec-1',
-        geoValidation: 'INSIDE',
-        flags: [],
-      ),
-      serverDate: null,
-    );
-  }
+  }) async => (
+    result: const CheckInResult(
+      routeStopId: 's1',
+      executionId: 'exec-1',
+      geoValidation: 'INSIDE',
+      flags: [],
+    ),
+    serverDate: null,
+  );
 
   @override
   Future<({CheckOutResult result, DateTime? serverDate})> checkOut({
@@ -234,27 +227,15 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-  }) async {
-    qrPayloads.add(qrPayload);
-    checkOutIdempotencyKeys.add(checkoutIdempotencyKey);
-    lastCheckOutRouteStopId = routeStopId;
-    capturedLatitude = latitude;
-    capturedLongitude = longitude;
-    if (checkOutError != null) {
-      final toThrow = checkOutError!;
-      checkOutError = null;
-      throw toThrow;
-    }
-    return (
-      result: CheckOutResult(
-        routeStopId: routeStopId ?? 's1',
-        executionId: 'exec-1',
-        checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
-        flags: const [],
-      ),
-      serverDate: null,
-    );
-  }
+  }) async => (
+    result: CheckOutResult(
+      routeStopId: routeStopId ?? 's1',
+      executionId: 'exec-1',
+      checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
+      flags: const [],
+    ),
+    serverDate: null,
+  );
 }
 
 /// An in-memory stand-in for the local write-ahead log —
@@ -448,15 +429,9 @@ class _NoopEvidenceApi implements EvidenceApi {
 /// seam RouteScreen's evidence-list tests exercise instead of the real
 /// network.
 class _FakeEvidenceApi implements EvidenceApi {
-  _FakeEvidenceApi({
-    this.syncedItems = const [],
-    this.uploadPhotoError,
-    this.uploadNoteError,
-  });
+  _FakeEvidenceApi({this.syncedItems = const []});
 
   final List<EvidenceItem> syncedItems;
-  Exception? uploadPhotoError;
-  Exception? uploadNoteError;
   final List<String> uploadedPhotoExecutionIds = [];
   final List<String> uploadedNoteTexts = [];
 
@@ -469,11 +444,6 @@ class _FakeEvidenceApi implements EvidenceApi {
     required String idempotencyKey,
   }) async {
     uploadedPhotoExecutionIds.add(executionId);
-    if (uploadPhotoError != null) {
-      final toThrow = uploadPhotoError!;
-      uploadPhotoError = null;
-      throw toThrow;
-    }
     return null;
   }
 
@@ -485,11 +455,6 @@ class _FakeEvidenceApi implements EvidenceApi {
     required String idempotencyKey,
   }) async {
     uploadedNoteTexts.add(textBody);
-    if (uploadNoteError != null) {
-      final toThrow = uploadNoteError!;
-      uploadNoteError = null;
-      throw toThrow;
-    }
     return null;
   }
 
@@ -662,13 +627,17 @@ Widget _screenWith(
         sessionProvider.overrideWith(() => _FixedSession(session)),
       if (evidenceCapture != null)
         evidenceCaptureProvider.overrideWithValue(evidenceCapture),
+      // The repository no longer calls the network (spec Ruling 2): it
+      // enqueues into `resolvedLocalStore`, updates `resolvedOpenExecutions`,
+      // then kicks a (recording, non-draining) SyncWorker. `executionApi` is
+      // kept only as the trigger for this override; the dispatch path is
+      // covered by sync_worker_test.dart.
       if (executionApi != null)
         executionRepositoryProvider.overrideWithValue(
           ExecutionRepository(
-            executionApi,
             resolvedLocalStore,
-            resolvedEvidenceApi,
             resolvedOpenExecutions,
+            _RecordingSyncWorker(),
           ),
         ),
     ],
@@ -1127,12 +1096,13 @@ void main() {
   testWidgets(
     'runs the check-in flow end-to-end: scans, checks in and shows success',
     (tester) async {
-      final api = _FakeExecutionApi();
+      final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressRoute()]),
           locationService: _FakeLocationService(),
-          executionApi: api,
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
         ),
       );
       await tester.pumpAndSettle();
@@ -1140,9 +1110,12 @@ void main() {
       await tapCheckInAndScan(tester, 'v1.floor.1.sig');
       await tester.pumpAndSettle();
 
-      expect(api.qrPayloads, ['v1.floor.1.sig']);
-      expect(api.capturedLatitude, -7.23);
-      expect(api.capturedLongitude, -35.88);
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.checkIn);
+      expect(rows.single.payload['qr_payload'], 'v1.floor.1.sig');
+      expect(rows.single.payload['latitude'], -7.23);
+      expect(rows.single.payload['longitude'], -35.88);
       expect(find.text('Check-in registrado.'), findsOneWidget);
     },
   );
@@ -1150,12 +1123,13 @@ void main() {
   testWidgets(
     'does nothing when the scan screen is popped without a value',
     (tester) async {
-      final api = _FakeExecutionApi();
+      final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressRoute()]),
           locationService: _FakeLocationService(),
-          executionApi: api,
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
         ),
       );
       await tester.pumpAndSettle();
@@ -1166,7 +1140,7 @@ void main() {
       Navigator.of(scanScreenContext).pop();
       await tester.pumpAndSettle();
 
-      expect(api.qrPayloads, isEmpty);
+      expect(await store.unsyncedForRoute('r1'), isEmpty);
       expect(
         find.widgetWithText(FilledButton, 'Fazer check-in'),
         findsOneWidget,
@@ -1178,12 +1152,13 @@ void main() {
     'tolerates a GPS failure during check-in and still checks in with '
     'null coordinates',
     (tester) async {
-      final api = _FakeExecutionApi();
+      final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressRoute()]),
           locationService: _FailingLocationService(),
-          executionApi: api,
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
         ),
       );
       await tester.pumpAndSettle();
@@ -1203,122 +1178,20 @@ void main() {
       );
 
       await tester.pumpAndSettle();
-      expect(api.qrPayloads, ['v1.floor.1.sig']);
-      expect(api.capturedLatitude, isNull);
-      expect(api.capturedLongitude, isNull);
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.payload['qr_payload'], 'v1.floor.1.sig');
+      expect(rows.single.payload['latitude'], isNull);
+      expect(rows.single.payload['longitude'], isNull);
     },
   );
 
-  testWidgets(
-    'on AmbiguousRoomException from check-in, shows the room picker and '
-    'retries checkIn with the chosen routeStopId and the same '
-    'idempotencyKey',
-    (tester) async {
-      final api = _FakeExecutionApi(
-        error: const AmbiguousRoomException([
-          RoomCandidate(
-            routeStopId: 's1',
-            servicePointId: 'sp1',
-            name: 'Sala 101',
-            distanceM: 3.2,
-          ),
-          RoomCandidate(
-            routeStopId: 's2',
-            servicePointId: 'sp2',
-            name: 'Sala 102',
-            distanceM: 8,
-          ),
-        ]),
-      );
-      await tester.pumpWidget(
-        _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
-          locationService: _FakeLocationService(),
-          executionApi: api,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
-
-      // The picker is up, nearest ("Sala 101") pre-selected; choose the
-      // farther one instead, then confirm.
-      expect(
-        find.text('Vários pontos correspondem — escolha o certo:'),
-        findsOneWidget,
-      );
-      await tester.tap(find.text('Sala 102'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
-      await tester.pumpAndSettle();
-
-      expect(api.checkInRouteStopIds, [null, 's2']);
-      expect(api.checkInIdempotencyKeys, hasLength(2));
-      expect(api.checkInIdempotencyKeys[0], api.checkInIdempotencyKeys[1]);
-      expect(find.text('Check-in registrado.'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'dismissing the room picker without choosing leaves the failed check-in '
-    'as-is',
-    (tester) async {
-      final api = _FakeExecutionApi(
-        error: const AmbiguousRoomException([
-          RoomCandidate(
-            routeStopId: 's1',
-            servicePointId: 'sp1',
-            name: 'Sala 101',
-            distanceM: 3.2,
-          ),
-        ]),
-      );
-      await tester.pumpWidget(
-        _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
-          locationService: _FakeLocationService(),
-          executionApi: api,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
-      await tester.pumpAndSettle();
-
-      // Only the first (failed) attempt happened — no retry.
-      expect(api.checkInRouteStopIds, [null]);
-      expect(find.text('Check-in registrado.'), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'shows a generic failure message when check-in fails for another reason',
-    (tester) async {
-      final api = _FakeExecutionApi(
-        error: DioException(requestOptions: RequestOptions(path: '/check-ins')),
-      );
-      await tester.pumpWidget(
-        _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
-          locationService: _FakeLocationService(),
-          executionApi: api,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('Não foi possível registrar o check-in.'),
-        findsOneWidget,
-      );
-    },
-  );
+  // NOTE (Etapa 6 Task 8): the check-in/check-out room-picker and
+  // generic-failure widget tests were removed here. The repository no longer
+  // calls the network or throws `AmbiguousRoomException`/`DioException` (spec
+  // Ruling 2), so RouteScreen can no longer surface a picker or an error
+  // snackbar from an enqueue. Task 10 re-adds room resolution locally, before
+  // the enqueue, and brings its own widget tests for that flow.
 
   testWidgets(
     'shows a "Concluir" action only for an IN_PROGRESS stop, not a PENDING '
@@ -1335,13 +1208,14 @@ void main() {
     'runs the check-out flow end-to-end: scans, checks out, invalidates '
     'myRoutesProvider and shows success',
     (tester) async {
-      final api = _FakeExecutionApi();
+      final store = _InMemoryLocalWriteStore();
       final repository = _CountingRouteRepository([inProgressStopRoute()]);
       await tester.pumpWidget(
         _screenWith(
           repository,
           locationService: _FakeLocationService(),
-          executionApi: api,
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
         ),
       );
       await tester.pumpAndSettle();
@@ -1350,89 +1224,13 @@ void main() {
       await tapConcluirAndScan(tester, 'v1.floor.1.sig');
       await tester.pumpAndSettle();
 
-      expect(api.qrPayloads, ['v1.floor.1.sig']);
-      expect(api.lastCheckOutRouteStopId, 's1');
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.checkOut);
+      expect(rows.single.payload['qr_payload'], 'v1.floor.1.sig');
+      expect(rows.single.payload['route_stop_id'], 's1');
       expect(find.text('Check-out registrado.'), findsOneWidget);
       expect(repository.fetchCount, 2);
-    },
-  );
-
-  testWidgets(
-    'shows a generic failure message when check-out fails with a plain '
-    'DioException (e.g. the 422 NO_OPEN_CHECKIN case), not the room picker',
-    (tester) async {
-      final api = _FakeExecutionApi(
-        checkOutError: DioException(
-          requestOptions: RequestOptions(path: '/check-outs'),
-          response: Response(
-            requestOptions: RequestOptions(path: '/check-outs'),
-            statusCode: 422,
-          ),
-        ),
-      );
-      await tester.pumpWidget(
-        _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
-          locationService: _FakeLocationService(),
-          executionApi: api,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tapConcluirAndScan(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('Não foi possível registrar o check-out.'),
-        findsOneWidget,
-      );
-      expect(
-        find.text('Vários pontos correspondem — escolha o certo:'),
-        findsNothing,
-      );
-    },
-  );
-
-  testWidgets(
-    'on AmbiguousRoomException from check-out, shows the room picker and '
-    'retries with the chosen routeStopId and the same '
-    'checkoutIdempotencyKey',
-    (tester) async {
-      // Ruling 16: rare in practice (check-out already sends its own stop
-      // as routeStopId from the first attempt) but handled the same as
-      // check-in's ambiguity by defense in depth.
-      final api = _FakeExecutionApi(
-        checkOutError: const AmbiguousRoomException([
-          RoomCandidate(
-            routeStopId: 's1',
-            servicePointId: 'sp1',
-            name: 'Sala 101',
-            distanceM: 1,
-          ),
-        ]),
-      );
-      await tester.pumpWidget(
-        _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
-          locationService: _FakeLocationService(),
-          executionApi: api,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tapConcluirAndScan(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('Vários pontos correspondem — escolha o certo:'),
-        findsOneWidget,
-      );
-      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
-      await tester.pumpAndSettle();
-
-      expect(api.checkOutIdempotencyKeys, hasLength(2));
-      expect(api.checkOutIdempotencyKeys[0], api.checkOutIdempotencyKeys[1]);
-      expect(find.text('Check-out registrado.'), findsOneWidget);
     },
   );
 
@@ -1556,20 +1354,19 @@ void main() {
   );
 
   testWidgets(
-    'tapping "Adicionar foto" captures, uploads the photo and shows success',
+    'tapping "Adicionar foto" captures, enqueues the photo and shows success',
     (tester) async {
-      final evidenceApi = _FakeEvidenceApi();
+      final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
-          evidenceApi: evidenceApi,
+          localWriteStore: store,
           evidenceCapture: _FakeEvidenceCapture(
-            photo: CapturedPhoto(
-              bytes: Uint8List.fromList([1, 2, 3]),
-              sha256: 'abc123',
-            ),
+            // A real (1x1) PNG — the pending row renders as an Image.memory
+            // thumbnail in the evidence list, which decodes eagerly.
+            photo: CapturedPhoto(bytes: _onePixelPng, sha256: 'abc123'),
           ),
         ),
       );
@@ -1578,7 +1375,11 @@ void main() {
       await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
       await tester.pumpAndSettle();
 
-      expect(evidenceApi.uploadedPhotoExecutionIds, ['exec-1']);
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.evidencePhoto);
+      expect(rows.single.payload['execution_id'], 'exec-1');
+      expect(rows.single.payload['sha256'], 'abc123');
       expect(find.text('Foto adicionada.'), findsOneWidget);
     },
   );
@@ -1611,38 +1412,11 @@ void main() {
     },
   );
 
-  testWidgets(
-    'shows a failure snackbar when the photo upload fails',
-    (tester) async {
-      final evidenceApi = _FakeEvidenceApi(
-        uploadPhotoError: DioException(
-          requestOptions: RequestOptions(
-            path: '/executions/exec-1/evidence/photo',
-          ),
-        ),
-      );
-      await tester.pumpWidget(
-        _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
-          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
-          executionApi: _FakeExecutionApi(),
-          evidenceApi: evidenceApi,
-          evidenceCapture: _FakeEvidenceCapture(
-            photo: CapturedPhoto(
-              bytes: Uint8List.fromList([1, 2, 3]),
-              sha256: 'abc123',
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Não foi possível adicionar a foto.'), findsOneWidget);
-    },
-  );
+  // NOTE (Etapa 6 Task 8): "failure snackbar when the photo/note upload
+  // fails" tests were removed — the repository enqueues and returns, it no
+  // longer awaits the upload, so an upload failure can't surface here. The
+  // SyncWorker classifies and surfaces dispatch failures now
+  // (sync_worker_test.dart); Task 10 adds the per-stop "blocked" indicator.
 
   testWidgets(
     'shows a failure snackbar when the camera itself throws (e.g. '
@@ -1671,51 +1445,16 @@ void main() {
   );
 
   testWidgets(
-    'shows a failure snackbar when the note upload fails',
+    'tapping "Adicionar observação" opens a dialog and "Salvar" enqueues '
+    'the note',
     (tester) async {
-      final evidenceApi = _FakeEvidenceApi(
-        uploadNoteError: DioException(
-          requestOptions: RequestOptions(
-            path: '/executions/exec-1/evidence/note',
-          ),
-        ),
-      );
+      final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
           _StaticRouteRepository([inProgressStopRoute()]),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
-          evidenceApi: evidenceApi,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(
-        find.widgetWithText(TextButton, 'Adicionar observação'),
-      );
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), 'Sala trancada.');
-      await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('Não foi possível adicionar a observação.'),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets(
-    'tapping "Adicionar observação" opens a dialog and "Salvar" uploads the '
-    'note',
-    (tester) async {
-      final evidenceApi = _FakeEvidenceApi();
-      await tester.pumpWidget(
-        _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
-          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
-          executionApi: _FakeExecutionApi(),
-          evidenceApi: evidenceApi,
+          localWriteStore: store,
         ),
       );
       await tester.pumpAndSettle();
@@ -1730,7 +1469,10 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
       await tester.pumpAndSettle();
 
-      expect(evidenceApi.uploadedNoteTexts, ['Sala trancada.']);
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.evidenceNote);
+      expect(rows.single.payload['text_body'], 'Sala trancada.');
       expect(find.text('Observação adicionada.'), findsOneWidget);
     },
   );
