@@ -18,6 +18,7 @@ import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -33,19 +34,25 @@ import 'no_tiles_tile_provider.dart';
 /// repository fires this fire-and-forget after each enqueue (spec Ruling 2);
 /// RouteScreen tests only care that the enqueue happened, not the network.
 class _RecordingSyncWorker implements SyncWorker {
+  _RecordingSyncWorker({this.statusStream});
+
+  final Stream<RouteSyncStatus>? statusStream;
   final List<String> syncedRoutes = [];
+  final List<String> unblocked = [];
+  int syncAllCount = 0;
 
   @override
   Future<void> syncRoute(String routeId) async => syncedRoutes.add(routeId);
 
   @override
-  Future<void> syncAll() async {}
+  Future<void> syncAll() async => syncAllCount++;
 
   @override
-  Stream<RouteSyncStatus> statusFor(String routeId) => const Stream.empty();
+  Stream<RouteSyncStatus> statusFor(String routeId) =>
+      statusStream ?? const Stream.empty();
 
   @override
-  Future<void> unblock(String operationId) async {}
+  Future<void> unblock(String operationId) async => unblocked.add(operationId);
 
   @override
   Future<void> dispose() async {}
@@ -316,8 +323,13 @@ class _InMemoryLocalWriteStore implements LocalWriteStore {
   }) => throw UnimplementedError();
 
   @override
-  Future<List<PendingOperationRow>> blockedForRoute(String routeId) =>
-      throw UnimplementedError();
+  Future<List<PendingOperationRow>> blockedForRoute(String routeId) async =>
+      _rows.values
+          .where(
+            (r) => r.routeId == routeId && r.state == PendingOpState.blocked,
+          )
+          .toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
   @override
   Future<List<PendingOperationRow>> dueForRoute(
@@ -329,7 +341,20 @@ class _InMemoryLocalWriteStore implements LocalWriteStore {
   Future<List<String>> routeIdsWithWork() => throw UnimplementedError();
 
   @override
-  Future<void> resetToPending(String id) => throw UnimplementedError();
+  Future<void> resetToPending(String id) async {
+    final row = _rows[id]!;
+    _rows[id] = PendingOperationRow(
+      id: row.id,
+      kind: row.kind,
+      routeId: row.routeId,
+      payload: row.payload,
+      createdAt: row.createdAt,
+      state: PendingOpState.pending,
+      lastError: null,
+      attempts: 0,
+      nextAttemptAt: null,
+    );
+  }
 }
 
 /// A no-op StopProgressStore — always reports no progress (`null`), so a plain
@@ -603,6 +628,7 @@ Widget _screenWith(
   StopProgressStore? stopProgressStore,
   LocalWriteStore? localWriteStore,
   SyncMetaStore? syncMetaStore,
+  SyncWorker? syncWorker,
   String? apiBaseUrl,
   Session? session,
 }) {
@@ -616,9 +642,14 @@ Widget _screenWith(
   final resolvedEvidenceApi = evidenceApi ?? _NoopEvidenceApi();
   final resolvedLocalStore = localWriteStore ?? _InMemoryLocalWriteStore();
   final resolvedSyncMeta = syncMetaStore ?? _InMemorySyncMetaStore();
+  // Always overridden: the sync banner watches `routeSyncStatusProvider` on
+  // every render now, and building the real `SyncWorker` reaches
+  // `apiBaseUrlFromEnvironment()` (no `--dart-define` under flutter_test).
+  final resolvedSyncWorker = syncWorker ?? _RecordingSyncWorker();
   return ProviderScope(
     overrides: [
       routeRepositoryProvider.overrideWithValue(repository),
+      syncWorkerProvider.overrideWithValue(resolvedSyncWorker),
       if (locationService != null)
         locationServiceProvider.overrideWithValue(locationService),
       stopProgressStoreProvider.overrideWithValue(resolvedOpenExecutions),
@@ -644,7 +675,7 @@ Widget _screenWith(
             resolvedLocalStore,
             resolvedOpenExecutions,
             resolvedSyncMeta,
-            _RecordingSyncWorker(),
+            resolvedSyncWorker,
           ),
         ),
     ],
@@ -929,6 +960,9 @@ void main() {
         overrides: [
           routeRepositoryProvider.overrideWithValue(_FakeRouteRepository()),
           syncMetaStoreProvider.overrideWithValue(_InMemorySyncMetaStore()),
+          syncWorkerProvider.overrideWithValue(_RecordingSyncWorker()),
+          stopProgressStoreProvider.overrideWithValue(_NoopStopProgressStore()),
+          localWriteStoreProvider.overrideWithValue(_InMemoryLocalWriteStore()),
         ],
         child: MaterialApp(
           home: RouteScreen(mapTileProvider: NoTilesTileProvider()),
@@ -1848,6 +1882,167 @@ void main() {
         expect(provider.url, 'http://test-base/evidence/e1/content');
         expect(provider.headers, isNull);
       });
+    },
+  );
+
+  RouteSyncStatus statusOf({
+    RouteSyncState state = RouteSyncState.idle,
+    int pending = 0,
+    int blocked = 0,
+  }) => RouteSyncStatus(
+    routeId: 'r1',
+    state: state,
+    pending: pending,
+    blocked: blocked,
+  );
+
+  testWidgets(
+    'a local IN_PROGRESS StopProgress overrides a server PENDING stop — the '
+    'tile renders the in-progress affordances (Concluir + evidence)',
+    (tester) async {
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressRoute()]),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.widgetWithText(TextButton, 'Concluir'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, 'Adicionar foto'), findsOneWidget);
+      expect(find.byIcon(Icons.check_circle), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'two pending outbox rows render the "aguardando sincronização" banner and '
+    '"Sincronizar agora" calls syncAll',
+    (tester) async {
+      final worker = _RecordingSyncWorker(
+        statusStream: Stream<RouteSyncStatus>.value(statusOf(pending: 2)),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressRoute()]),
+          syncWorker: worker,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('2 ações aguardando sincronização'),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Sincronizar agora'),
+      );
+      await tester.pumpAndSettle();
+      expect(worker.syncAllCount, 1);
+    },
+  );
+
+  testWidgets(
+    'an idle status with nothing pending renders "Tudo sincronizado" and no '
+    'waiting banner',
+    (tester) async {
+      final worker = _RecordingSyncWorker(
+        statusStream: Stream<RouteSyncStatus>.value(statusOf()),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressRoute()]),
+          syncWorker: worker,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tudo sincronizado'), findsOneWidget);
+      expect(find.textContaining('aguardando sincronização'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'a blocked status renders the "Sincronização bloqueada" banner and '
+    'tapping it pushes BlockedSyncScreen',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await store.enqueue(
+        id: 'op-1',
+        kind: PendingOpKind.checkIn,
+        routeId: 'r1',
+        payload: {'route_stop_id': 's1'},
+      );
+      await store.markBlocked('op-1', 'HTTP 422');
+      final worker = _RecordingSyncWorker(
+        statusStream: Stream<RouteSyncStatus>.value(
+          statusOf(state: RouteSyncState.blocked, blocked: 1),
+        ),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressRoute()]),
+          syncWorker: worker,
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Sincronização bloqueada — toque para ver'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Sincronização bloqueada — toque para ver'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BlockedSyncScreen), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'a stop with a pending check-in row shows the "Pendente" chip; a stop '
+    'with no rows shows none',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await store.enqueue(
+        id: 'op-1',
+        kind: PendingOpKind.checkIn,
+        routeId: 'r1',
+        payload: {'route_stop_id': 's1'},
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([
+            _routeWith(
+              status: 'IN_PROGRESS',
+              startedAt: DateTime(2026, 8, 25, 8),
+              stops: const [
+                RouteStopSummary(
+                  id: 's1',
+                  orderIndex: 1,
+                  status: 'PENDING',
+                  servicePointName: 'Sala 101',
+                  latitude: -7.21,
+                  longitude: -35.91,
+                  pointType: 'REGULAR',
+                ),
+                RouteStopSummary(
+                  id: 's2',
+                  orderIndex: 2,
+                  status: 'PENDING',
+                  servicePointName: 'Sala 102',
+                  latitude: -7.22,
+                  longitude: -35.92,
+                  pointType: 'REGULAR',
+                ),
+              ],
+            ),
+          ]),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pendente'), findsOneWidget);
+      expect(find.text('Bloqueado'), findsNothing);
     },
   );
 }

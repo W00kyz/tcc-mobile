@@ -11,10 +11,13 @@ import 'package:route_monitor/execution/room_resolution.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart'
     show StopLocalStatus;
+import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/sync/sync_providers.dart';
+import 'package:route_monitor/sync/sync_status.dart';
 import 'package:uuid/uuid.dart';
 
 const _uuid = Uuid();
@@ -93,6 +96,8 @@ class RouteScreen extends ConsumerWidget {
               children: [
                 _RouteHeader(route: route, started: started),
                 const SizedBox(height: 12),
+                _SyncBanner(routeId: route.id),
+                const SizedBox(height: 12),
                 FilledButton.tonal(
                   onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
@@ -109,18 +114,7 @@ class RouteScreen extends ConsumerWidget {
                   child: ListView(
                     children: [
                       for (final stop in route.stops)
-                        _StopTile(
-                          stop: stop,
-                          onConcluir: stop.status == 'IN_PROGRESS'
-                              ? () => _checkOut(context, ref, route, stop)
-                              : null,
-                          evidenceSection: stop.status == 'IN_PROGRESS'
-                              ? _StopEvidenceSection(
-                                  routeId: route.id,
-                                  routeStopId: stop.id,
-                                )
-                              : null,
-                        ),
+                        _buildStopRow(context, ref, route, stop),
                     ],
                   ),
                 ),
@@ -139,6 +133,40 @@ class RouteScreen extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+
+  /// Builds one stop's tile with its *effective* status (spec Ruling 5): a
+  /// local `done` beats a local `inProgress` beats the server `stop.status`,
+  /// so a not-yet-synced check-in/out shows on the tile immediately. The
+  /// `ref.watch` lives here (a `ConsumerWidget`) so `_StopTile` itself stays
+  /// a plain, ref-free `StatelessWidget`.
+  Widget _buildStopRow(
+    BuildContext context,
+    WidgetRef ref,
+    RouteSummary route,
+    RouteStopSummary stop,
+  ) {
+    final progress = ref.watch(stopProgressForProvider(stop.id)).asData?.value;
+    final effectiveStatus = switch (progress?.status) {
+      StopLocalStatus.done => 'DONE',
+      StopLocalStatus.inProgress => 'IN_PROGRESS',
+      null => stop.status,
+    };
+    final syncChip =
+        ref.watch(stopSyncChipProvider((route.id, stop.id))).asData?.value ??
+        StopSyncChip.none;
+    final inProgress = effectiveStatus == 'IN_PROGRESS';
+    return _StopTile(
+      stop: stop,
+      effectiveStatus: effectiveStatus,
+      syncChip: syncChip,
+      onConcluir: inProgress
+          ? () => _checkOut(context, ref, route, stop)
+          : null,
+      evidenceSection: inProgress
+          ? _StopEvidenceSection(routeId: route.id, routeStopId: stop.id)
+          : null,
     );
   }
 
@@ -356,10 +384,112 @@ class _RouteHeader extends StatelessWidget {
   }
 }
 
+/// The top-of-screen sync banner (spec Ruling 5). Renders nothing while the
+/// status stream has not emitted yet (`.loading`/`.error`).
+class _SyncBanner extends ConsumerWidget {
+  const _SyncBanner({required this.routeId});
+
+  final String routeId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final status = ref.watch(routeSyncStatusProvider(routeId)).asData?.value;
+    if (status == null) return const SizedBox.shrink();
+
+    if (status.state == RouteSyncState.blocked || status.blocked > 0) {
+      final scheme = Theme.of(context).colorScheme;
+      return InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => BlockedSyncScreen(routeId: routeId),
+          ),
+        ),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          color: scheme.errorContainer,
+          child: Row(
+            children: [
+              Icon(Icons.sync_problem, color: scheme.onErrorContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Sincronização bloqueada — toque para ver',
+                  style: TextStyle(color: scheme.onErrorContainer),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (status.pending > 0) {
+      return Row(
+        children: [
+          Expanded(
+            child: Text('${status.pending} ações aguardando sincronização'),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonal(
+            onPressed: () => ref.read(syncWorkerProvider).syncAll(),
+            child: const Text('Sincronizar agora'),
+          ),
+        ],
+      );
+    }
+
+    return const Row(
+      children: [
+        Icon(Icons.cloud_done, size: 16, color: Colors.green),
+        SizedBox(width: 8),
+        Text('Tudo sincronizado'),
+      ],
+    );
+  }
+}
+
+/// A compact inline chip flagging a stop's outbox state — amber "Pendente"
+/// for a not-yet-synced row, red "Bloqueado" for a hard-blocked one. Matches
+/// the evidence sync icons' colours (`Colors.orange` / `Colors.red`).
+class _StopSyncChipLabel extends StatelessWidget {
+  const _StopSyncChipLabel(this.chip);
+
+  final StopSyncChip chip;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (chip) {
+      StopSyncChip.pending => ('Pendente', Colors.orange),
+      StopSyncChip.blocked => ('Bloqueado', Colors.red),
+      StopSyncChip.none => ('', Colors.transparent),
+    };
+    return Chip(
+      label: Text(label, style: TextStyle(color: color)),
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+}
+
 class _StopTile extends StatelessWidget {
-  const _StopTile({required this.stop, this.onConcluir, this.evidenceSection});
+  const _StopTile({
+    required this.stop,
+    required this.effectiveStatus,
+    this.syncChip = StopSyncChip.none,
+    this.onConcluir,
+    this.evidenceSection,
+  });
 
   final RouteStopSummary stop;
+
+  /// The status actually rendered — a local optimistic override of
+  /// `stop.status` (spec Ruling 5), resolved by `RouteScreen._buildStopRow`.
+  final String effectiveStatus;
+
+  /// Whether this stop has an unsynced (`pending`) or hard-`blocked` outbox
+  /// row, surfaced as a small inline chip next to the stop name.
+  final StopSyncChip syncChip;
 
   /// The "Concluir" (check-out) action for this stop, or null to hide the
   /// button. RouteScreen passes a callback only for an `IN_PROGRESS` stop —
@@ -375,7 +505,7 @@ class _StopTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDone = stop.status == 'DONE';
+    final isDone = effectiveStatus == 'DONE';
     final window = _formatWindow(
       stop.expectedArrivalFrom,
       stop.expectedArrivalTo,
@@ -403,6 +533,11 @@ class _StopTile extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Expanded(child: Text(stop.servicePointName)),
+              if (syncChip != StopSyncChip.none)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8),
+                  child: _StopSyncChipLabel(syncChip),
+                ),
               if (stop.pointType == 'OCCASIONAL')
                 const Padding(
                   padding: EdgeInsets.only(left: 8),
