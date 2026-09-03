@@ -43,6 +43,14 @@ jobs:
       - name: Test with coverage
         run: flutter test --coverage
 
+      # Etapa 6 deliverable proof (RF35): the whole-route offline->sync
+      # integration test. It is a widget-level test on the Live binding — it
+      # runs headless in the same job, no emulator, NOT `flutter drive`. The
+      # step above already covers it (it lives under test/); this dedicated
+      # run is a named signal so an integration regression is obvious.
+      - name: Integration test (offline route -> sync)
+        run: flutter test test/integration/offline_route_test.dart
+
       # RNF20: 70% nas regras de negócio críticas. Nesta etapa só existe o shell,
       # então o corte é trivial de atingir — o que importa é o portão existir desde
       # o começo, para a dívida nunca acumular.

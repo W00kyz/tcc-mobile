@@ -42,6 +42,12 @@ dev_dependencies:
   drift_dev: 2.34.0
   flutter_test:
     sdk: flutter
+  # Declares this repo has an integration suite (test/integration/). The
+  # suite itself does NOT import package:integration_test — see
+  # test/integration/offline_route_test.dart for why (that binding forces
+  # `flutter test` onto a device).
+  integration_test:
+    sdk: flutter
   mocktail: 1.0.5
   very_good_analysis: 10.3.0
 
