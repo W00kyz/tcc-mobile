@@ -193,13 +193,15 @@ class _FakeExecutionApi implements ExecutionApi {
   String? lastCheckOutRouteStopId;
 
   @override
-  Future<CheckInResult> checkIn({
+  Future<({CheckInResult result, DateTime? serverDate})> checkIn({
+    required String executionId,
     required String qrPayload,
     required DateTime scannedAt,
     required String idempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
   }) async {
     qrPayloads.add(qrPayload);
     checkInRouteStopIds.add(routeStopId);
@@ -211,22 +213,27 @@ class _FakeExecutionApi implements ExecutionApi {
       error = null;
       throw toThrow;
     }
-    return const CheckInResult(
-      routeStopId: 's1',
-      executionId: 'exec-1',
-      geoValidation: 'INSIDE',
-      flags: [],
+    return (
+      result: const CheckInResult(
+        routeStopId: 's1',
+        executionId: 'exec-1',
+        geoValidation: 'INSIDE',
+        flags: [],
+      ),
+      serverDate: null,
     );
   }
 
   @override
-  Future<CheckOutResult> checkOut({
+  Future<({CheckOutResult result, DateTime? serverDate})> checkOut({
+    required String executionId,
     required String qrPayload,
     required DateTime scannedAt,
     required String checkoutIdempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
   }) async {
     qrPayloads.add(qrPayload);
     checkOutIdempotencyKeys.add(checkoutIdempotencyKey);
@@ -238,11 +245,14 @@ class _FakeExecutionApi implements ExecutionApi {
       checkOutError = null;
       throw toThrow;
     }
-    return CheckOutResult(
-      routeStopId: routeStopId ?? 's1',
-      executionId: 'exec-1',
-      checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
-      flags: const [],
+    return (
+      result: CheckOutResult(
+        routeStopId: routeStopId ?? 's1',
+        executionId: 'exec-1',
+        checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
+        flags: const [],
+      ),
+      serverDate: null,
     );
   }
 }
@@ -333,6 +343,9 @@ class _InMemoryLocalWriteStore implements LocalWriteStore {
 
   @override
   Future<List<String>> routeIdsWithWork() => throw UnimplementedError();
+
+  @override
+  Future<void> resetToPending(String id) => throw UnimplementedError();
 }
 
 /// A no-op StopProgressStore — always reports no progress (`null`), so a plain
@@ -411,19 +424,21 @@ class _FakeStopProgressStore implements StopProgressStore {
 /// evidence upload/list path.
 class _NoopEvidenceApi implements EvidenceApi {
   @override
-  Future<void> uploadNote({
+  Future<DateTime?> uploadNote({
     required String executionId,
     required String textBody,
     required DateTime capturedAt,
-  }) async {}
+    required String idempotencyKey,
+  }) async => null;
 
   @override
-  Future<void> uploadPhoto({
+  Future<DateTime?> uploadPhoto({
     required String executionId,
     required Uint8List bytes,
     required String sha256,
     required DateTime capturedAt,
-  }) async {}
+    required String idempotencyKey,
+  }) async => null;
 
   @override
   Future<List<EvidenceItem>> listEvidence(String executionId) async => [];
@@ -446,11 +461,12 @@ class _FakeEvidenceApi implements EvidenceApi {
   final List<String> uploadedNoteTexts = [];
 
   @override
-  Future<void> uploadPhoto({
+  Future<DateTime?> uploadPhoto({
     required String executionId,
     required Uint8List bytes,
     required String sha256,
     required DateTime capturedAt,
+    required String idempotencyKey,
   }) async {
     uploadedPhotoExecutionIds.add(executionId);
     if (uploadPhotoError != null) {
@@ -458,13 +474,15 @@ class _FakeEvidenceApi implements EvidenceApi {
       uploadPhotoError = null;
       throw toThrow;
     }
+    return null;
   }
 
   @override
-  Future<void> uploadNote({
+  Future<DateTime?> uploadNote({
     required String executionId,
     required String textBody,
     required DateTime capturedAt,
+    required String idempotencyKey,
   }) async {
     uploadedNoteTexts.add(textBody);
     if (uploadNoteError != null) {
@@ -472,6 +490,7 @@ class _FakeEvidenceApi implements EvidenceApi {
       uploadNoteError = null;
       throw toThrow;
     }
+    return null;
   }
 
   @override

@@ -24,45 +24,55 @@ class _FakeExecutionApi implements ExecutionApi {
   final List<String> capturedCheckoutIdempotencyKeys = [];
 
   @override
-  Future<CheckInResult> checkIn({
+  Future<({CheckInResult result, DateTime? serverDate})> checkIn({
+    required String executionId,
     required String qrPayload,
     required DateTime scannedAt,
     required String idempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
   }) async {
     callCount++;
     capturedIdempotencyKeys.add(idempotencyKey);
     _log.add('api:$idempotencyKey');
-    if (_checkInImpl != null) return _checkInImpl();
-    return const CheckInResult(
-      routeStopId: 'stop-1',
-      executionId: 'exec-1',
-      geoValidation: 'INSIDE',
-      flags: [],
-    );
+    final impl = _checkInImpl;
+    final result = impl != null
+        ? await impl()
+        : const CheckInResult(
+            routeStopId: 'stop-1',
+            executionId: 'exec-1',
+            geoValidation: 'INSIDE',
+            flags: [],
+          );
+    return (result: result, serverDate: null);
   }
 
   @override
-  Future<CheckOutResult> checkOut({
+  Future<({CheckOutResult result, DateTime? serverDate})> checkOut({
+    required String executionId,
     required String qrPayload,
     required DateTime scannedAt,
     required String checkoutIdempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
   }) async {
     callCount++;
     capturedCheckoutIdempotencyKeys.add(checkoutIdempotencyKey);
     _log.add('api:$checkoutIdempotencyKey');
-    if (_checkOutImpl != null) return _checkOutImpl();
-    return CheckOutResult(
-      routeStopId: 'stop-1',
-      executionId: 'exec-1',
-      checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
-      flags: const [],
-    );
+    final impl = _checkOutImpl;
+    final result = impl != null
+        ? await impl()
+        : CheckOutResult(
+            routeStopId: 'stop-1',
+            executionId: 'exec-1',
+            checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
+            flags: const [],
+          );
+    return (result: result, serverDate: null);
   }
 }
 
@@ -149,6 +159,9 @@ class _FakeLocalWriteStore implements LocalWriteStore {
 
   @override
   Future<List<String>> routeIdsWithWork() => throw UnimplementedError();
+
+  @override
+  Future<void> resetToPending(String id) => throw UnimplementedError();
 }
 
 extension on PendingOperationRow {
@@ -180,11 +193,12 @@ class _FakeEvidenceApi implements EvidenceApi {
   String? lastNoteText;
 
   @override
-  Future<void> uploadPhoto({
+  Future<DateTime?> uploadPhoto({
     required String executionId,
     required Uint8List bytes,
     required String sha256,
     required DateTime capturedAt,
+    required String idempotencyKey,
   }) async {
     uploadedPhotoExecutionIds.add(executionId);
     lastPhotoSha256 = sha256;
@@ -193,13 +207,15 @@ class _FakeEvidenceApi implements EvidenceApi {
       uploadPhotoError = null;
       throw toThrow;
     }
+    return null;
   }
 
   @override
-  Future<void> uploadNote({
+  Future<DateTime?> uploadNote({
     required String executionId,
     required String textBody,
     required DateTime capturedAt,
+    required String idempotencyKey,
   }) async {
     uploadedNoteExecutionIds.add(executionId);
     lastNoteText = textBody;
@@ -208,6 +224,7 @@ class _FakeEvidenceApi implements EvidenceApi {
       uploadNoteError = null;
       throw toThrow;
     }
+    return null;
   }
 
   @override

@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:route_monitor/execution/execution_api.dart'
+    show parseServerDate;
 
 /// One evidence item as the backend returns it (`EvidenceItemOut`,
 /// `GET /executions/{execution_id}/evidence`).
@@ -42,17 +44,23 @@ class EvidenceItem {
 // (docs/CLAUDE.base.md — Dependencies: "wrap third-party libs behind a thin
 // interface"), same discipline as ExecutionApi.
 abstract class EvidenceApi {
-  Future<void> uploadPhoto({
+  /// Returns the response's `Date` header (null when absent/unparseable) so
+  /// the sync worker can measure the clock offset (spec Ruling 7).
+  /// [idempotencyKey] is the app-generated UUID the backend dedupes on
+  /// (spec Ruling 8) — a known key returns `200` with the existing item.
+  Future<DateTime?> uploadPhoto({
     required String executionId,
     required Uint8List bytes,
     required String sha256,
     required DateTime capturedAt,
+    required String idempotencyKey,
   });
 
-  Future<void> uploadNote({
+  Future<DateTime?> uploadNote({
     required String executionId,
     required String textBody,
     required DateTime capturedAt,
+    required String idempotencyKey,
   });
 
   Future<List<EvidenceItem>> listEvidence(String executionId);
@@ -64,35 +72,41 @@ class DioEvidenceApi implements EvidenceApi {
   final Dio _dio;
 
   @override
-  Future<void> uploadPhoto({
+  Future<DateTime?> uploadPhoto({
     required String executionId,
     required Uint8List bytes,
     required String sha256,
     required DateTime capturedAt,
-  }) {
-    return _dio.post<void>(
+    required String idempotencyKey,
+  }) async {
+    final response = await _dio.post<void>(
       '/executions/$executionId/evidence/photo',
       data: FormData.fromMap({
         'file': MultipartFile.fromBytes(bytes, filename: 'evidence.jpg'),
         'sha256': sha256,
         'captured_at': capturedAt.toUtc().toIso8601String(),
+        'idempotency_key': idempotencyKey,
       }),
     );
+    return parseServerDate(response.headers);
   }
 
   @override
-  Future<void> uploadNote({
+  Future<DateTime?> uploadNote({
     required String executionId,
     required String textBody,
     required DateTime capturedAt,
-  }) {
-    return _dio.post<void>(
+    required String idempotencyKey,
+  }) async {
+    final response = await _dio.post<void>(
       '/executions/$executionId/evidence/note',
       data: {
         'text_body': textBody,
         'captured_at': capturedAt.toUtc().toIso8601String(),
+        'idempotency_key': idempotencyKey,
       },
     );
+    return parseServerDate(response.headers);
   }
 
   @override

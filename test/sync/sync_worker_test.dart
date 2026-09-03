@@ -1,0 +1,575 @@
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:dio/dio.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/execution/evidence_api.dart';
+import 'package:route_monitor/execution/execution_api.dart';
+import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/sync/sync_status.dart';
+import 'package:route_monitor/sync/sync_worker.dart';
+
+import '../support/fake_connectivity.dart';
+
+DioException _dio({DioExceptionType? type, int? status, Object? body}) {
+  final options = RequestOptions(path: '/x');
+  return DioException(
+    requestOptions: options,
+    type: type ?? DioExceptionType.unknown,
+    response: status == null
+        ? null
+        : Response<dynamic>(
+            requestOptions: options,
+            statusCode: status,
+            data: body,
+          ),
+  );
+}
+
+class _FakeExecutionApi implements ExecutionApi {
+  _FakeExecutionApi(this.log);
+
+  final List<String> log;
+  Exception? checkInError;
+  Exception? checkOutError;
+  bool consumeError = true;
+  DateTime? serverDate;
+  double? lastClientClockOffset;
+
+  @override
+  Future<({CheckInResult result, DateTime? serverDate})> checkIn({
+    required String executionId,
+    required String qrPayload,
+    required DateTime scannedAt,
+    required String idempotencyKey,
+    double? latitude,
+    double? longitude,
+    String? routeStopId,
+    double? clientClockOffsetSeconds,
+  }) async {
+    log.add('checkIn:$idempotencyKey');
+    lastClientClockOffset = clientClockOffsetSeconds;
+    final error = checkInError;
+    if (error != null) {
+      if (consumeError) checkInError = null;
+      throw error;
+    }
+    return (
+      result: const CheckInResult(
+        routeStopId: 'stop-1',
+        executionId: 'exec-1',
+        geoValidation: 'INSIDE',
+        flags: [],
+      ),
+      serverDate: serverDate,
+    );
+  }
+
+  @override
+  Future<({CheckOutResult result, DateTime? serverDate})> checkOut({
+    required String executionId,
+    required String qrPayload,
+    required DateTime scannedAt,
+    required String checkoutIdempotencyKey,
+    double? latitude,
+    double? longitude,
+    String? routeStopId,
+    double? clientClockOffsetSeconds,
+  }) async {
+    log.add('checkOut:$checkoutIdempotencyKey');
+    final error = checkOutError;
+    if (error != null) {
+      if (consumeError) checkOutError = null;
+      throw error;
+    }
+    return (
+      result: CheckOutResult(
+        routeStopId: 'stop-1',
+        executionId: 'exec-1',
+        checkedOutAt: DateTime.utc(2026),
+        flags: const [],
+      ),
+      serverDate: serverDate,
+    );
+  }
+}
+
+class _FakeEvidenceApi implements EvidenceApi {
+  _FakeEvidenceApi(this.log);
+
+  final List<String> log;
+  Exception? photoError;
+  DateTime? serverDate;
+
+  @override
+  Future<DateTime?> uploadPhoto({
+    required String executionId,
+    required Uint8List bytes,
+    required String sha256,
+    required DateTime capturedAt,
+    required String idempotencyKey,
+  }) async {
+    log.add('photo:$idempotencyKey');
+    final error = photoError;
+    if (error != null) {
+      photoError = null;
+      throw error;
+    }
+    return serverDate;
+  }
+
+  @override
+  Future<DateTime?> uploadNote({
+    required String executionId,
+    required String textBody,
+    required DateTime capturedAt,
+    required String idempotencyKey,
+  }) async {
+    log.add('note:$idempotencyKey');
+    return serverDate;
+  }
+
+  @override
+  Future<List<EvidenceItem>> listEvidence(String executionId) async => const [];
+}
+
+class _FakeStopProgressStore implements StopProgressStore {
+  final List<String> calls = [];
+  final Map<String, StopProgressEntry> rows = {};
+
+  @override
+  Future<void> upsertInProgress(String routeStopId, String executionId) async {
+    calls.add('inProgress:$routeStopId');
+    rows[routeStopId] = StopProgressEntry(
+      routeStopId: routeStopId,
+      executionId: executionId,
+      status: StopLocalStatus.inProgress,
+    );
+  }
+
+  @override
+  Future<void> markDone(String routeStopId) async {
+    calls.add('done:$routeStopId');
+    final existing = rows[routeStopId];
+    if (existing == null) return;
+    rows[routeStopId] = StopProgressEntry(
+      routeStopId: existing.routeStopId,
+      executionId: existing.executionId,
+      status: StopLocalStatus.done,
+    );
+  }
+
+  @override
+  Future<StopProgressEntry?> progressFor(String routeStopId) async =>
+      rows[routeStopId];
+
+  @override
+  Future<List<StopProgressEntry>> allForRoute(
+    Iterable<String> routeStopIds,
+  ) async => [for (final id in routeStopIds) ?rows[id]];
+}
+
+class _FakeSyncMetaStore implements SyncMetaStore {
+  double? offset;
+
+  @override
+  Future<double?> getClockOffsetSeconds() async => offset;
+
+  @override
+  Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
+}
+
+class _FakeLocalWriteStore implements LocalWriteStore {
+  final Map<String, PendingOperationRow> rows = {};
+
+  void seed(
+    String id, {
+    required PendingOpKind kind,
+    required int createdAt,
+    Map<String, dynamic>? payload,
+    String routeId = 'route-R',
+    PendingOpState state = PendingOpState.pending,
+  }) {
+    rows[id] = PendingOperationRow(
+      id: id,
+      kind: kind,
+      routeId: routeId,
+      payload: payload ?? _defaultPayload(id),
+      createdAt: createdAt,
+      state: state,
+      lastError: null,
+      attempts: 0,
+      nextAttemptAt: null,
+    );
+  }
+
+  static Map<String, dynamic> _defaultPayload(String id) => {
+    'execution_id': 'exec-$id',
+    'qr_payload': 'v1.floor.1.sig',
+    'scanned_at': DateTime.utc(2026).toIso8601String(),
+    'captured_at': DateTime.utc(2026).toIso8601String(),
+    'idempotency_key': id,
+    'checkout_idempotency_key': id,
+    'route_stop_id': 'stop-1',
+    'sha256': 'abc',
+    'bytes_b64': 'AAAA',
+    'text_body': 'nota',
+  };
+
+  PendingOperationRow _copy(
+    PendingOperationRow row, {
+    PendingOpState? state,
+    String? lastError,
+    int? attempts,
+    int? nextAttemptAt,
+    bool clearNextAttemptAt = false,
+  }) => PendingOperationRow(
+    id: row.id,
+    kind: row.kind,
+    routeId: row.routeId,
+    payload: row.payload,
+    createdAt: row.createdAt,
+    state: state ?? row.state,
+    lastError: lastError ?? row.lastError,
+    attempts: attempts ?? row.attempts,
+    nextAttemptAt: clearNextAttemptAt
+        ? null
+        : nextAttemptAt ?? row.nextAttemptAt,
+  );
+
+  @override
+  Future<void> enqueue({
+    required String id,
+    required PendingOpKind kind,
+    required Map<String, dynamic> payload,
+    required String routeId,
+  }) async => seed(
+    id,
+    kind: kind,
+    createdAt: rows.length,
+    payload: payload,
+    routeId: routeId,
+  );
+
+  @override
+  Future<void> markSynced(String id) async =>
+      rows[id] = _copy(rows[id]!, state: PendingOpState.synced);
+
+  @override
+  Future<void> markFailed(String id, String error) async => rows[id] = _copy(
+    rows[id]!,
+    state: PendingOpState.failed,
+    lastError: error,
+  );
+
+  @override
+  Future<void> markBlocked(String id, String error) async => rows[id] = _copy(
+    rows[id]!,
+    state: PendingOpState.blocked,
+    lastError: error,
+  );
+
+  @override
+  Future<void> markRetryScheduled(
+    String id, {
+    required int attempts,
+    required int nextAttemptAt,
+  }) async => rows[id] = _copy(
+    rows[id]!,
+    attempts: attempts,
+    nextAttemptAt: nextAttemptAt,
+  );
+
+  @override
+  Future<void> resetToPending(String id) async => rows[id] = _copy(
+    rows[id]!,
+    state: PendingOpState.pending,
+    attempts: 0,
+    clearNextAttemptAt: true,
+  );
+
+  List<PendingOperationRow> _sorted(Iterable<PendingOperationRow> it) =>
+      it.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+  @override
+  Future<List<PendingOperationRow>> unsyncedForRoute(String routeId) async =>
+      _sorted(
+        rows.values.where(
+          (r) =>
+              r.routeId == routeId &&
+              (r.state == PendingOpState.pending ||
+                  r.state == PendingOpState.failed),
+        ),
+      );
+
+  @override
+  Future<List<PendingOperationRow>> blockedForRoute(String routeId) async =>
+      _sorted(
+        rows.values.where(
+          (r) => r.routeId == routeId && r.state == PendingOpState.blocked,
+        ),
+      );
+
+  @override
+  Future<List<PendingOperationRow>> dueForRoute(
+    String routeId, {
+    required int now,
+  }) async => _sorted(
+    rows.values.where(
+      (r) =>
+          r.routeId == routeId &&
+          (r.state == PendingOpState.pending ||
+              r.state == PendingOpState.failed) &&
+          (r.nextAttemptAt == null || r.nextAttemptAt! <= now),
+    ),
+  );
+
+  @override
+  Future<List<String>> routeIdsWithWork() async => rows.values
+      .where((r) => r.state != PendingOpState.synced)
+      .map((r) => r.routeId)
+      .toSet()
+      .toList();
+}
+
+class _Harness {
+  _Harness() {
+    worker = SyncWorker(
+      store,
+      stopProgress,
+      syncMeta,
+      connectivity,
+      executionApi,
+      evidenceApi,
+      now: () => now,
+      random: _ZeroRandom(),
+    );
+  }
+
+  final log = <String>[];
+  late final store = _FakeLocalWriteStore();
+  final stopProgress = _FakeStopProgressStore();
+  final syncMeta = _FakeSyncMetaStore();
+  final connectivity = FakeConnectivity(isOnline: true);
+  late final executionApi = _FakeExecutionApi(log);
+  late final evidenceApi = _FakeEvidenceApi(log);
+  DateTime now = DateTime.utc(2026, 6, 1, 12);
+  late final SyncWorker worker;
+}
+
+/// Deterministic jitter so the backoff assertions can pin an exact value.
+class _ZeroRandom implements math.Random {
+  @override
+  int nextInt(int max) => 0;
+
+  @override
+  double nextDouble() => 0;
+
+  @override
+  bool nextBool() => false;
+}
+
+void main() {
+  test(
+    'drains a route FIFO: check-in, photo, check-out in createdAt order',
+    () async {
+      final h = _Harness();
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.evidencePhoto, createdAt: 2)
+        ..seed('c', kind: PendingOpKind.checkOut, createdAt: 3);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['checkIn:a', 'photo:b', 'checkOut:c']);
+      expect(
+        h.store.rows.values.map((r) => r.state),
+        everyElement(PendingOpState.synced),
+      );
+      expect(h.stopProgress.rows['stop-1']?.status, StopLocalStatus.done);
+    },
+  );
+
+  test(
+    'a soft error defers the row and stops the queue, then recovers',
+    () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(
+        type: DioExceptionType.connectionError,
+      );
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.checkOut, createdAt: 2);
+
+      await h.worker.syncRoute('route-R');
+
+      final row = h.store.rows['a']!;
+      expect(row.state, PendingOpState.failed);
+      expect(row.attempts, 1);
+      // backoff = min(1<<1, 60) = 2s, zero jitter.
+      expect(row.nextAttemptAt, h.now.millisecondsSinceEpoch + 2000);
+      expect(h.store.rows['b']!.state, PendingOpState.pending);
+      expect(h.log, ['checkIn:a']);
+
+      h.now = h.now.add(const Duration(seconds: 3));
+      await h.worker.syncRoute('route-R');
+
+      expect(
+        h.store.rows.values.map((r) => r.state),
+        everyElement(PendingOpState.synced),
+      );
+    },
+  );
+
+  test(
+    'a hard error blocks the row, halts the route, and emits blocked',
+    () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(status: 422);
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.checkOut, createdAt: 2);
+
+      final statuses = <RouteSyncStatus>[];
+      final sub = h.worker.statusFor('route-R').listen(statuses.add);
+      await Future<void>.delayed(Duration.zero);
+
+      await h.worker.syncRoute('route-R');
+      await Future<void>.delayed(Duration.zero);
+
+      expect(h.store.rows['a']!.state, PendingOpState.blocked);
+      expect(h.store.rows['a']!.lastError, contains('DioException'));
+      expect(h.store.rows['b']!.state, PendingOpState.pending);
+      expect(statuses.last.state, RouteSyncState.blocked);
+      expect(statuses.last.blocked, 1);
+
+      await sub.cancel();
+    },
+  );
+
+  test(
+    'an "already applied" 409 counts as success and the queue continues',
+    () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(
+        status: 409,
+        body: {'detail': 'Route already started'},
+      );
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.evidencePhoto, createdAt: 2);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.store.rows['a']!.state, PendingOpState.synced);
+      expect(h.store.rows['b']!.state, PendingOpState.synced);
+      expect(h.log, ['checkIn:a', 'photo:b']);
+    },
+  );
+
+  test('re-running a fully drained route makes zero API calls', () async {
+    final h = _Harness();
+    h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+    await h.worker.syncRoute('route-R');
+    h.log.clear();
+    await h.worker.syncRoute('route-R');
+
+    expect(h.log, isEmpty);
+  });
+
+  test(
+    'captures the clock offset from a successful response Date header',
+    () async {
+      final h = _Harness();
+      h.executionApi.serverDate = h.now.add(const Duration(seconds: 30));
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.syncMeta.offset, closeTo(30, 0.001));
+    },
+  );
+
+  test('sends the stored clock offset on the next check-in', () async {
+    final h = _Harness();
+    h.syncMeta.offset = -12.5;
+    h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+    await h.worker.syncRoute('route-R');
+
+    expect(h.executionApi.lastClientClockOffset, -12.5);
+  });
+
+  test('unblock resets a blocked row to a clean pending state', () async {
+    final h = _Harness();
+    h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+    await h.store.markBlocked('a', 'boom');
+    await h.store.markRetryScheduled('a', attempts: 4, nextAttemptAt: 999);
+
+    await h.worker.unblock('a');
+
+    final row = h.store.rows['a']!;
+    expect(row.state, PendingOpState.pending);
+    expect(row.attempts, 0);
+    expect(row.nextAttemptAt, isNull);
+  });
+
+  test(
+    'syncAll still drains an unblocked route when another is blocked',
+    () async {
+      final h = _Harness();
+      h.store
+        ..seed(
+          'a',
+          kind: PendingOpKind.checkIn,
+          createdAt: 1,
+          state: PendingOpState.blocked,
+        )
+        ..seed(
+          'b',
+          kind: PendingOpKind.checkIn,
+          createdAt: 2,
+          routeId: 'route-S',
+        );
+
+      await h.worker.syncAll();
+
+      expect(h.store.rows['a']!.state, PendingOpState.blocked);
+      expect(h.store.rows['b']!.state, PendingOpState.synced);
+    },
+  );
+
+  test(
+    'the fifth soft failure blocks the row instead of rescheduling',
+    () async {
+      final h = _Harness();
+      h.executionApi
+        ..consumeError = false
+        ..checkInError = _dio(status: 503);
+      h.store.seed(
+        'a',
+        kind: PendingOpKind.checkIn,
+        createdAt: 1,
+        state: PendingOpState.failed,
+      );
+      h.store.rows['a'] = PendingOperationRow(
+        id: 'a',
+        kind: PendingOpKind.checkIn,
+        routeId: 'route-R',
+        payload: _FakeLocalWriteStore._defaultPayload('a'),
+        createdAt: 1,
+        state: PendingOpState.failed,
+        lastError: 'prev',
+        attempts: 4,
+        nextAttemptAt: null,
+      );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.store.rows['a']!.state, PendingOpState.blocked);
+    },
+  );
+}

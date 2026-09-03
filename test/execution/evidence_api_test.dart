@@ -30,6 +30,7 @@ void main() {
       bytes: Uint8List.fromList([1, 2, 3]),
       sha256: 'deadbeef',
       capturedAt: DateTime.utc(2026, 8, 25, 8, 20),
+      idempotencyKey: 'idem-photo-1',
     );
 
     expect(captured.path, '/executions/exec-1/evidence/photo');
@@ -37,6 +38,7 @@ void main() {
     final fields = {for (final f in body.fields) f.key: f.value};
     expect(fields['sha256'], 'deadbeef');
     expect(fields['captured_at'], '2026-08-25T08:20:00.000Z');
+    expect(fields['idempotency_key'], 'idem-photo-1');
     expect(body.files.single.key, 'file');
     expect(body.files.single.value.filename, 'evidence.jpg');
   });
@@ -64,12 +66,14 @@ void main() {
       executionId: 'exec-1',
       textBody: 'Vazamento no teto.',
       capturedAt: DateTime.utc(2026, 8, 25, 8, 20),
+      idempotencyKey: 'idem-note-1',
     );
 
     expect(captured.path, '/executions/exec-1/evidence/note');
     final body = captured.data as Map;
     expect(body['text_body'], 'Vazamento no teto.');
     expect(body['captured_at'], '2026-08-25T08:20:00.000Z');
+    expect(body['idempotency_key'], 'idem-note-1');
   });
 
   test('listEvidence parses every EvidenceItemOut field', () async {

@@ -42,12 +42,16 @@ class ExecutionRepository {
     String? routeStopId,
   }) async {
     final key = idempotencyKey ?? _uuid.v4();
+    // The app now supplies the execution id (spec Ruling 8 / Etapa 6): a
+    // stable id per logical attempt, reused across a same-tap picker retry.
+    final executionId = _uuid.v4();
     final scannedAt = DateTime.now().toUtc();
     await _store.enqueue(
       id: key,
       kind: PendingOpKind.checkIn,
       routeId: routeId,
       payload: {
+        'execution_id': executionId,
         'qr_payload': qrPayload,
         'latitude': latitude,
         'longitude': longitude,
@@ -60,14 +64,15 @@ class ExecutionRepository {
     );
 
     try {
-      final result = await _api.checkIn(
+      final result = (await _api.checkIn(
+        executionId: executionId,
         qrPayload: qrPayload,
         latitude: latitude,
         longitude: longitude,
         scannedAt: scannedAt,
         idempotencyKey: key,
         routeStopId: routeStopId,
-      );
+      )).result;
       await _store.markSynced(key);
       // Ruling 17: the evidence endpoints need this execution_id and have no
       // other way to learn it — record it now while the response is at hand.
@@ -108,12 +113,14 @@ class ExecutionRepository {
     String? checkoutIdempotencyKey,
   }) async {
     final key = checkoutIdempotencyKey ?? _uuid.v4();
+    final executionId = _uuid.v4();
     final scannedAt = DateTime.now().toUtc();
     await _store.enqueue(
       id: key,
       kind: PendingOpKind.checkOut,
       routeId: routeId,
       payload: {
+        'execution_id': executionId,
         'qr_payload': qrPayload,
         'latitude': latitude,
         'longitude': longitude,
@@ -124,14 +131,15 @@ class ExecutionRepository {
     );
 
     try {
-      final result = await _api.checkOut(
+      final result = (await _api.checkOut(
+        executionId: executionId,
         qrPayload: qrPayload,
         latitude: latitude,
         longitude: longitude,
         scannedAt: scannedAt,
         checkoutIdempotencyKey: key,
         routeStopId: routeStopId,
-      );
+      )).result;
       await _store.markSynced(key);
       // Ruling 17 counterpart to checkIn's record above: the stop is
       // concluded, so the evidence buttons must stop being offered. Ruling 3:
@@ -170,6 +178,7 @@ class ExecutionRepository {
         'bytes_b64': base64Encode(photo.bytes),
         'sha256': photo.sha256,
         'captured_at': capturedAt.toIso8601String(),
+        'idempotency_key': key,
       },
     );
 
@@ -179,6 +188,7 @@ class ExecutionRepository {
         bytes: photo.bytes,
         sha256: photo.sha256,
         capturedAt: capturedAt,
+        idempotencyKey: key,
       );
       await _store.markSynced(key);
       // Deliberately broad: any upload failure marks the row failed so a
@@ -206,6 +216,7 @@ class ExecutionRepository {
         'execution_id': executionId,
         'text_body': text,
         'captured_at': capturedAt.toIso8601String(),
+        'idempotency_key': key,
       },
     );
 
@@ -214,6 +225,7 @@ class ExecutionRepository {
         executionId: executionId,
         textBody: text,
         capturedAt: capturedAt,
+        idempotencyKey: key,
       );
       await _store.markSynced(key);
       // Deliberately broad: same rationale as addPhoto above.
@@ -234,14 +246,15 @@ class ExecutionRepository {
       // knows check-in rows for now.
       if (row.kind != PendingOpKind.checkIn) continue;
       try {
-        final result = await _api.checkIn(
+        final result = (await _api.checkIn(
+          executionId: row.payload['execution_id'] as String? ?? _uuid.v4(),
           qrPayload: row.payload['qr_payload'] as String,
           latitude: (row.payload['latitude'] as num?)?.toDouble(),
           longitude: (row.payload['longitude'] as num?)?.toDouble(),
           scannedAt: DateTime.parse(row.payload['scanned_at'] as String),
           idempotencyKey: row.payload['idempotency_key'] as String,
           routeStopId: row.payload['route_stop_id'] as String?,
-        );
+        )).result;
         await _store.markSynced(row.id);
         // Same Ruling 17 bookkeeping as the primary checkIn path above — a
         // retry that succeeds here is a normal check-in success, not the

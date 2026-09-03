@@ -1,3 +1,5 @@
+import 'dart:io' show HttpDate;
+
 import 'package:dio/dio.dart';
 
 /// The backend's response to a successful check-in (`app/api/checkins.py`,
@@ -71,23 +73,43 @@ class CheckOutResult {
 // real HTTP client (docs/CLAUDE.base.md — Dependencies: "wrap third-party
 // libs behind a thin interface").
 abstract class ExecutionApi {
-  Future<CheckInResult> checkIn({
+  /// Returns the parsed body alongside the response's `Date` header
+  /// (`serverDate`, null when absent/unparseable) so the sync worker can
+  /// measure the device-vs-server clock offset (spec Ruling 7).
+  Future<({CheckInResult result, DateTime? serverDate})> checkIn({
+    required String executionId,
     required String qrPayload,
     required DateTime scannedAt,
     required String idempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
   });
 
-  Future<CheckOutResult> checkOut({
+  Future<({CheckOutResult result, DateTime? serverDate})> checkOut({
+    required String executionId,
     required String qrPayload,
     required DateTime scannedAt,
     required String checkoutIdempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
   });
+}
+
+/// The response's `Date` header parsed to a [DateTime], or null when the
+/// header is missing or not an RFC-1123 date. Shared by every method here and
+/// in `EvidenceApi` — the worker reads it once per successful dispatch.
+DateTime? parseServerDate(Headers headers) {
+  final raw = headers.value('date');
+  if (raw == null) return null;
+  try {
+    return HttpDate.parse(raw);
+  } on Exception {
+    return null;
+  }
 }
 
 class DioExecutionApi implements ExecutionApi {
@@ -96,32 +118,39 @@ class DioExecutionApi implements ExecutionApi {
   final Dio _dio;
 
   @override
-  Future<CheckInResult> checkIn({
+  Future<({CheckInResult result, DateTime? serverDate})> checkIn({
+    required String executionId,
     required String qrPayload,
     required DateTime scannedAt,
     required String idempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
   }) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/check-ins',
         data: {
+          'execution_id': executionId,
           'qr_payload': qrPayload,
           'latitude': latitude,
           'longitude': longitude,
           'scanned_at': scannedAt.toUtc().toIso8601String(),
           'idempotency_key': idempotencyKey,
           'route_stop_id': routeStopId,
+          'client_clock_offset_seconds': clientClockOffsetSeconds,
         },
       );
       final body = response.data!;
-      return CheckInResult(
-        routeStopId: body['route_stop_id'] as String,
-        executionId: body['execution_id'] as String,
-        geoValidation: body['geo_validation'] as String,
-        flags: (body['validation_flags'] as List).cast<String>(),
+      return (
+        result: CheckInResult(
+          routeStopId: body['route_stop_id'] as String,
+          executionId: body['execution_id'] as String,
+          geoValidation: body['geo_validation'] as String,
+          flags: (body['validation_flags'] as List).cast<String>(),
+        ),
+        serverDate: parseServerDate(response.headers),
       );
     } on DioException catch (e) {
       final candidates = _ambiguousRoomCandidates(e);
@@ -131,32 +160,42 @@ class DioExecutionApi implements ExecutionApi {
   }
 
   @override
-  Future<CheckOutResult> checkOut({
+  Future<({CheckOutResult result, DateTime? serverDate})> checkOut({
+    required String executionId,
     required String qrPayload,
     required DateTime scannedAt,
     required String checkoutIdempotencyKey,
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
   }) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/check-outs',
         data: {
+          // The backend accepts `execution_id` here for symmetry with
+          // check-in but ignores it (the open check-in already pins the
+          // execution) — still sent so the outbox payload shape is uniform.
+          'execution_id': executionId,
           'qr_payload': qrPayload,
           'latitude': latitude,
           'longitude': longitude,
           'scanned_at': scannedAt.toUtc().toIso8601String(),
           'checkout_idempotency_key': checkoutIdempotencyKey,
           'route_stop_id': routeStopId,
+          'client_clock_offset_seconds': clientClockOffsetSeconds,
         },
       );
       final body = response.data!;
-      return CheckOutResult(
-        routeStopId: body['route_stop_id'] as String,
-        executionId: body['execution_id'] as String,
-        checkedOutAt: DateTime.parse(body['checked_out_at'] as String),
-        flags: (body['validation_flags'] as List).cast<String>(),
+      return (
+        result: CheckOutResult(
+          routeStopId: body['route_stop_id'] as String,
+          executionId: body['execution_id'] as String,
+          checkedOutAt: DateTime.parse(body['checked_out_at'] as String),
+          flags: (body['validation_flags'] as List).cast<String>(),
+        ),
+        serverDate: parseServerDate(response.headers),
       );
     } on DioException catch (e) {
       final candidates = _ambiguousRoomCandidates(e);

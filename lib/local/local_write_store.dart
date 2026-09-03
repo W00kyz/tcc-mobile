@@ -91,6 +91,12 @@ abstract class LocalWriteStore {
   /// Distinct route ids with any `pending`, `failed` or `blocked` row — the
   /// set of routes the sync worker still has work for.
   Future<List<String>> routeIdsWithWork();
+
+  /// Clears a `blocked` (or `failed`) row back to a clean `pending` state —
+  /// state `pending`, `attempts` 0, `nextAttemptAt`/`lastError` null — so the
+  /// next drain replays it from scratch. Backs `SyncWorker.unblock` (the
+  /// "Tentar de novo" button on the blocked-rows list, spec Ruling 6).
+  Future<void> resetToPending(String id);
 }
 
 class DriftLocalWriteStore implements LocalWriteStore {
@@ -145,6 +151,20 @@ class DriftLocalWriteStore implements LocalWriteStore {
       PendingOperationsCompanion(
         attempts: Value(attempts),
         nextAttemptAt: Value(nextAttemptAt),
+      ),
+    );
+  }
+
+  @override
+  Future<void> resetToPending(String id) {
+    final update = _db.update(_db.pendingOperations)
+      ..where((row) => row.id.equals(id));
+    return update.write(
+      PendingOperationsCompanion(
+        state: Value(PendingOpState.pending.name),
+        lastError: const Value(null),
+        attempts: const Value(0),
+        nextAttemptAt: const Value(null),
       ),
     );
   }

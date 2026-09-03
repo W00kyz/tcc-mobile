@@ -24,22 +24,27 @@ void main() {
       );
       final api = DioExecutionApi(dio);
 
-      final result = await api.checkIn(
+      final response = await api.checkIn(
+        executionId: 'exec-supplied-1',
         qrPayload: 'v1.floor.1.sig',
         latitude: -7.2,
         longitude: -35.9,
         scannedAt: DateTime.utc(2026, 8, 25, 8, 20),
         idempotencyKey: 'idem-1',
         routeStopId: 'stop-hint',
+        clientClockOffsetSeconds: 12.5,
       );
+      final result = response.result;
 
       final body = captured.data as Map;
+      expect(body['execution_id'], 'exec-supplied-1');
       expect(body['qr_payload'], 'v1.floor.1.sig');
       expect(body['latitude'], -7.2);
       expect(body['longitude'], -35.9);
       expect(body['scanned_at'], '2026-08-25T08:20:00.000Z');
       expect(body['idempotency_key'], 'idem-1');
       expect(body['route_stop_id'], 'stop-hint');
+      expect(body['client_clock_offset_seconds'], 12.5);
       expect(result.routeStopId, 's1');
       expect(result.executionId, 'e1');
       expect(result.geoValidation, 'INSIDE');
@@ -83,6 +88,7 @@ void main() {
 
       await expectLater(
         api.checkIn(
+          executionId: 'exec-1',
           qrPayload: 'v1.floor.1.sig',
           scannedAt: DateTime.utc(2026, 8, 25),
           idempotencyKey: 'idem-1',
@@ -120,6 +126,7 @@ void main() {
 
       await expectLater(
         api.checkIn(
+          executionId: 'exec-1',
           qrPayload: 'v1.floor.1.sig',
           scannedAt: DateTime.utc(2026, 8, 25),
           idempotencyKey: 'idem-1',
@@ -147,16 +154,18 @@ void main() {
       );
       final api = DioExecutionApi(dio);
 
-      final result = await api.checkOut(
+      final result = (await api.checkOut(
+        executionId: 'exec-out-supplied',
         qrPayload: 'v1.floor.1.sig',
         latitude: -7.2,
         longitude: -35.9,
         scannedAt: DateTime.utc(2026, 8, 25, 8, 40),
         checkoutIdempotencyKey: 'idem-out-1',
         routeStopId: 's1',
-      );
+      )).result;
 
       final body = captured.data as Map;
+      expect(body['execution_id'], 'exec-out-supplied');
       expect(body['qr_payload'], 'v1.floor.1.sig');
       expect(body['latitude'], -7.2);
       expect(body['longitude'], -35.9);
@@ -200,6 +209,7 @@ void main() {
 
       await expectLater(
         api.checkOut(
+          executionId: 'exec-1',
           qrPayload: 'v1.floor.1.sig',
           scannedAt: DateTime.utc(2026, 8, 25),
           checkoutIdempotencyKey: 'idem-out-1',
@@ -238,6 +248,7 @@ void main() {
 
       await expectLater(
         api.checkOut(
+          executionId: 'exec-1',
           qrPayload: 'v1.floor.1.sig',
           scannedAt: DateTime.utc(2026, 8, 25),
           checkoutIdempotencyKey: 'idem-out-1',

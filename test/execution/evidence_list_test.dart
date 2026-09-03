@@ -14,18 +14,20 @@ class _FakeEvidenceApi implements EvidenceApi {
   Future<List<EvidenceItem>> listEvidence(String executionId) async => items;
 
   @override
-  Future<void> uploadNote({
+  Future<DateTime?> uploadNote({
     required String executionId,
     required String textBody,
     required DateTime capturedAt,
+    required String idempotencyKey,
   }) => throw UnimplementedError();
 
   @override
-  Future<void> uploadPhoto({
+  Future<DateTime?> uploadPhoto({
     required String executionId,
     required Uint8List bytes,
     required String sha256,
     required DateTime capturedAt,
+    required String idempotencyKey,
   }) => throw UnimplementedError();
 }
 
@@ -75,6 +77,9 @@ class _FakeLocalWriteStore implements LocalWriteStore {
 
   @override
   Future<List<String>> routeIdsWithWork() => throw UnimplementedError();
+
+  @override
+  Future<void> resetToPending(String id) => throw UnimplementedError();
 }
 
 PendingOperationRow _row({
