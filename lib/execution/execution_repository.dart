@@ -1,15 +1,27 @@
+import 'dart:convert';
+
+import 'package:route_monitor/execution/evidence_api.dart';
+import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/open_execution_store.dart';
 import 'package:uuid/uuid.dart';
 
 /// Enqueues every check-in in [LocalWriteStore] before touching the network
 /// (Ruling 1, Etapa 5 design §4.1/§6.1 — RNF06: no pending write may exist
 /// only in memory), then marks the row synced or failed from the outcome.
 class ExecutionRepository {
-  ExecutionRepository(this._api, this._store);
+  ExecutionRepository(
+    this._api,
+    this._store,
+    this._evidenceApi,
+    this._openExecutions,
+  );
 
   final ExecutionApi _api;
   final LocalWriteStore _store;
+  final EvidenceApi _evidenceApi;
+  final OpenExecutionStore _openExecutions;
   static const _uuid = Uuid();
 
   /// [idempotencyKey], when supplied, is reused instead of generating a
@@ -57,6 +69,12 @@ class ExecutionRepository {
         routeStopId: routeStopId,
       );
       await _store.markSynced(key);
+      // Ruling 17: the evidence endpoints need this execution_id and have no
+      // other way to learn it — record it now while the response is at hand.
+      await _openExecutions.recordOpenExecution(
+        result.routeStopId,
+        result.executionId,
+      );
       return result;
       // Deliberately broad: any failure here — DioException (network/HTTP)
       // or AmbiguousRoomException (the floor cross-reference found more than
@@ -115,10 +133,89 @@ class ExecutionRepository {
         routeStopId: routeStopId,
       );
       await _store.markSynced(key);
+      // Ruling 17 counterpart to checkIn's record above: the stop's open
+      // execution is closed, so the evidence buttons must stop being offered.
+      await _openExecutions.clearOpenExecution(result.routeStopId);
       return result;
       // Deliberately broad: same rationale as checkIn above — any failure
       // marks the row failed, and AmbiguousRoomException must still
       // propagate unchanged.
+    } catch (e) {
+      await _store.markFailed(key, e.toString());
+      rethrow;
+    }
+  }
+
+  /// Adds a photo to [executionId]'s evidence list — same drift-first
+  /// discipline as `checkIn`/`checkOut`: enqueued as a `pending` row
+  /// ([PendingOpKind.evidencePhoto]) before the upload, marked
+  /// synced/failed from the outcome. [photo]'s bytes are base64-encoded into
+  /// the payload (never a raw `Uint8List` — `LocalWriteStore.enqueue`
+  /// `jsonEncode`s the map) so a `pending`/`failed` row still has what it
+  /// needs to render a local thumbnail before the backend has a copy.
+  Future<void> addPhoto({
+    required String routeId,
+    required String executionId,
+    required CapturedPhoto photo,
+  }) async {
+    final key = _uuid.v4();
+    final capturedAt = DateTime.now().toUtc();
+    await _store.enqueue(
+      id: key,
+      kind: PendingOpKind.evidencePhoto,
+      routeId: routeId,
+      payload: {
+        'execution_id': executionId,
+        'bytes_b64': base64Encode(photo.bytes),
+        'sha256': photo.sha256,
+        'captured_at': capturedAt.toIso8601String(),
+      },
+    );
+
+    try {
+      await _evidenceApi.uploadPhoto(
+        executionId: executionId,
+        bytes: photo.bytes,
+        sha256: photo.sha256,
+        capturedAt: capturedAt,
+      );
+      await _store.markSynced(key);
+      // Deliberately broad: any upload failure marks the row failed so a
+      // later retry can replay it.
+    } catch (e) {
+      await _store.markFailed(key, e.toString());
+      rethrow;
+    }
+  }
+
+  /// Adds a text note to [executionId]'s evidence list — same lifecycle as
+  /// [addPhoto].
+  Future<void> addNote({
+    required String routeId,
+    required String executionId,
+    required String text,
+  }) async {
+    final key = _uuid.v4();
+    final capturedAt = DateTime.now().toUtc();
+    await _store.enqueue(
+      id: key,
+      kind: PendingOpKind.evidenceNote,
+      routeId: routeId,
+      payload: {
+        'execution_id': executionId,
+        'text_body': text,
+        'captured_at': capturedAt.toIso8601String(),
+      },
+    );
+
+    try {
+      await _evidenceApi.uploadNote(
+        executionId: executionId,
+        textBody: text,
+        capturedAt: capturedAt,
+      );
+      await _store.markSynced(key);
+      // Deliberately broad: same rationale as addPhoto above.
     } catch (e) {
       await _store.markFailed(key, e.toString());
       rethrow;
@@ -131,8 +228,9 @@ class ExecutionRepository {
   Future<void> retryFailed(String routeId) async {
     final rows = await _store.unsyncedForRoute(routeId);
     for (final row in rows) {
-      // Task 18/19 add checkOut/evidence retry; this drain only knows
-      // check-in rows for now.
+      // checkOut/evidence retry (PendingOpKind.checkOut/evidencePhoto/
+      // evidenceNote) is still deferred to a future task; this drain only
+      // knows check-in rows for now.
       if (row.kind != PendingOpKind.checkIn) continue;
       try {
         await _api.checkIn(

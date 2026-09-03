@@ -6,11 +6,19 @@ import 'package:dio/dio.dart';
 class CheckInResult {
   const CheckInResult({
     required this.routeStopId,
+    required this.executionId,
     required this.geoValidation,
     required this.flags,
   });
 
   final String routeStopId;
+
+  /// The backend's `execution_id` (`CheckInResponse.execution_id`) — the app
+  /// has no other way to learn it (spec §6.3b Ruling 17: `RouteStopOut` has
+  /// no `execution_id` field, and `GET /executions` is MANAGER/ADMIN-only),
+  /// so `ExecutionRepository.checkIn` records it in `OpenExecutions` for the
+  /// evidence endpoints to use later.
+  final String executionId;
   final String geoValidation;
   final List<String> flags;
 }
@@ -45,11 +53,16 @@ class AmbiguousRoomException implements Exception {
 class CheckOutResult {
   const CheckOutResult({
     required this.routeStopId,
+    required this.executionId,
     required this.checkedOutAt,
     required this.flags,
   });
 
   final String routeStopId;
+
+  /// See `CheckInResult.executionId` — same Ruling 17 rationale, this time
+  /// used to clear the `OpenExecutions` row for the stop.
+  final String executionId;
   final DateTime checkedOutAt;
   final List<String> flags;
 }
@@ -106,6 +119,7 @@ class DioExecutionApi implements ExecutionApi {
       final body = response.data!;
       return CheckInResult(
         routeStopId: body['route_stop_id'] as String,
+        executionId: body['execution_id'] as String,
         geoValidation: body['geo_validation'] as String,
         flags: (body['validation_flags'] as List).cast<String>(),
       );
@@ -140,6 +154,7 @@ class DioExecutionApi implements ExecutionApi {
       final body = response.data!;
       return CheckOutResult(
         routeStopId: body['route_stop_id'] as String,
+        executionId: body['execution_id'] as String,
         checkedOutAt: DateTime.parse(body['checked_out_at'] as String),
         flags: (body['validation_flags'] as List).cast<String>(),
       );

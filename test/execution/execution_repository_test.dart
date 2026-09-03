@@ -1,8 +1,13 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/execution/evidence_api.dart';
+import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/open_execution_store.dart';
 
 /// Records enqueue/API/mark calls in the order they happen, tagged with the
 /// idempotency key — the four invariants below are all about ordering, so a
@@ -33,6 +38,7 @@ class _FakeExecutionApi implements ExecutionApi {
     if (_checkInImpl != null) return _checkInImpl();
     return const CheckInResult(
       routeStopId: 'stop-1',
+      executionId: 'exec-1',
       geoValidation: 'INSIDE',
       flags: [],
     );
@@ -53,6 +59,7 @@ class _FakeExecutionApi implements ExecutionApi {
     if (_checkOutImpl != null) return _checkOutImpl();
     return CheckOutResult(
       routeStopId: 'stop-1',
+      executionId: 'exec-1',
       checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
       flags: const [],
     );
@@ -126,13 +133,93 @@ extension on PendingOperationRow {
       );
 }
 
+/// Records every upload call instead of hitting the network, and throws
+/// [uploadPhotoError]/[uploadNoteError] once (then clears it) — same
+/// consume-once shape as `_FakeExecutionApi`'s `error` above.
+class _FakeEvidenceApi implements EvidenceApi {
+  _FakeEvidenceApi({this.uploadPhotoError, this.uploadNoteError});
+
+  Exception? uploadPhotoError;
+  Exception? uploadNoteError;
+  final List<String> uploadedPhotoExecutionIds = [];
+  final List<String> uploadedNoteExecutionIds = [];
+  String? lastPhotoSha256;
+  String? lastNoteText;
+
+  @override
+  Future<void> uploadPhoto({
+    required String executionId,
+    required Uint8List bytes,
+    required String sha256,
+    required DateTime capturedAt,
+  }) async {
+    uploadedPhotoExecutionIds.add(executionId);
+    lastPhotoSha256 = sha256;
+    if (uploadPhotoError != null) {
+      final toThrow = uploadPhotoError!;
+      uploadPhotoError = null;
+      throw toThrow;
+    }
+  }
+
+  @override
+  Future<void> uploadNote({
+    required String executionId,
+    required String textBody,
+    required DateTime capturedAt,
+  }) async {
+    uploadedNoteExecutionIds.add(executionId);
+    lastNoteText = textBody;
+    if (uploadNoteError != null) {
+      final toThrow = uploadNoteError!;
+      uploadNoteError = null;
+      throw toThrow;
+    }
+  }
+
+  @override
+  Future<List<EvidenceItem>> listEvidence(String executionId) async => [];
+}
+
+/// In-memory stand-in for [DriftOpenExecutionStore] — real Drift behavior is
+/// proven by open_execution_store_test.dart; this just records calls so
+/// checkIn/checkOut's Ruling 17 wiring can be asserted directly.
+class _FakeOpenExecutionStore implements OpenExecutionStore {
+  final List<String> calls = [];
+  final Map<String, String> _open = {};
+
+  @override
+  Future<void> recordOpenExecution(
+    String routeStopId,
+    String executionId,
+  ) async {
+    calls.add('record:$routeStopId:$executionId');
+    _open[routeStopId] = executionId;
+  }
+
+  @override
+  Future<void> clearOpenExecution(String routeStopId) async {
+    calls.add('clear:$routeStopId');
+    _open.remove(routeStopId);
+  }
+
+  @override
+  Future<String?> openExecutionFor(String routeStopId) async =>
+      _open[routeStopId];
+}
+
 void main() {
   test(
     'checkIn enqueues the row before calling the API, then marks it synced',
     () async {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
-      final repository = ExecutionRepository(_FakeExecutionApi(log), store);
+      final repository = ExecutionRepository(
+        _FakeExecutionApi(log),
+        store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
+      );
 
       final result = await repository.checkIn(
         routeId: 'route-A',
@@ -162,6 +249,8 @@ void main() {
       final repository = ExecutionRepository(
         _FakeExecutionApi(log, checkInImpl: () async => throw networkError),
         store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
       );
 
       await expectLater(
@@ -192,6 +281,8 @@ void main() {
       final repository = ExecutionRepository(
         _FakeExecutionApi(log, checkInImpl: () async => throw ambiguous),
         store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
       );
 
       await expectLater(
@@ -237,7 +328,12 @@ void main() {
         },
       );
       final api = _FakeExecutionApi(log);
-      final repository = ExecutionRepository(api, store);
+      final repository = ExecutionRepository(
+        api,
+        store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
+      );
 
       await repository.retryFailed('route-A');
 
@@ -257,7 +353,12 @@ void main() {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
       final api = _FakeExecutionApi(log);
-      final repository = ExecutionRepository(api, store);
+      final repository = ExecutionRepository(
+        api,
+        store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
+      );
 
       await repository.checkIn(
         routeId: 'route-A',
@@ -276,7 +377,12 @@ void main() {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
       final api = _FakeExecutionApi(log);
-      final repository = ExecutionRepository(api, store);
+      final repository = ExecutionRepository(
+        api,
+        store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
+      );
 
       await repository.checkIn(routeId: 'route-A', qrPayload: 'q1');
       await repository.checkIn(routeId: 'route-A', qrPayload: 'q2');
@@ -290,7 +396,12 @@ void main() {
     () async {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
-      final repository = ExecutionRepository(_FakeExecutionApi(log), store);
+      final repository = ExecutionRepository(
+        _FakeExecutionApi(log),
+        store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
+      );
 
       final result = await repository.checkOut(
         routeId: 'route-A',
@@ -321,6 +432,8 @@ void main() {
       final repository = ExecutionRepository(
         _FakeExecutionApi(log, checkOutImpl: () async => throw networkError),
         store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
       );
 
       await expectLater(
@@ -356,6 +469,8 @@ void main() {
       final repository = ExecutionRepository(
         _FakeExecutionApi(log, checkOutImpl: () async => throw ambiguous),
         store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
       );
 
       await expectLater(
@@ -380,7 +495,12 @@ void main() {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
       final api = _FakeExecutionApi(log);
-      final repository = ExecutionRepository(api, store);
+      final repository = ExecutionRepository(
+        api,
+        store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
+      );
 
       await repository.checkOut(
         routeId: 'route-A',
@@ -401,7 +521,12 @@ void main() {
       final log = <String>[];
       final store = _FakeLocalWriteStore(log);
       final api = _FakeExecutionApi(log);
-      final repository = ExecutionRepository(api, store);
+      final repository = ExecutionRepository(
+        api,
+        store,
+        _FakeEvidenceApi(),
+        _FakeOpenExecutionStore(),
+      );
 
       await repository.checkOut(
         routeId: 'route-A',
@@ -417,4 +542,192 @@ void main() {
       expect(api.capturedCheckoutIdempotencyKeys.toSet(), hasLength(2));
     },
   );
+
+  test(
+    'checkIn records the returned execution_id in OpenExecutionStore, '
+    'keyed by the resolved routeStopId (Ruling 17)',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final openExecutions = _FakeOpenExecutionStore();
+      final repository = ExecutionRepository(
+        _FakeExecutionApi(log),
+        store,
+        _FakeEvidenceApi(),
+        openExecutions,
+      );
+
+      await repository.checkIn(routeId: 'route-A', qrPayload: 'q');
+
+      expect(openExecutions.calls, ['record:stop-1:exec-1']);
+      expect(await openExecutions.openExecutionFor('stop-1'), 'exec-1');
+    },
+  );
+
+  test(
+    'a checkIn failure never records an OpenExecutions row',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final openExecutions = _FakeOpenExecutionStore();
+      final networkError = DioException(
+        requestOptions: RequestOptions(path: '/check-ins'),
+      );
+      final repository = ExecutionRepository(
+        _FakeExecutionApi(log, checkInImpl: () async => throw networkError),
+        store,
+        _FakeEvidenceApi(),
+        openExecutions,
+      );
+
+      await expectLater(
+        repository.checkIn(routeId: 'route-A', qrPayload: 'q'),
+        throwsA(same(networkError)),
+      );
+
+      expect(openExecutions.calls, isEmpty);
+    },
+  );
+
+  test(
+    'checkOut clears the OpenExecutions row for the checked-out routeStopId '
+    '(Ruling 17)',
+    () async {
+      final log = <String>[];
+      final store = _FakeLocalWriteStore(log);
+      final openExecutions = _FakeOpenExecutionStore();
+      await openExecutions.recordOpenExecution('stop-1', 'exec-1');
+      openExecutions.calls.clear();
+      final repository = ExecutionRepository(
+        _FakeExecutionApi(log),
+        store,
+        _FakeEvidenceApi(),
+        openExecutions,
+      );
+
+      await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'q',
+      );
+
+      expect(openExecutions.calls, ['clear:stop-1']);
+      expect(await openExecutions.openExecutionFor('stop-1'), isNull);
+    },
+  );
+
+  test(
+    'addPhoto enqueues an evidencePhoto row before uploading, then marks it '
+    'synced',
+    () async {
+      final store = _FakeLocalWriteStore([]);
+      final evidenceApi = _FakeEvidenceApi();
+      final repository = ExecutionRepository(
+        _FakeExecutionApi([]),
+        store,
+        evidenceApi,
+        _FakeOpenExecutionStore(),
+      );
+
+      await repository.addPhoto(
+        routeId: 'route-A',
+        executionId: 'exec-1',
+        photo: CapturedPhoto(
+          bytes: Uint8List.fromList([1, 2, 3]),
+          sha256: 'abc123',
+        ),
+      );
+
+      expect(evidenceApi.uploadedPhotoExecutionIds, ['exec-1']);
+      expect(evidenceApi.lastPhotoSha256, 'abc123');
+      final rows = await store.unsyncedForRoute('route-A');
+      expect(rows, isEmpty);
+    },
+  );
+
+  test('a failed photo upload marks the row failed and rethrows', () async {
+    final store = _FakeLocalWriteStore([]);
+    final uploadError = DioException(
+      requestOptions: RequestOptions(path: '/executions/exec-1/evidence/photo'),
+    );
+    final repository = ExecutionRepository(
+      _FakeExecutionApi([]),
+      store,
+      _FakeEvidenceApi(uploadPhotoError: uploadError),
+      _FakeOpenExecutionStore(),
+    );
+
+    await expectLater(
+      repository.addPhoto(
+        routeId: 'route-A',
+        executionId: 'exec-1',
+        photo: CapturedPhoto(
+          bytes: Uint8List.fromList([1, 2, 3]),
+          sha256: 'abc123',
+        ),
+      ),
+      throwsA(same(uploadError)),
+    );
+
+    final rows = await store.unsyncedForRoute('route-A');
+    expect(rows, hasLength(1));
+    expect(rows.single.kind, PendingOpKind.evidencePhoto);
+    expect(rows.single.state, PendingOpState.failed);
+    expect(rows.single.payload['execution_id'], 'exec-1');
+    expect(rows.single.payload['bytes_b64'], isNotNull);
+  });
+
+  test(
+    'addNote enqueues an evidenceNote row before uploading, then marks it '
+    'synced',
+    () async {
+      final store = _FakeLocalWriteStore([]);
+      final evidenceApi = _FakeEvidenceApi();
+      final repository = ExecutionRepository(
+        _FakeExecutionApi([]),
+        store,
+        evidenceApi,
+        _FakeOpenExecutionStore(),
+      );
+
+      await repository.addNote(
+        routeId: 'route-A',
+        executionId: 'exec-1',
+        text: 'Sala trancada.',
+      );
+
+      expect(evidenceApi.uploadedNoteExecutionIds, ['exec-1']);
+      expect(evidenceApi.lastNoteText, 'Sala trancada.');
+      final rows = await store.unsyncedForRoute('route-A');
+      expect(rows, isEmpty);
+    },
+  );
+
+  test('a failed note upload marks the row failed and rethrows', () async {
+    final store = _FakeLocalWriteStore([]);
+    final uploadError = DioException(
+      requestOptions: RequestOptions(path: '/executions/exec-1/evidence/note'),
+    );
+    final repository = ExecutionRepository(
+      _FakeExecutionApi([]),
+      store,
+      _FakeEvidenceApi(uploadNoteError: uploadError),
+      _FakeOpenExecutionStore(),
+    );
+
+    await expectLater(
+      repository.addNote(
+        routeId: 'route-A',
+        executionId: 'exec-1',
+        text: 'Sala trancada.',
+      ),
+      throwsA(same(uploadError)),
+    );
+
+    final rows = await store.unsyncedForRoute('route-A');
+    expect(rows, hasLength(1));
+    expect(rows.single.kind, PendingOpKind.evidenceNote);
+    expect(rows.single.state, PendingOpState.failed);
+    expect(rows.single.payload['text_body'], 'Sala trancada.');
+  });
 }

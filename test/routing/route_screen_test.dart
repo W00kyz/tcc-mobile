@@ -1,12 +1,18 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
+import 'package:route_monitor/execution/evidence_api.dart';
+import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/open_execution_store.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -14,6 +20,13 @@ import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_screen.dart';
 
 import 'no_tiles_tile_provider.dart';
+
+/// A real, decodable 1x1 transparent PNG — used wherever a test needs
+/// `Image.memory` to actually succeed instead of throwing mid-decode.
+final Uint8List _onePixelPng = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY'
+  '42YAAAAASUVORK5CYII=',
+);
 
 final _unstartedRoute = RouteSummary(
   id: 'r1',
@@ -196,6 +209,7 @@ class _FakeExecutionApi implements ExecutionApi {
     }
     return const CheckInResult(
       routeStopId: 's1',
+      executionId: 'exec-1',
       geoValidation: 'INSIDE',
       flags: [],
     );
@@ -222,34 +236,208 @@ class _FakeExecutionApi implements ExecutionApi {
     }
     return CheckOutResult(
       routeStopId: routeStopId ?? 's1',
+      executionId: 'exec-1',
       checkedOutAt: DateTime.utc(2026, 8, 25, 8, 40),
       flags: const [],
     );
   }
 }
 
-/// A no-op stand-in for the local write-ahead log — ExecutionRepository's
-/// own enqueue/mark-synced/mark-failed behavior is already proven by
-/// execution_repository_test.dart; RouteScreen only needs *some*
-/// LocalWriteStore to build a real ExecutionRepository around the fake API.
-class _NoopLocalWriteStore implements LocalWriteStore {
+/// An in-memory stand-in for the local write-ahead log —
+/// ExecutionRepository's own enqueue/mark-synced/mark-failed behavior is
+/// already proven by execution_repository_test.dart, but RouteScreen also
+/// needs a *shared* instance here: `stopEvidenceProvider` reads
+/// `localWriteStoreProvider` directly, so a photo/note added through
+/// `ExecutionRepository` in one test must be visible to the evidence list
+/// through the same store instance — a pure no-op store would never
+/// surface it.
+class _InMemoryLocalWriteStore implements LocalWriteStore {
+  final Map<String, PendingOperationRow> _rows = {};
+
   @override
   Future<void> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
-  }) async {}
+  }) async {
+    _rows[id] = PendingOperationRow(
+      id: id,
+      kind: kind,
+      routeId: routeId,
+      payload: payload,
+      createdAt: _rows.length,
+      state: PendingOpState.pending,
+      lastError: null,
+    );
+  }
 
   @override
-  Future<void> markSynced(String id) async {}
+  Future<void> markSynced(String id) async =>
+      _setState(id, PendingOpState.synced);
 
   @override
-  Future<void> markFailed(String id, String error) async {}
+  Future<void> markFailed(String id, String error) async =>
+      _setState(id, PendingOpState.failed, error: error);
+
+  void _setState(String id, PendingOpState state, {String? error}) {
+    final row = _rows[id]!;
+    _rows[id] = PendingOperationRow(
+      id: row.id,
+      kind: row.kind,
+      routeId: row.routeId,
+      payload: row.payload,
+      createdAt: row.createdAt,
+      state: state,
+      lastError: error,
+    );
+  }
 
   @override
   Future<List<PendingOperationRow>> unsyncedForRoute(String routeId) async =>
-      [];
+      _rows.values
+          .where(
+            (r) => r.routeId == routeId && r.state != PendingOpState.synced,
+          )
+          .toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+}
+
+/// A no-op OpenExecutionStore — always reports no open execution (`null`),
+/// so a plain check-in/check-out test never triggers `_StopEvidenceSection`
+/// (Ruling 17: `null` hides the evidence buttons entirely). Evidence-specific
+/// tests use `_FakeOpenExecutionStore` instead.
+class _NoopOpenExecutionStore implements OpenExecutionStore {
+  @override
+  Future<void> recordOpenExecution(
+    String routeStopId,
+    String executionId,
+  ) async {}
+
+  @override
+  Future<void> clearOpenExecution(String routeStopId) async {}
+
+  @override
+  Future<String?> openExecutionFor(String routeStopId) async => null;
+}
+
+/// An in-memory OpenExecutionStore for tests that need a stop's evidence
+/// section to actually render — pre-seed with `seed` (routeStopId ->
+/// executionId).
+class _FakeOpenExecutionStore implements OpenExecutionStore {
+  _FakeOpenExecutionStore([Map<String, String> seed = const {}])
+    : _open = Map.of(seed);
+
+  final Map<String, String> _open;
+
+  @override
+  Future<void> recordOpenExecution(
+    String routeStopId,
+    String executionId,
+  ) async {
+    _open[routeStopId] = executionId;
+  }
+
+  @override
+  Future<void> clearOpenExecution(String routeStopId) async {
+    _open.remove(routeStopId);
+  }
+
+  @override
+  Future<String?> openExecutionFor(String routeStopId) async =>
+      _open[routeStopId];
+}
+
+/// A no-op EvidenceApi — `listEvidence` returns no synced items and the
+/// uploads never fail, for tests that don't specifically exercise the
+/// evidence upload/list path.
+class _NoopEvidenceApi implements EvidenceApi {
+  @override
+  Future<void> uploadNote({
+    required String executionId,
+    required String textBody,
+    required DateTime capturedAt,
+  }) async {}
+
+  @override
+  Future<void> uploadPhoto({
+    required String executionId,
+    required Uint8List bytes,
+    required String sha256,
+    required DateTime capturedAt,
+  }) async {}
+
+  @override
+  Future<List<EvidenceItem>> listEvidence(String executionId) async => [];
+}
+
+/// Records upload calls and returns [syncedItems] from `listEvidence` — the
+/// seam RouteScreen's evidence-list tests exercise instead of the real
+/// network.
+class _FakeEvidenceApi implements EvidenceApi {
+  _FakeEvidenceApi({
+    this.syncedItems = const [],
+    this.uploadPhotoError,
+    this.uploadNoteError,
+  });
+
+  final List<EvidenceItem> syncedItems;
+  Exception? uploadPhotoError;
+  Exception? uploadNoteError;
+  final List<String> uploadedPhotoExecutionIds = [];
+  final List<String> uploadedNoteTexts = [];
+
+  @override
+  Future<void> uploadPhoto({
+    required String executionId,
+    required Uint8List bytes,
+    required String sha256,
+    required DateTime capturedAt,
+  }) async {
+    uploadedPhotoExecutionIds.add(executionId);
+    if (uploadPhotoError != null) {
+      final toThrow = uploadPhotoError!;
+      uploadPhotoError = null;
+      throw toThrow;
+    }
+  }
+
+  @override
+  Future<void> uploadNote({
+    required String executionId,
+    required String textBody,
+    required DateTime capturedAt,
+  }) async {
+    uploadedNoteTexts.add(textBody);
+    if (uploadNoteError != null) {
+      final toThrow = uploadNoteError!;
+      uploadNoteError = null;
+      throw toThrow;
+    }
+  }
+
+  @override
+  Future<List<EvidenceItem>> listEvidence(String executionId) async =>
+      syncedItems;
+}
+
+/// A fake camera — returns [photo] (or throws [error]) instead of opening
+/// the real camera app.
+class _FakeEvidenceCapture implements EvidenceCapture {
+  _FakeEvidenceCapture({this.photo, this.error});
+
+  final CapturedPhoto? photo;
+
+  /// `Error?`, not `Exception?`: the real `DeviceEvidenceCapture.takePhoto`
+  /// can throw a `StateError` (a compression failure), so this fake must be
+  /// able to reproduce that too.
+  final Error? error;
+
+  @override
+  Future<CapturedPhoto?> takePhoto() async {
+    if (error != null) throw error!;
+    return photo;
+  }
 }
 
 RouteSummary _routeWith({
@@ -271,18 +459,44 @@ Widget _screenWith(
   RouteRepository repository, {
   LocationService? locationService,
   ExecutionApi? executionApi,
-}) => ProviderScope(
-  overrides: [
-    routeRepositoryProvider.overrideWithValue(repository),
-    if (locationService != null)
-      locationServiceProvider.overrideWithValue(locationService),
-    if (executionApi != null)
-      executionRepositoryProvider.overrideWithValue(
-        ExecutionRepository(executionApi, _NoopLocalWriteStore()),
-      ),
-  ],
-  child: const MaterialApp(home: RouteScreen()),
-);
+  EvidenceApi? evidenceApi,
+  EvidenceCapture? evidenceCapture,
+  OpenExecutionStore? openExecutionStore,
+  LocalWriteStore? localWriteStore,
+}) {
+  // Always overridden, regardless of whether the test cares about evidence:
+  // any IN_PROGRESS stop builds a _StopEvidenceSection that watches
+  // openExecutionForProvider/stopEvidenceProvider/localWriteStoreProvider,
+  // and those must never fall through to the real Drift database or a real
+  // Dio client under flutter_test (docs/CLAUDE.base.md — never touch the
+  // network in a test).
+  final resolvedOpenExecutions =
+      openExecutionStore ?? _NoopOpenExecutionStore();
+  final resolvedEvidenceApi = evidenceApi ?? _NoopEvidenceApi();
+  final resolvedLocalStore = localWriteStore ?? _InMemoryLocalWriteStore();
+  return ProviderScope(
+    overrides: [
+      routeRepositoryProvider.overrideWithValue(repository),
+      if (locationService != null)
+        locationServiceProvider.overrideWithValue(locationService),
+      openExecutionStoreProvider.overrideWithValue(resolvedOpenExecutions),
+      evidenceApiProvider.overrideWithValue(resolvedEvidenceApi),
+      localWriteStoreProvider.overrideWithValue(resolvedLocalStore),
+      if (evidenceCapture != null)
+        evidenceCaptureProvider.overrideWithValue(evidenceCapture),
+      if (executionApi != null)
+        executionRepositoryProvider.overrideWithValue(
+          ExecutionRepository(
+            executionApi,
+            resolvedLocalStore,
+            resolvedEvidenceApi,
+            resolvedOpenExecutions,
+          ),
+        ),
+    ],
+    child: const MaterialApp(home: RouteScreen()),
+  );
+}
 
 void main() {
   testWidgets('shows the assigned stop and a start button', (tester) async {
@@ -1030,6 +1244,297 @@ void main() {
       expect(api.checkOutIdempotencyKeys, hasLength(2));
       expect(api.checkOutIdempotencyKeys[0], api.checkOutIdempotencyKeys[1]);
       expect(find.text('Check-out registrado.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'hides the evidence buttons for an IN_PROGRESS stop with no '
+    'OpenExecutions row (Ruling 17 cold-start gap)',
+    (tester) async {
+      await tester.pumpWidget(
+        _screenWith(_StaticRouteRepository([inProgressStopRoute()])),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Adicionar foto'), findsNothing);
+      expect(find.text('Adicionar observação'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'shows the evidence buttons for an IN_PROGRESS stop once its '
+    'OpenExecutions row resolves',
+    (tester) async {
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(TextButton, 'Adicionar foto'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(TextButton, 'Adicionar observação'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'tapping "Adicionar foto" captures, uploads the photo and shows success',
+    (tester) async {
+      final evidenceApi = _FakeEvidenceApi();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          executionApi: _FakeExecutionApi(),
+          evidenceApi: evidenceApi,
+          evidenceCapture: _FakeEvidenceCapture(
+            photo: CapturedPhoto(
+              bytes: Uint8List.fromList([1, 2, 3]),
+              sha256: 'abc123',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
+      await tester.pumpAndSettle();
+
+      expect(evidenceApi.uploadedPhotoExecutionIds, ['exec-1']);
+      expect(find.text('Foto adicionada.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'does nothing when the field worker cancels the camera (takePhoto '
+    'returns null)',
+    (tester) async {
+      final evidenceApi = _FakeEvidenceApi();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          executionApi: _FakeExecutionApi(),
+          evidenceApi: evidenceApi,
+          evidenceCapture: _FakeEvidenceCapture(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
+      await tester.pumpAndSettle();
+
+      expect(evidenceApi.uploadedPhotoExecutionIds, isEmpty);
+      expect(find.text('Foto adicionada.'), findsNothing);
+      expect(
+        find.text('Não foi possível adicionar a foto.'),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'shows a failure snackbar when the photo upload fails',
+    (tester) async {
+      final evidenceApi = _FakeEvidenceApi(
+        uploadPhotoError: DioException(
+          requestOptions: RequestOptions(
+            path: '/executions/exec-1/evidence/photo',
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          executionApi: _FakeExecutionApi(),
+          evidenceApi: evidenceApi,
+          evidenceCapture: _FakeEvidenceCapture(
+            photo: CapturedPhoto(
+              bytes: Uint8List.fromList([1, 2, 3]),
+              sha256: 'abc123',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Não foi possível adicionar a foto.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'shows a failure snackbar when the camera itself throws (e.g. '
+    'compression failed)',
+    (tester) async {
+      final evidenceApi = _FakeEvidenceApi();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          executionApi: _FakeExecutionApi(),
+          evidenceApi: evidenceApi,
+          evidenceCapture: _FakeEvidenceCapture(
+            error: StateError('Photo compression failed for "x.jpg".'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
+      await tester.pumpAndSettle();
+
+      expect(evidenceApi.uploadedPhotoExecutionIds, isEmpty);
+      expect(find.text('Não foi possível adicionar a foto.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'shows a failure snackbar when the note upload fails',
+    (tester) async {
+      final evidenceApi = _FakeEvidenceApi(
+        uploadNoteError: DioException(
+          requestOptions: RequestOptions(
+            path: '/executions/exec-1/evidence/note',
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          executionApi: _FakeExecutionApi(),
+          evidenceApi: evidenceApi,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Adicionar observação'),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Sala trancada.');
+      await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Não foi possível adicionar a observação.'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'tapping "Adicionar observação" opens a dialog and "Salvar" uploads the '
+    'note',
+    (tester) async {
+      final evidenceApi = _FakeEvidenceApi();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          executionApi: _FakeExecutionApi(),
+          evidenceApi: evidenceApi,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Adicionar observação'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TextField), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'Sala trancada.');
+      await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
+      await tester.pumpAndSettle();
+
+      expect(evidenceApi.uploadedNoteTexts, ['Sala trancada.']);
+      expect(find.text('Observação adicionada.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'cancelling the note dialog uploads nothing',
+    (tester) async {
+      final evidenceApi = _FakeEvidenceApi();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          evidenceApi: evidenceApi,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Adicionar observação'),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'not saved');
+      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
+      await tester.pumpAndSettle();
+
+      expect(evidenceApi.uploadedNoteTexts, isEmpty);
+      expect(find.text('Observação adicionada.'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'renders a synced note from the backend and a pending local photo '
+    'together, each with its own sync icon',
+    (tester) async {
+      final localStore = _InMemoryLocalWriteStore();
+      await localStore.enqueue(
+        id: 'op-photo-1',
+        kind: PendingOpKind.evidencePhoto,
+        routeId: 'r1',
+        payload: {
+          'execution_id': 'exec-1',
+          // A real (1x1) PNG, not arbitrary bytes: Image.memory decodes this
+          // eagerly, and flutter_test surfaces a decode failure as an
+          // uncaught test error rather than a rendering glitch.
+          'bytes_b64': base64Encode(_onePixelPng),
+          'sha256': 'abc123',
+          'captured_at': '2026-08-25T08:05:00.000Z',
+        },
+      );
+      final evidenceApi = _FakeEvidenceApi(
+        syncedItems: [
+          EvidenceItem(
+            id: 'e1',
+            kind: 'NOTE',
+            textBody: 'Sala trancada.',
+            capturedAt: DateTime.utc(2026, 8, 25, 8),
+            createdAt: DateTime.utc(2026, 8, 25, 8, 1),
+          ),
+        ],
+      );
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          openExecutionStore: _FakeOpenExecutionStore({'s1': 'exec-1'}),
+          evidenceApi: evidenceApi,
+          localWriteStore: localStore,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sala trancada.'), findsOneWidget);
+      expect(find.text('Foto'), findsOneWidget);
+      expect(find.byIcon(Icons.cloud_done), findsOneWidget);
+      expect(find.byIcon(Icons.cloud_upload), findsOneWidget);
+      expect(find.byType(Image), findsOneWidget);
     },
   );
 }

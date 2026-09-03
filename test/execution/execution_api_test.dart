@@ -41,6 +41,7 @@ void main() {
       expect(body['idempotency_key'], 'idem-1');
       expect(body['route_stop_id'], 'stop-hint');
       expect(result.routeStopId, 's1');
+      expect(result.executionId, 'e1');
       expect(result.geoValidation, 'INSIDE');
       expect(result.flags, ['MISSING_GPS']);
     },
@@ -163,6 +164,7 @@ void main() {
       expect(body['checkout_idempotency_key'], 'idem-out-1');
       expect(body['route_stop_id'], 's1');
       expect(result.routeStopId, 's1');
+      expect(result.executionId, 'e1');
       expect(result.checkedOutAt, DateTime.utc(2026, 8, 25, 8, 40));
       expect(result.flags, ['ROOM_CHOSEN_MANUALLY']);
     },

@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' show TileProvider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:route_monitor/api/env.dart';
+import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
+import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/room_picker.dart';
+import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -104,6 +108,12 @@ class RouteScreen extends ConsumerWidget {
                           stop: stop,
                           onConcluir: stop.status == 'IN_PROGRESS'
                               ? () => _checkOut(context, ref, route, stop)
+                              : null,
+                          evidenceSection: stop.status == 'IN_PROGRESS'
+                              ? _StopEvidenceSection(
+                                  routeId: route.id,
+                                  routeStopId: stop.id,
+                                )
                               : null,
                         ),
                     ],
@@ -408,7 +418,7 @@ class _RouteHeader extends StatelessWidget {
 }
 
 class _StopTile extends StatelessWidget {
-  const _StopTile({required this.stop, this.onConcluir});
+  const _StopTile({required this.stop, this.onConcluir, this.evidenceSection});
 
   final RouteStopSummary stop;
 
@@ -417,6 +427,12 @@ class _StopTile extends StatelessWidget {
   /// this widget stays a plain StatelessWidget with no WidgetRef of its own,
   /// leaving the execution-repository/room-picker wiring to RouteScreen.
   final VoidCallback? onConcluir;
+
+  /// The evidence buttons + list for this stop, or null to omit that whole
+  /// block (every non-`IN_PROGRESS` stop). RouteScreen builds this as a
+  /// `_StopEvidenceSection` — this widget just gives it a slot below the
+  /// tile, keeping `_StopTile` itself a plain, ref-free StatelessWidget.
+  final Widget? evidenceSection;
 
   @override
   Widget build(BuildContext context) {
@@ -427,46 +443,303 @@ class _StopTile extends StatelessWidget {
     );
     final leg = _formatLeg(stop.distanceFromPrevM, stop.durationFromPrevS);
 
-    return ListTile(
-      leading: CircleAvatar(
-        radius: 14,
-        // Smaller than default so a 2-digit orderIndex (routes with >= 10
-        // stops) still fits inside the r=14 circle without clipping.
-        child: Text(
-          '${stop.orderIndex}',
-          style: const TextStyle(fontSize: 12),
-        ),
-      ),
-      title: Row(
-        children: [
-          Icon(
-            isDone ? Icons.check_circle : Icons.qr_code_scanner,
-            size: 18,
-          ),
-          const SizedBox(width: 8),
-          Expanded(child: Text(stop.servicePointName)),
-          if (stop.pointType == 'OCCASIONAL')
-            const Padding(
-              padding: EdgeInsets.only(left: 8),
-              child: Chip(label: Text('Ponto eventual')),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          leading: CircleAvatar(
+            radius: 14,
+            // Smaller than default so a 2-digit orderIndex (routes with >= 10
+            // stops) still fits inside the r=14 circle without clipping.
+            child: Text(
+              '${stop.orderIndex}',
+              style: const TextStyle(fontSize: 12),
             ),
+          ),
+          title: Row(
+            children: [
+              Icon(
+                isDone ? Icons.check_circle : Icons.qr_code_scanner,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(child: Text(stop.servicePointName)),
+              if (stop.pointType == 'OCCASIONAL')
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Chip(label: Text('Ponto eventual')),
+                ),
+            ],
+          ),
+          subtitle: window == null && leg == null
+              ? null
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (leg != null) Text('a $leg'),
+                    if (window != null) Text('Janela: $window'),
+                  ],
+                ),
+          trailing: onConcluir == null
+              ? null
+              : TextButton(
+                  onPressed: onConcluir,
+                  child: const Text('Concluir'),
+                ),
+        ),
+        ?evidenceSection,
+      ],
+    );
+  }
+}
+
+/// Resolves [routeStopId]'s open `execution_id` (Ruling 17) and, only when
+/// found, shows the evidence buttons + list for it. A `null` result — no
+/// `OpenExecutions` row, the accepted cold-start gap for a stop that turned
+/// `IN_PROGRESS` before that table existed — hides the whole section rather
+/// than showing a broken action.
+class _StopEvidenceSection extends ConsumerWidget {
+  const _StopEvidenceSection({
+    required this.routeId,
+    required this.routeStopId,
+  });
+
+  final String routeId;
+  final String routeStopId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final executionIdAsync = ref.watch(openExecutionForProvider(routeStopId));
+    return executionIdAsync.when(
+      data: (executionId) => executionId == null
+          ? const SizedBox.shrink()
+          : _EvidenceSection(routeId: routeId, executionId: executionId),
+      loading: () => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
+    );
+  }
+}
+
+/// The "Adicionar foto"/"Adicionar observação" buttons and the evidence list
+/// for one stop's open execution.
+class _EvidenceSection extends ConsumerWidget {
+  const _EvidenceSection({required this.routeId, required this.executionId});
+
+  final String routeId;
+  final String executionId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final query = (routeId, executionId);
+    final itemsAsync = ref.watch(stopEvidenceProvider(query));
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 56, right: 16, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                onPressed: () => _addPhoto(context, ref, query),
+                icon: const Icon(Icons.add_a_photo),
+                label: const Text('Adicionar foto'),
+              ),
+              TextButton.icon(
+                onPressed: () => _addNote(context, ref, query),
+                icon: const Icon(Icons.note_add),
+                label: const Text('Adicionar observação'),
+              ),
+            ],
+          ),
+          itemsAsync.when(
+            data: (items) =>
+                items.isEmpty ? const SizedBox.shrink() : _EvidenceList(items),
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: SizedBox(
+                height: 16,
+                width: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            error: (_, _) =>
+                const Text('Não foi possível carregar as evidências.'),
+          ),
         ],
       ),
-      subtitle: window == null && leg == null
-          ? null
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (leg != null) Text('a $leg'),
-                if (window != null) Text('Janela: $window'),
-              ],
-            ),
-      trailing: onConcluir == null
-          ? null
-          : TextButton(
-              onPressed: onConcluir,
-              child: const Text('Concluir'),
-            ),
     );
+  }
+
+  Future<void> _addPhoto(
+    BuildContext context,
+    WidgetRef ref,
+    (String, String) query,
+  ) async {
+    try {
+      final photo = await ref.read(evidenceCaptureProvider).takePhoto();
+      if (photo == null) return; // The field worker cancelled the camera.
+      await ref
+          .read(executionRepositoryProvider)
+          .addPhoto(routeId: query.$1, executionId: query.$2, photo: photo);
+      ref.invalidate(stopEvidenceProvider(query));
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Foto adicionada.')));
+      }
+      // Deliberately broad: a compression failure (StateError), a network
+      // failure (DioException) or any other capture/upload error all map to
+      // the same generic message here, same discipline as check-in/out.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível adicionar a foto.')),
+        );
+      }
+    }
+  }
+
+  Future<void> _addNote(
+    BuildContext context,
+    WidgetRef ref,
+    (String, String) query,
+  ) async {
+    final text = await _showNoteDialog(context);
+    if (text == null || text.isEmpty || !context.mounted) return;
+
+    try {
+      await ref
+          .read(executionRepositoryProvider)
+          .addNote(routeId: query.$1, executionId: query.$2, text: text);
+      ref.invalidate(stopEvidenceProvider(query));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Observação adicionada.')),
+        );
+      }
+      // Deliberately broad: same rationale as _addPhoto above.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Não foi possível adicionar a observação.'),
+          ),
+        );
+      }
+    }
+  }
+}
+
+/// A `showDialog` + single `TextField` — simplest idiomatic Flutter shape
+/// for a short free-text prompt, no need for the dashboard's React-modal
+/// pattern here. Returns the trimmed text, or null if cancelled/dismissed.
+Future<String?> _showNoteDialog(BuildContext context) {
+  final controller = TextEditingController();
+  return showDialog<String>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Adicionar observação'),
+      content: TextField(
+        controller: controller,
+        maxLength: 2000,
+        maxLines: 4,
+        autofocus: true,
+        decoration: const InputDecoration(hintText: 'Descreva a observação'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () =>
+              Navigator.of(dialogContext).pop(controller.text.trim()),
+          child: const Text('Salvar'),
+        ),
+      ],
+    ),
+  );
+}
+
+class _EvidenceList extends StatelessWidget {
+  const _EvidenceList(this.items);
+
+  final List<EvidenceListEntry> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [for (final item in items) _EvidenceTile(item)],
+    );
+  }
+}
+
+class _EvidenceTile extends ConsumerWidget {
+  const _EvidenceTile(this.item);
+
+  final EvidenceListEntry item;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _thumbnail(ref),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(item.kind == 'NOTE' ? (item.textBody ?? '') : 'Foto'),
+          ),
+          const SizedBox(width: 8),
+          _syncIcon(),
+        ],
+      ),
+    );
+  }
+
+  Widget _thumbnail(WidgetRef ref) {
+    if (item.kind != 'PHOTO') return const SizedBox.shrink();
+    if (item.photoBytes != null) {
+      return Image.memory(
+        item.photoBytes!,
+        width: 40,
+        height: 40,
+        fit: BoxFit.cover,
+      );
+    }
+    if (item.contentUrl != null) {
+      // NetworkImage's own `headers` map is enough for the bearer token here
+      // — simpler than a custom Dio-backed ImageProvider, and the offline
+      // map screen already established that a plain network fetch (no
+      // redirect handling needed) is fine for this backend.
+      final token = ref.watch(sessionProvider)?.accessToken;
+      return Image(
+        image: NetworkImage(
+          '${apiBaseUrlFromEnvironment()}${item.contentUrl}',
+          headers: token == null ? null : {'Authorization': 'Bearer $token'},
+        ),
+        width: 40,
+        height: 40,
+        fit: BoxFit.cover,
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  Widget _syncIcon() {
+    switch (item.syncState) {
+      case PendingOpState.synced:
+        return const Icon(Icons.cloud_done, size: 16, color: Colors.green);
+      case PendingOpState.pending:
+        return const Icon(Icons.cloud_upload, size: 16, color: Colors.orange);
+      case PendingOpState.failed:
+        return const Icon(Icons.error, size: 16, color: Colors.red);
+    }
   }
 }

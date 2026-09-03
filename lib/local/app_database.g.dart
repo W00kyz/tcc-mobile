@@ -464,16 +464,248 @@ class PendingOperationsCompanion extends UpdateCompanion<PendingOperation> {
   }
 }
 
+class $OpenExecutionsTable extends OpenExecutions
+    with TableInfo<$OpenExecutionsTable, OpenExecution> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $OpenExecutionsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _routeStopIdMeta = const VerificationMeta(
+    'routeStopId',
+  );
+  @override
+  late final GeneratedColumn<String> routeStopId = GeneratedColumn<String>(
+    'route_stop_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _executionIdMeta = const VerificationMeta(
+    'executionId',
+  );
+  @override
+  late final GeneratedColumn<String> executionId = GeneratedColumn<String>(
+    'execution_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [routeStopId, executionId];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'open_executions';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<OpenExecution> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('route_stop_id')) {
+      context.handle(
+        _routeStopIdMeta,
+        routeStopId.isAcceptableOrUnknown(
+          data['route_stop_id']!,
+          _routeStopIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_routeStopIdMeta);
+    }
+    if (data.containsKey('execution_id')) {
+      context.handle(
+        _executionIdMeta,
+        executionId.isAcceptableOrUnknown(
+          data['execution_id']!,
+          _executionIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_executionIdMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {routeStopId};
+  @override
+  OpenExecution map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return OpenExecution(
+      routeStopId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}route_stop_id'],
+      )!,
+      executionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}execution_id'],
+      )!,
+    );
+  }
+
+  @override
+  $OpenExecutionsTable createAlias(String alias) {
+    return $OpenExecutionsTable(attachedDatabase, alias);
+  }
+}
+
+class OpenExecution extends DataClass implements Insertable<OpenExecution> {
+  final String routeStopId;
+  final String executionId;
+  const OpenExecution({required this.routeStopId, required this.executionId});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['route_stop_id'] = Variable<String>(routeStopId);
+    map['execution_id'] = Variable<String>(executionId);
+    return map;
+  }
+
+  OpenExecutionsCompanion toCompanion(bool nullToAbsent) {
+    return OpenExecutionsCompanion(
+      routeStopId: Value(routeStopId),
+      executionId: Value(executionId),
+    );
+  }
+
+  factory OpenExecution.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return OpenExecution(
+      routeStopId: serializer.fromJson<String>(json['routeStopId']),
+      executionId: serializer.fromJson<String>(json['executionId']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'routeStopId': serializer.toJson<String>(routeStopId),
+      'executionId': serializer.toJson<String>(executionId),
+    };
+  }
+
+  OpenExecution copyWith({String? routeStopId, String? executionId}) =>
+      OpenExecution(
+        routeStopId: routeStopId ?? this.routeStopId,
+        executionId: executionId ?? this.executionId,
+      );
+  OpenExecution copyWithCompanion(OpenExecutionsCompanion data) {
+    return OpenExecution(
+      routeStopId: data.routeStopId.present
+          ? data.routeStopId.value
+          : this.routeStopId,
+      executionId: data.executionId.present
+          ? data.executionId.value
+          : this.executionId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OpenExecution(')
+          ..write('routeStopId: $routeStopId, ')
+          ..write('executionId: $executionId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(routeStopId, executionId);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is OpenExecution &&
+          other.routeStopId == this.routeStopId &&
+          other.executionId == this.executionId);
+}
+
+class OpenExecutionsCompanion extends UpdateCompanion<OpenExecution> {
+  final Value<String> routeStopId;
+  final Value<String> executionId;
+  final Value<int> rowid;
+  const OpenExecutionsCompanion({
+    this.routeStopId = const Value.absent(),
+    this.executionId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  OpenExecutionsCompanion.insert({
+    required String routeStopId,
+    required String executionId,
+    this.rowid = const Value.absent(),
+  }) : routeStopId = Value(routeStopId),
+       executionId = Value(executionId);
+  static Insertable<OpenExecution> custom({
+    Expression<String>? routeStopId,
+    Expression<String>? executionId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (routeStopId != null) 'route_stop_id': routeStopId,
+      if (executionId != null) 'execution_id': executionId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  OpenExecutionsCompanion copyWith({
+    Value<String>? routeStopId,
+    Value<String>? executionId,
+    Value<int>? rowid,
+  }) {
+    return OpenExecutionsCompanion(
+      routeStopId: routeStopId ?? this.routeStopId,
+      executionId: executionId ?? this.executionId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (routeStopId.present) {
+      map['route_stop_id'] = Variable<String>(routeStopId.value);
+    }
+    if (executionId.present) {
+      map['execution_id'] = Variable<String>(executionId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OpenExecutionsCompanion(')
+          ..write('routeStopId: $routeStopId, ')
+          ..write('executionId: $executionId, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $PendingOperationsTable pendingOperations =
       $PendingOperationsTable(this);
+  late final $OpenExecutionsTable openExecutions = $OpenExecutionsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [pendingOperations];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+    pendingOperations,
+    openExecutions,
+  ];
 }
 
 typedef $$PendingOperationsTableCreateCompanionBuilder =
@@ -729,10 +961,161 @@ typedef $$PendingOperationsTableProcessedTableManager =
       PendingOperation,
       PrefetchHooks Function()
     >;
+typedef $$OpenExecutionsTableCreateCompanionBuilder =
+    OpenExecutionsCompanion Function({
+      required String routeStopId,
+      required String executionId,
+      Value<int> rowid,
+    });
+typedef $$OpenExecutionsTableUpdateCompanionBuilder =
+    OpenExecutionsCompanion Function({
+      Value<String> routeStopId,
+      Value<String> executionId,
+      Value<int> rowid,
+    });
+
+class $$OpenExecutionsTableFilterComposer
+    extends Composer<_$AppDatabase, $OpenExecutionsTable> {
+  $$OpenExecutionsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get routeStopId => $composableBuilder(
+    column: $table.routeStopId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get executionId => $composableBuilder(
+    column: $table.executionId,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$OpenExecutionsTableOrderingComposer
+    extends Composer<_$AppDatabase, $OpenExecutionsTable> {
+  $$OpenExecutionsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get routeStopId => $composableBuilder(
+    column: $table.routeStopId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get executionId => $composableBuilder(
+    column: $table.executionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$OpenExecutionsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $OpenExecutionsTable> {
+  $$OpenExecutionsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get routeStopId => $composableBuilder(
+    column: $table.routeStopId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get executionId => $composableBuilder(
+    column: $table.executionId,
+    builder: (column) => column,
+  );
+}
+
+class $$OpenExecutionsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $OpenExecutionsTable,
+          OpenExecution,
+          $$OpenExecutionsTableFilterComposer,
+          $$OpenExecutionsTableOrderingComposer,
+          $$OpenExecutionsTableAnnotationComposer,
+          $$OpenExecutionsTableCreateCompanionBuilder,
+          $$OpenExecutionsTableUpdateCompanionBuilder,
+          (
+            OpenExecution,
+            BaseReferences<_$AppDatabase, $OpenExecutionsTable, OpenExecution>,
+          ),
+          OpenExecution,
+          PrefetchHooks Function()
+        > {
+  $$OpenExecutionsTableTableManager(
+    _$AppDatabase db,
+    $OpenExecutionsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$OpenExecutionsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$OpenExecutionsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$OpenExecutionsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> routeStopId = const Value.absent(),
+                Value<String> executionId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => OpenExecutionsCompanion(
+                routeStopId: routeStopId,
+                executionId: executionId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String routeStopId,
+                required String executionId,
+                Value<int> rowid = const Value.absent(),
+              }) => OpenExecutionsCompanion.insert(
+                routeStopId: routeStopId,
+                executionId: executionId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$OpenExecutionsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $OpenExecutionsTable,
+      OpenExecution,
+      $$OpenExecutionsTableFilterComposer,
+      $$OpenExecutionsTableOrderingComposer,
+      $$OpenExecutionsTableAnnotationComposer,
+      $$OpenExecutionsTableCreateCompanionBuilder,
+      $$OpenExecutionsTableUpdateCompanionBuilder,
+      (
+        OpenExecution,
+        BaseReferences<_$AppDatabase, $OpenExecutionsTable, OpenExecution>,
+      ),
+      OpenExecution,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
   $AppDatabaseManager(this._db);
   $$PendingOperationsTableTableManager get pendingOperations =>
       $$PendingOperationsTableTableManager(_db, _db.pendingOperations);
+  $$OpenExecutionsTableTableManager get openExecutions =>
+      $$OpenExecutionsTableTableManager(_db, _db.openExecutions);
 }

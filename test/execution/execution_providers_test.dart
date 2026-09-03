@@ -59,6 +59,20 @@ void main() {
   );
 
   test(
+    'evidenceApiProvider surfaces the missing API_BASE_URL failure the same '
+    'way executionApiProvider does',
+    () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+
+      expect(
+        () => container.read(evidenceApiProvider),
+        _throwsWrappedStateError,
+      );
+    },
+  );
+
+  test(
     'appDatabaseProvider is a singleton — every reader shares one '
     'AppDatabase instance for the on-device file',
     () {

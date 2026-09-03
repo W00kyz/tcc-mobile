@@ -25,7 +25,21 @@ class PendingOperations extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-@DriftDatabase(tables: [PendingOperations])
+/// One row per stop with an open (checked-in, not yet checked-out) execution
+/// — the app's own record of the `execution_id` the evidence endpoints need
+/// (spec §6.3b Ruling 17: `RouteStopOut` from `GET /routes/me` has no
+/// `execution_id` field, and the field worker has no access to the
+/// MANAGER/ADMIN-only `GET /executions`). Written on a successful check-in,
+/// deleted on a successful check-out.
+class OpenExecutions extends Table {
+  TextColumn get routeStopId => text()();
+  TextColumn get executionId => text()();
+
+  @override
+  Set<Column> get primaryKey => {routeStopId};
+}
+
+@DriftDatabase(tables: [PendingOperations, OpenExecutions])
 class AppDatabase extends _$AppDatabase {
   /// [executor] defaults to the on-device SQLite file; tests inject
   /// `NativeDatabase.memory()` so no suite ever touches real storage.
@@ -33,5 +47,18 @@ class AppDatabase extends _$AppDatabase {
     : super(executor ?? driftDatabase(name: 'route_monitor'));
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  // Additive-only: nobody has schema 1 installed outside development (spec
+  // §6.3b Ruling 17), so onUpgrade only ever needs to add OpenExecutions —
+  // existing PendingOperations rows are left untouched.
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) => m.createAll(),
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.createTable(openExecutions);
+      }
+    },
+  );
 }
