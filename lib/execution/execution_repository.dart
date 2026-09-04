@@ -151,6 +151,14 @@ class ExecutionRepository {
     final draftItems = progress == null
         ? const <FormDraftItem>[]
         : await _formDraftStore.itemsFor(progress.executionId);
+    // `FormDraftStore.isComplete` deliberately lets an unanswered
+    // non-required question through the completeness gate, so `draftItems`
+    // can contain items with a null `value` here. The backend's
+    // `build_answers` rejects a null value for every question type with a
+    // 422 (which `SyncWorker` treats as a hard, permanently-blocking
+    // failure), so only answered items may reach the wire — an unanswered
+    // optional question is simply omitted, not sent as `null`.
+    final answered = draftItems.where((i) => i.value != null).toList();
 
     await _store.enqueue(
       id: key,
@@ -164,10 +172,15 @@ class ExecutionRepository {
         'scanned_at': scannedAt.toIso8601String(),
         'checkout_idempotency_key': key,
         'route_stop_id': routeStopId,
+        // Guarded on `draftItems`, not `answered`: a draft that exists but
+        // is entirely unanswered-optional still has a `form_version_id` and
+        // must still send `answers: []` — the backend's pair-completeness
+        // check (Ruling 7) accepts an empty `answers` list as long as
+        // `form_version_id` is present.
         if (draftItems.isNotEmpty)
           'form_version_id': draftItems.first.formVersionId,
         if (draftItems.isNotEmpty)
-          'answers': draftItems
+          'answers': answered
               .map((i) => {'stable_key': i.stableKey, 'value': i.value})
               .toList(),
       },

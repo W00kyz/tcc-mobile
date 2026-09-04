@@ -63,10 +63,20 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
   /// Also invalidates `myRoutesProvider` (Task 14) so a resume/reconnect
   /// re-fetches the route list — which in turn feeds
   /// `formReconciliationProvider` fresh `FormSchema`s to diff local drafts
-  /// against (RF39/RF40).
+  /// against (RF39/RF40). Gated on `Connectivity.isOnline`: `myRoutesProvider`
+  /// has no cache-on-error, so invalidating it while offline (e.g. the app
+  /// resuming with no network yet) would throw on the re-fetch and
+  /// `route_screen.dart`'s error branch would replace the whole,
+  /// still-perfectly-valid route list with a generic error message.
   void _sync() {
     unawaited(ref.read(syncWorkerProvider).syncAll());
-    ref.invalidate(myRoutesProvider);
+    unawaited(_invalidateRoutesIfOnline());
+  }
+
+  Future<void> _invalidateRoutesIfOnline() async {
+    if (await ref.read(connectivityProvider).isOnline) {
+      ref.invalidate(myRoutesProvider);
+    }
   }
 
   @override

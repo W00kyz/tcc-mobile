@@ -141,8 +141,10 @@ void main() {
   );
 
   testWidgets(
-    'AppLifecycleState.resumed also invalidates myRoutesProvider',
+    'AppLifecycleState.resumed while online also invalidates '
+    'myRoutesProvider',
     (tester) async {
+      connectivity.isOnlineValue = true;
       final routeRepository = _FakeRouteRepository();
       final container = await pumpWithContainer(
         tester,
@@ -156,6 +158,31 @@ void main() {
 
       expect(await container.read(myRoutesProvider.future), isEmpty);
       expect(routeRepository.fetchCount, 2);
+    },
+  );
+
+  testWidgets(
+    'AppLifecycleState.resumed while offline does NOT invalidate '
+    'myRoutesProvider — myRoutesProvider has no cache-on-error, so '
+    'invalidating it offline would blank a previously-successful route list '
+    'with a generic error (Important-1)',
+    (tester) async {
+      final routeRepository = _FakeRouteRepository();
+      final container = await pumpWithContainer(
+        tester,
+        routeRepository: routeRepository,
+      );
+      await container.read(myRoutesProvider.future);
+      expect(routeRepository.fetchCount, 1);
+
+      connectivity.goOffline();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+
+      // Still the same, previously-fetched (successful) value — no
+      // re-fetch attempted, so no `AsyncError` blanking the route list.
+      expect(await container.read(myRoutesProvider.future), isEmpty);
+      expect(routeRepository.fetchCount, 1);
     },
   );
 

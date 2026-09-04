@@ -39,7 +39,11 @@ class FormScreen extends ConsumerWidget {
                   padding: const EdgeInsets.all(16),
                   children: [
                     for (final item in sorted)
-                      _QuestionField(executionId: executionId, item: item),
+                      _QuestionField(
+                        key: ValueKey(item.stableKey),
+                        executionId: executionId,
+                        item: item,
+                      ),
                   ],
                 ),
               ),
@@ -56,7 +60,11 @@ class FormScreen extends ConsumerWidget {
 /// item gets a warning banner above the field; touching the field clears the
 /// flag through `setAnswer` (Task 11 guarantee).
 class _QuestionField extends ConsumerWidget {
-  const _QuestionField({required this.executionId, required this.item});
+  const _QuestionField({
+    required this.executionId,
+    required this.item,
+    super.key,
+  });
 
   final String executionId;
   final FormDraftItem item;

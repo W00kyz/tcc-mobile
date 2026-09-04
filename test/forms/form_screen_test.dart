@@ -114,6 +114,33 @@ void main() {
   });
 
   testWidgets(
+    'each question field carries a ValueKey(stableKey), so Flutter '
+    'reconciles by question identity rather than position during a live '
+    'reconcile (Important-2 — a positional-only reconcile risked an '
+    "in-flight TextFormField's uncommitted text ending up rendered under "
+    "the wrong question's prompt)",
+    (tester) async {
+      await store.snapshotFrom(_executionId, _routeStopId, _oneOfEachType());
+
+      await _pumpForm(tester, store);
+
+      for (final stableKey in [
+        'q-text',
+        'q-number',
+        'q-bool',
+        'q-single',
+        'q-multi',
+      ]) {
+        expect(
+          find.byKey(ValueKey(stableKey)),
+          findsOneWidget,
+          reason: '$stableKey should have its own ValueKey',
+        );
+      }
+    },
+  );
+
+  testWidgets(
     'a needsReanswer item shows the warning and clears on interaction',
     (tester) async {
       final v1 = FormSchema(

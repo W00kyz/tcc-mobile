@@ -436,6 +436,57 @@ void main() {
   );
 
   test(
+    'checkOut with a mixed draft (one answered required question, one '
+    'unanswered non-required question) sends only the answered item — an '
+    'unanswered optional question must never reach the wire as a null value '
+    '(the backend rejects null for every question type with a 422, which '
+    'SyncWorker treats as a permanent, queue-blocking failure)',
+    () async {
+      await stopProgress.upsertInProgress('stop-1', 'exec-real-1');
+      stopProgress.calls.clear();
+      formDraftStore.seed('exec-real-1', const [
+        FormDraftItem(
+          stableKey: 'q1',
+          orderIndex: 0,
+          prompt: 'Required prompt',
+          type: QuestionType.text,
+          required: true,
+          options: [],
+          contentHash: 'hash',
+          formVersionId: 'v1',
+          value: 'answered',
+          needsReanswer: false,
+        ),
+        FormDraftItem(
+          stableKey: 'q2',
+          orderIndex: 1,
+          prompt: 'Optional prompt',
+          type: QuestionType.text,
+          required: false,
+          options: [],
+          contentHash: 'hash',
+          formVersionId: 'v1',
+          value: null,
+          needsReanswer: false,
+        ),
+      ]);
+
+      await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'v1.floor.1.sig',
+      );
+
+      final rows = await store.unsyncedForRoute('route-A');
+      final payload = rows.single.payload;
+      expect(payload['form_version_id'], 'v1');
+      expect(payload['answers'], [
+        {'stable_key': 'q1', 'value': 'answered'},
+      ]);
+    },
+  );
+
+  test(
     'checkOut with no StopProgress entry sends no answers/form_version_id '
     'and clears nothing',
     () async {
