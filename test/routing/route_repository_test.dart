@@ -182,6 +182,65 @@ void main() {
     expect(capturedRequest.uri.queryParameters.containsKey('date'), isFalse);
   });
 
+  test(
+    "fetchMyRoutes parses a stop's service type and form when present",
+    () async {
+      final payload = _routePayload();
+      final stopsJson = (payload['stops'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      stopsJson[0]['service_type_id'] = 'st1';
+      stopsJson[0]['service_type_name'] = 'Limpeza';
+      stopsJson[0]['form'] = {
+        'form_version_id': 'v1',
+        'questions': [
+          {
+            'stable_key': 'k1',
+            'order_index': 0,
+            'prompt': 'p',
+            'question_type': 'TEXT',
+            'required': true,
+            'options': <String>[],
+            'content_hash': 'h1',
+          },
+        ],
+      };
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _FakeAdapter(
+          statusCode: 200,
+          body: [payload],
+        );
+      final repository = DioRouteRepository(dio);
+
+      final stops = (await repository.fetchMyRoutes()).first.stops;
+
+      expect(stops[0].serviceTypeId, 'st1');
+      expect(stops[0].serviceTypeName, 'Limpeza');
+      expect(stops[0].form, isNotNull);
+      expect(stops[0].form!.formVersionId, 'v1');
+      expect(stops[0].form!.questions, hasLength(1));
+      expect(stops[0].form!.questions.single.stableKey, 'k1');
+    },
+  );
+
+  test(
+    'fetchMyRoutes leaves service type and form null when the stop carries '
+    'neither',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _FakeAdapter(
+          statusCode: 200,
+          body: [_routePayload()],
+        );
+      final repository = DioRouteRepository(dio);
+
+      final stops = (await repository.fetchMyRoutes()).first.stops;
+
+      expect(stops[0].serviceTypeId, isNull);
+      expect(stops[0].serviceTypeName, isNull);
+      expect(stops[0].form, isNull);
+    },
+  );
+
   test('startRoute posts the captured position', () async {
     final dio = Dio(BaseOptions(baseUrl: 'http://test'));
     late RequestOptions capturedRequest;

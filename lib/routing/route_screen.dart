@@ -8,6 +8,8 @@ import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/room_picker.dart';
 import 'package:route_monitor/execution/room_resolution.dart';
+import 'package:route_monitor/forms/form_providers.dart';
+import 'package:route_monitor/forms/form_screen.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart'
     show StopLocalStatus;
@@ -157,16 +159,36 @@ class RouteScreen extends ConsumerWidget {
         ref.watch(stopSyncChipProvider((route.id, stop.id))).asData?.value ??
         StopSyncChip.none;
     final inProgress = effectiveStatus == 'IN_PROGRESS';
+    final stopForm = stop.form;
+    final executionId = progress?.executionId;
+    // Default `false` (not "unknown -> allow") while the completeness query
+    // is still loading — a form-gated stop must never let check-out through
+    // before we actually know the draft is complete.
+    final formComplete =
+        inProgress &&
+        stopForm != null &&
+        executionId != null &&
+        (ref.watch(formDraftCompleteProvider(executionId)).asData?.value ??
+            false);
+    final formIncomplete = inProgress && stopForm != null && !formComplete;
     return _StopTile(
       stop: stop,
       effectiveStatus: effectiveStatus,
       syncChip: syncChip,
-      onConcluir: inProgress
+      onConcluir: inProgress && (stopForm == null || formComplete)
           ? () => _checkOut(context, ref, route, stop)
           : null,
       evidenceSection: inProgress
           ? _StopEvidenceSection(routeId: route.id, routeStopId: stop.id)
           : null,
+      formFillAction: (inProgress && stopForm != null && executionId != null)
+          ? () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => FormScreen(executionId: executionId),
+              ),
+            )
+          : null,
+      formIncomplete: formIncomplete,
     );
   }
 
@@ -218,7 +240,7 @@ class RouteScreen extends ConsumerWidget {
     // The repository only enqueues + writes local state now (spec Ruling 2):
     // it never throws `AmbiguousRoomException` or a network error, so there
     // is nothing to catch here.
-    await ref
+    final executionId = await ref
         .read(executionRepositoryProvider)
         .checkIn(
           routeId: route.id,
@@ -227,6 +249,17 @@ class RouteScreen extends ConsumerWidget {
           latitude: scan.coordinates?.latitude,
           longitude: scan.coordinates?.longitude,
         );
+    // The FormSchema lives on the route's stop list, not on the execution
+    // repository — snapshot the draft here, right after check-in succeeds
+    // and before the stale `route.stops` view gets invalidated below.
+    // `snapshotFrom` is idempotent (Task 11), so a retried check-in on the
+    // same executionId never clobbers an answer already drafted.
+    final checkedInStop = route.stops.firstWhere((s) => s.id == routeStopId);
+    if (checkedInStop.form != null) {
+      await ref
+          .read(formDraftStoreProvider)
+          .snapshotFrom(executionId, routeStopId, checkedInStop.form!);
+    }
     ref.invalidate(myRoutesProvider);
     if (context.mounted) {
       ScaffoldMessenger.of(
@@ -482,6 +515,8 @@ class _StopTile extends StatelessWidget {
     this.syncChip = StopSyncChip.none,
     this.onConcluir,
     this.evidenceSection,
+    this.formFillAction,
+    this.formIncomplete = false,
   });
 
   final RouteStopSummary stop;
@@ -505,6 +540,17 @@ class _StopTile extends StatelessWidget {
   /// `_StopEvidenceSection` — this widget just gives it a slot below the
   /// tile, keeping `_StopTile` itself a plain, ref-free StatelessWidget.
   final Widget? evidenceSection;
+
+  /// Pushes [FormScreen] for this stop's open execution, or null to hide the
+  /// "Preencher formulário" action — set only for an `IN_PROGRESS` stop that
+  /// carries a [RouteStopSummary.form]. Kept as a plain callback (same
+  /// pattern as [onConcluir]) so this widget stays ref-free.
+  final VoidCallback? formFillAction;
+
+  /// True while this stop's form-gated check-out is blocked on an
+  /// incomplete draft — shows a hint below the tile explaining why
+  /// "Concluir" is disabled.
+  final bool formIncomplete;
 
   @override
   Widget build(BuildContext context) {
@@ -557,13 +603,29 @@ class _StopTile extends StatelessWidget {
                     if (window != null) Text('Janela: $window'),
                   ],
                 ),
-          trailing: onConcluir == null
+          trailing: onConcluir == null && formFillAction == null
               ? null
               : TextButton(
                   onPressed: onConcluir,
                   child: const Text('Concluir'),
                 ),
         ),
+        if (formFillAction != null || formIncomplete)
+          Padding(
+            padding: const EdgeInsets.only(left: 56, right: 16, bottom: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (formFillAction != null)
+                  TextButton(
+                    onPressed: formFillAction,
+                    child: const Text('Preencher formulário'),
+                  ),
+                if (formIncomplete)
+                  const Text('Preencha o formulário para concluir.'),
+              ],
+            ),
+          ),
         ?evidenceSection,
       ],
     );

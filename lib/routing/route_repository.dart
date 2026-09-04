@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:route_monitor/forms/form_schema.dart';
 
 DateTime? _parseOptionalTimestamp(Object? raw) =>
     raw == null ? null : DateTime.parse(raw as String);
@@ -17,6 +18,9 @@ class RouteStopSummary {
     this.distanceFromPrevM,
     this.durationFromPrevS,
     this.legGeometry,
+    this.serviceTypeId,
+    this.serviceTypeName,
+    this.form,
   });
 
   factory RouteStopSummary.fromJson(Map<String, dynamic> json) =>
@@ -43,6 +47,11 @@ class RouteStopSummary {
                   .toList(),
             )
             .toList(),
+        serviceTypeId: json['service_type_id'] as String?,
+        serviceTypeName: json['service_type_name'] as String?,
+        form: json['form'] == null
+            ? null
+            : FormSchema.fromJson(json['form'] as Map<String, dynamic>),
       );
 
   final String id;
@@ -57,6 +66,15 @@ class RouteStopSummary {
   final double? distanceFromPrevM;
   final double? durationFromPrevS;
   final List<List<double>>? legGeometry;
+
+  /// The service type assigned to this stop (RF-adjacent metadata, not yet
+  /// surfaced in the UI) — null for a stop with none.
+  final String? serviceTypeId;
+  final String? serviceTypeName;
+
+  /// The stop's PUBLISHED `active_form_version` and its ordered questions
+  /// (spec §6.2), or null when the stop's service type has no form attached.
+  final FormSchema? form;
 }
 
 class RouteSummary {
