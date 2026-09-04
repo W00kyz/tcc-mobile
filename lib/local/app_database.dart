@@ -65,7 +65,34 @@ class SyncMeta extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-@DriftDatabase(tables: [PendingOperations, StopProgress, SyncMeta])
+/// One row per form question the field worker has drafted or answered for a
+/// given execution — the local shape the diff engine reconciles against a
+/// fresh `FormVersion` fetch (spec §6.1 / Ruling 8: a version bump must not
+/// silently discard answers already on the device).
+class FormDraftItems extends Table {
+  TextColumn get executionId => text()();
+  TextColumn get stableKey => text()();
+  TextColumn get routeStopId => text()(); // to find the draft from the stop
+  TextColumn get formVersionId =>
+      text()(); // the version this item was last diffed against
+  IntColumn get orderIndex => integer()();
+  TextColumn get prompt => text()();
+  TextColumn get questionType => text()();
+  BoolColumn get required => boolean()();
+  TextColumn get optionsJson => text()(); // JSON list of strings
+  TextColumn get contentHash => text()();
+  TextColumn get valueJson =>
+      text().nullable()(); // the answer; null = unanswered
+  BoolColumn get needsReanswer =>
+      boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {executionId, stableKey};
+}
+
+@DriftDatabase(
+  tables: [PendingOperations, StopProgress, SyncMeta, FormDraftItems],
+)
 class AppDatabase extends _$AppDatabase {
   /// [executor] defaults to the on-device SQLite file; tests inject
   /// `NativeDatabase.memory()` so no suite ever touches real storage.
@@ -73,7 +100,7 @@ class AppDatabase extends _$AppDatabase {
     : super(executor ?? driftDatabase(name: 'route_monitor'));
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -100,6 +127,9 @@ class AppDatabase extends _$AppDatabase {
           'FROM open_executions',
         );
         await customStatement('DROP TABLE open_executions');
+      }
+      if (from < 4) {
+        await m.createTable(formDraftItems);
       }
     },
   );
