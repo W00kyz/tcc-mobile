@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:route_monitor/routing/route_providers.dart'
+    show myRoutesProvider;
 import 'package:route_monitor/sync/sync_providers.dart';
 
 /// App-wide observer that drains the outbox on the two automatic triggers of
@@ -57,8 +59,14 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
 
   /// Fire-and-forget: a trigger asks the worker to drain, it does not wait for
   /// the pass. `SyncWorker` already guards against overlapping drains.
+  ///
+  /// Also invalidates `myRoutesProvider` (Task 14) so a resume/reconnect
+  /// re-fetches the route list — which in turn feeds
+  /// `formReconciliationProvider` fresh `FormSchema`s to diff local drafts
+  /// against (RF39/RF40).
   void _sync() {
     unawaited(ref.read(syncWorkerProvider).syncAll());
+    ref.invalidate(myRoutesProvider);
   }
 
   @override

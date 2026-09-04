@@ -3,12 +3,36 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/routing/route_providers.dart';
+import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
 import '../support/fake_connectivity.dart';
+
+/// Records how many times `fetchMyRoutes` runs — `myRoutesProvider`
+/// invalidation only shows up as a re-fetch the next time something reads
+/// the provider (Riverpod invalidation is lazy), so the tests below re-read
+/// `myRoutesProvider.future` after the trigger fires.
+class _FakeRouteRepository implements RouteRepository {
+  int fetchCount = 0;
+
+  @override
+  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async {
+    fetchCount++;
+    return const [];
+  }
+
+  @override
+  Future<RouteSummary> startRoute({
+    required String routeId,
+    required double latitude,
+    required double longitude,
+    required DateTime startedAt,
+  }) async => throw UnimplementedError('not exercised in this test');
+}
 
 /// Records `syncAll` calls and never drains — the triggers only care that the
 /// worker was asked to sync.
@@ -54,6 +78,30 @@ void main() {
     );
   }
 
+  /// Same as [pump] but hands back the `ProviderContainer` behind the tree,
+  /// so a test can `read(myRoutesProvider.future)` directly — invalidation
+  /// alone is silent until something re-reads the provider.
+  Future<ProviderContainer> pumpWithContainer(
+    WidgetTester tester, {
+    required RouteRepository routeRepository,
+  }) async {
+    final container = ProviderContainer(
+      overrides: [
+        connectivityProvider.overrideWithValue(connectivity),
+        syncWorkerProvider.overrideWithValue(worker),
+        routeRepositoryProvider.overrideWithValue(routeRepository),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const SyncTriggers(child: SizedBox.shrink()),
+      ),
+    );
+    return container;
+  }
+
   testWidgets('renders its child', (tester) async {
     await pump(
       tester,
@@ -71,6 +119,45 @@ void main() {
 
     expect(worker.syncAllCount, 1);
   });
+
+  testWidgets(
+    'regained connectivity also invalidates myRoutesProvider, so the next '
+    'read re-fetches (Task 14 — feeds formReconciliationProvider)',
+    (tester) async {
+      final routeRepository = _FakeRouteRepository();
+      final container = await pumpWithContainer(
+        tester,
+        routeRepository: routeRepository,
+      );
+      await container.read(myRoutesProvider.future);
+      expect(routeRepository.fetchCount, 1);
+
+      connectivity.goOnline();
+      await tester.pump();
+
+      expect(await container.read(myRoutesProvider.future), isEmpty);
+      expect(routeRepository.fetchCount, 2);
+    },
+  );
+
+  testWidgets(
+    'AppLifecycleState.resumed also invalidates myRoutesProvider',
+    (tester) async {
+      final routeRepository = _FakeRouteRepository();
+      final container = await pumpWithContainer(
+        tester,
+        routeRepository: routeRepository,
+      );
+      await container.read(myRoutesProvider.future);
+      expect(routeRepository.fetchCount, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+
+      expect(await container.read(myRoutesProvider.future), isEmpty);
+      expect(routeRepository.fetchCount, 2);
+    },
+  );
 
   testWidgets('AppLifecycleState.resumed triggers a drain', (tester) async {
     await pump(tester);

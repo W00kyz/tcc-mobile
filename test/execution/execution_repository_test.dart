@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
+import 'package:route_monitor/forms/form_draft_store.dart';
+import 'package:route_monitor/forms/form_schema.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
@@ -171,11 +173,54 @@ class _FakeSyncMetaStore implements SyncMetaStore {
       routeStartedAt[routeId] = startedAt;
 }
 
+/// In-memory stand-in for [DriftFormDraftStore] — just enough to seed a
+/// draft under an executionId and observe whether `checkOut` cleared it.
+class _FakeFormDraftStore implements FormDraftStore {
+  final List<String> clearedExecutionIds = [];
+  final Map<String, List<FormDraftItem>> _itemsByExecutionId = {};
+
+  void seed(String executionId, List<FormDraftItem> items) {
+    _itemsByExecutionId[executionId] = items;
+  }
+
+  @override
+  Future<List<FormDraftItem>> itemsFor(String executionId) async =>
+      _itemsByExecutionId[executionId] ?? const [];
+
+  @override
+  Future<void> clear(String executionId) async {
+    clearedExecutionIds.add(executionId);
+    _itemsByExecutionId.remove(executionId);
+  }
+
+  @override
+  Future<void> snapshotFrom(
+    String executionId,
+    String routeStopId,
+    FormSchema schema,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<void> setAnswer(String executionId, String stableKey, Object? value) =>
+      throw UnimplementedError();
+
+  @override
+  Future<bool> isComplete(String executionId) => throw UnimplementedError();
+
+  @override
+  Future<void> reconcile(
+    String executionId,
+    String routeStopId,
+    FormSchema newSchema,
+  ) => throw UnimplementedError();
+}
+
 void main() {
   late _FakeLocalWriteStore store;
   late _FakeStopProgressStore stopProgress;
   late _FakeSyncMetaStore syncMeta;
   late _FakeSyncWorker syncWorker;
+  late _FakeFormDraftStore formDraftStore;
   late ExecutionRepository repository;
 
   setUp(() {
@@ -183,7 +228,14 @@ void main() {
     stopProgress = _FakeStopProgressStore();
     syncMeta = _FakeSyncMetaStore();
     syncWorker = _FakeSyncWorker();
-    repository = ExecutionRepository(store, stopProgress, syncMeta, syncWorker);
+    formDraftStore = _FakeFormDraftStore();
+    repository = ExecutionRepository(
+      store,
+      stopProgress,
+      syncMeta,
+      syncWorker,
+      formDraftStore,
+    );
   });
 
   test('checkIn enqueues one pending row, marks the stop IN_PROGRESS and '
@@ -339,6 +391,87 @@ void main() {
     );
     expect(syncWorker.syncedRoutes, ['route-A']);
   });
+
+  test(
+    'checkOut with a non-empty draft attaches form_version_id and answers, '
+    'then clears the draft under the REAL (StopProgress) executionId, not '
+    'the throwaway one generated for the payload',
+    () async {
+      await stopProgress.upsertInProgress('stop-1', 'exec-real-1');
+      stopProgress.calls.clear();
+      formDraftStore.seed('exec-real-1', const [
+        FormDraftItem(
+          stableKey: 'q1',
+          orderIndex: 0,
+          prompt: 'Prompt',
+          type: QuestionType.text,
+          required: false,
+          options: [],
+          contentHash: 'hash',
+          formVersionId: 'v1',
+          value: 'answered',
+          needsReanswer: false,
+        ),
+      ]);
+
+      await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'v1.floor.1.sig',
+      );
+
+      final rows = await store.unsyncedForRoute('route-A');
+      final payload = rows.single.payload;
+      // The throwaway `execution_id` in the payload is NOT the same value
+      // the draft was cleared under below — that's the whole point of the
+      // fix (checkOut's own generated UUID has nothing to do with the
+      // draft's real executionId).
+      expect(payload['execution_id'], isNot('exec-real-1'));
+      expect(payload['form_version_id'], 'v1');
+      expect(payload['answers'], [
+        {'stable_key': 'q1', 'value': 'answered'},
+      ]);
+      expect(formDraftStore.clearedExecutionIds, ['exec-real-1']);
+    },
+  );
+
+  test(
+    'checkOut with no StopProgress entry sends no answers/form_version_id '
+    'and clears nothing',
+    () async {
+      await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'q',
+      );
+
+      final rows = await store.unsyncedForRoute('route-A');
+      final payload = rows.single.payload;
+      expect(payload.containsKey('answers'), isFalse);
+      expect(payload.containsKey('form_version_id'), isFalse);
+      expect(formDraftStore.clearedExecutionIds, isEmpty);
+    },
+  );
+
+  test(
+    'checkOut with a StopProgress entry but an empty draft sends no '
+    'answers/form_version_id but still clears (a no-op on an empty draft)',
+    () async {
+      await stopProgress.upsertInProgress('stop-1', 'exec-real-1');
+
+      await repository.checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'q',
+      );
+
+      final rows = await store.unsyncedForRoute('route-A');
+      final payload = rows.single.payload;
+      expect(payload.containsKey('answers'), isFalse);
+      expect(payload.containsKey('form_version_id'), isFalse);
+      expect(formDraftStore.clearedExecutionIds, ['exec-real-1']);
+    },
+  );
 
   test('checkOut reuses a caller-supplied checkoutIdempotencyKey', () async {
     await repository.checkOut(

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:route_monitor/execution/evidence_capture.dart';
+import 'package:route_monitor/forms/form_draft_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
@@ -22,12 +23,14 @@ class ExecutionRepository {
     this._stopProgress,
     this._syncMeta,
     this._syncWorker,
+    this._formDraftStore,
   );
 
   final LocalWriteStore _store;
   final StopProgressStore _stopProgress;
   final SyncMetaStore _syncMeta;
   final SyncWorker _syncWorker;
+  final FormDraftStore _formDraftStore;
   static const _uuid = Uuid();
 
   /// [idempotencyKey], when supplied, is reused instead of generating a
@@ -122,7 +125,14 @@ class ExecutionRepository {
   /// `checkIn`'s `idempotencyKey`: omitted generates a fresh one, supplied
   /// reuses the first attempt's key. `execution_id` is a generated UUID the
   /// worker forwards in the dispatch call (the backend accepts and ignores
-  /// it for a check-out).
+  /// it for a check-out) — it is NOT the executionId the stop's form draft
+  /// was snapshotted under (that one lives in `StopProgress`, looked up
+  /// below), so it is never used to read or clear the draft.
+  ///
+  /// Task 14: when the stop has an open, non-empty form draft, its answers
+  /// (and the form version they were answered against) ride along in the
+  /// check-out payload — this is the only place the server ever sees them,
+  /// the draft itself never syncs mid-fill (spec §6.1/§6.3).
   Future<void> checkOut({
     required String routeId,
     required String routeStopId,
@@ -134,6 +144,14 @@ class ExecutionRepository {
     final key = checkoutIdempotencyKey ?? _uuid.v4();
     final executionId = _uuid.v4();
     final scannedAt = DateTime.now().toUtc();
+
+    // The real draft executionId — StopProgress, not the throwaway one just
+    // generated above — is what the draft was snapshotted under at check-in.
+    final progress = await _stopProgress.progressFor(routeStopId);
+    final draftItems = progress == null
+        ? const <FormDraftItem>[]
+        : await _formDraftStore.itemsFor(progress.executionId);
+
     await _store.enqueue(
       id: key,
       kind: PendingOpKind.checkOut,
@@ -146,11 +164,21 @@ class ExecutionRepository {
         'scanned_at': scannedAt.toIso8601String(),
         'checkout_idempotency_key': key,
         'route_stop_id': routeStopId,
+        if (draftItems.isNotEmpty)
+          'form_version_id': draftItems.first.formVersionId,
+        if (draftItems.isNotEmpty)
+          'answers': draftItems
+              .map((i) => {'stable_key': i.stableKey, 'value': i.value})
+              .toList(),
       },
     );
     // Ruling 5 counterpart to checkIn's upsert above; Ruling 3: the row is
     // marked DONE, not deleted.
     await _stopProgress.markDone(routeStopId);
+    // The draft's job ends here — the server now has (or will have, once
+    // this row syncs) the final answers, so nothing is left on-device to
+    // reconcile or resume.
+    if (progress != null) await _formDraftStore.clear(progress.executionId);
     unawaited(_syncWorker.syncRoute(routeId));
   }
 

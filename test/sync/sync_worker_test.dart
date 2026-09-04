@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -38,6 +39,8 @@ class _FakeExecutionApi implements ExecutionApi {
   bool consumeError = true;
   DateTime? serverDate;
   double? lastClientClockOffset;
+  String? lastFormVersionId;
+  List<Map<String, Object?>>? lastAnswers;
 
   @override
   Future<({CheckInResult result, DateTime? serverDate})> checkIn({
@@ -78,8 +81,12 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
+    String? formVersionId,
+    List<Map<String, Object?>>? answers,
   }) async {
     log.add('checkOut:$checkoutIdempotencyKey');
+    lastFormVersionId = formVersionId;
+    lastAnswers = answers;
     final error = checkOutError;
     if (error != null) {
       if (consumeError) checkOutError = null;
@@ -445,6 +452,42 @@ void main() {
         everyElement(PendingOpState.synced),
       );
       expect(h.stopProgress.rows['stop-1']?.status, StopLocalStatus.done);
+    },
+  );
+
+  test(
+    'a checkOut row with form_version_id + answers in its payload passes '
+    'them through to ExecutionApi.checkOut, correctly typed after the '
+    'jsonEncode/jsonDecode round-trip',
+    () async {
+      final h = _Harness();
+      h.store.seed(
+        'c',
+        kind: PendingOpKind.checkOut,
+        createdAt: 1,
+        payload: {
+          ..._FakeLocalWriteStore._defaultPayload('c'),
+          'form_version_id': 'v2',
+          // A round-trip through jsonEncode/jsonDecode (as the real
+          // LocalWriteStore does) leaves this a List<dynamic> of
+          // Map<String, dynamic> — reproduced here instead of a literal
+          // List<Map<String, Object?>> so the test proves the worker's cast
+          // actually copes with that shape.
+          'answers': jsonDecode(
+            jsonEncode([
+              {'stable_key': 'q1', 'value': 'answered'},
+            ]),
+          ),
+        },
+      );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.store.rows['c']!.state, PendingOpState.synced);
+      expect(h.executionApi.lastFormVersionId, 'v2');
+      expect(h.executionApi.lastAnswers, [
+        {'stable_key': 'q1', 'value': 'answered'},
+      ]);
     },
   );
 

@@ -19,6 +19,7 @@ class FormDraftItem {
     required this.required,
     required this.options,
     required this.contentHash,
+    required this.formVersionId,
     required this.value,
     required this.needsReanswer,
   });
@@ -30,6 +31,15 @@ class FormDraftItem {
   final bool required;
   final List<String> options;
   final String contentHash;
+
+  /// The published form version this snapshot was drawn from (Task 14) —
+  /// `checkOut` reads it off any item to fill the outbox payload's
+  /// `form_version_id`, and the reconcile provider compares it against the
+  /// stop's freshly re-fetched `FormSchema.formVersionId` to decide whether a
+  /// re-fetch actually changed anything worth reconciling. The Drift row
+  /// already stored this (`formVersionId` on `FormDraftItemsCompanion`); this
+  /// field just surfaces it on the public, Drift-free type.
+  final String formVersionId;
 
   /// The stored answer, JSON-primitive (bool/num/String/`List<String>`), or
   /// null when unanswered.
@@ -110,6 +120,7 @@ class DriftFormDraftStore implements FormDraftStore {
             options: (jsonDecode(row.optionsJson) as List<dynamic>)
                 .cast<String>(),
             contentHash: row.contentHash,
+            formVersionId: row.formVersionId,
             value: _decodeValue(row.valueJson),
             needsReanswer: row.needsReanswer,
           ),

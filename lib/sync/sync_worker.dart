@@ -216,6 +216,15 @@ class SyncWorker {
       longitude: (payload['longitude'] as num?)?.toDouble(),
       routeStopId: payload['route_stop_id'] as String?,
       clientClockOffsetSeconds: await _syncMeta.getClockOffsetSeconds(),
+      formVersionId: payload['form_version_id'] as String?,
+      // A JSON round-trip through LocalWriteStore's jsonEncode/jsonDecode
+      // leaves each list element as `Map<String, dynamic>`, not the
+      // `Map<String, Object?>` the API signature promises — cast each one
+      // rather than the whole list, which `.cast<Map<String, Object?>>()`
+      // cannot do for a `List<dynamic>` of `Map<String, dynamic>` maps.
+      answers: (payload['answers'] as List?)
+          ?.map((a) => Map<String, Object?>.from(a as Map))
+          .toList(),
     );
     await _stopProgress.markDone(response.result.routeStopId);
     return response.serverDate;

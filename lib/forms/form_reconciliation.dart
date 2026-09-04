@@ -1,0 +1,88 @@
+import 'dart:async';
+
+import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:route_monitor/execution/execution_providers.dart'
+    show stopProgressStoreProvider;
+import 'package:route_monitor/forms/form_draft_store.dart';
+import 'package:route_monitor/forms/form_providers.dart';
+import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/routing/route_providers.dart';
+import 'package:route_monitor/routing/route_repository.dart';
+
+/// RF39/RF40 reconciliation on re-fetch (spec §6.3, Task 11's
+/// `FormDraftStore.reconcile`): every time `myRoutesProvider` resolves a
+/// fresh route list, diff each `IN_PROGRESS` stop's local form draft against
+/// the stop's currently-published `FormSchema` and reconcile it when the
+/// versions differ. A stale draft otherwise only gets reconciled on its next
+/// check-in/out, which may be hours away — this closes that gap the moment
+/// new data arrives (on app resume, reconnect, or a manual route refresh).
+///
+/// A plain `Provider<void>` rather than a `ref.listen`: nothing needs its
+/// value, but Riverpod only re-evaluates a provider body — re-running this
+/// loop — while something keeps it watched. `FormReconciliationTrigger`
+/// below is that "something", mounted once alongside `SyncTriggers` in
+/// `main.dart`'s `builder:` so it stays alive for the app's whole lifetime.
+/// The loop itself is fire-and-forget: it must never block the route list
+/// from rendering, and a failure here (a transient store error) has no user
+/// waiting on it — the next re-fetch tries again.
+final formReconciliationProvider = Provider<void>((ref) {
+  final routes = ref.watch(myRoutesProvider).value;
+  if (routes == null) return;
+  final stopProgress = ref.watch(stopProgressStoreProvider);
+  final formDraftStore = ref.watch(formDraftStoreProvider);
+  unawaited(_reconcileRoutes(routes, stopProgress, formDraftStore));
+});
+
+Future<void> _reconcileRoutes(
+  List<RouteSummary> routes,
+  StopProgressStore stopProgress,
+  FormDraftStore formDraftStore,
+) async {
+  for (final route in routes) {
+    for (final stop in route.stops) {
+      await _reconcileStopIfStale(stop, stopProgress, formDraftStore);
+    }
+  }
+}
+
+Future<void> _reconcileStopIfStale(
+  RouteStopSummary stop,
+  StopProgressStore stopProgress,
+  FormDraftStore formDraftStore,
+) async {
+  final form = stop.form;
+  if (form == null) return;
+
+  final progress = await stopProgress.progressFor(stop.id);
+  if (progress == null || progress.status != StopLocalStatus.inProgress) {
+    return;
+  }
+
+  final items = await formDraftStore.itemsFor(progress.executionId);
+  if (items.isEmpty) return;
+  // Same formVersionId on every item (they're all snapshotted/reconciled
+  // together) — any one item's value tells whether the fresh fetch changed
+  // anything worth reconciling.
+  if (items.first.formVersionId == form.formVersionId) return;
+
+  await formDraftStore.reconcile(progress.executionId, stop.id, form);
+}
+
+/// Mounts [formReconciliationProvider] for the app's whole lifetime by
+/// watching it on every build — see the provider's doc comment for why a
+/// watcher is what keeps the reconcile loop running at all. Wraps
+/// `SyncTriggers`' child in `main.dart`, the same "wrap, don't grow"
+/// discipline `RouteMonitorApp` already follows for that widget.
+class FormReconciliationTrigger extends ConsumerWidget {
+  const FormReconciliationTrigger({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(formReconciliationProvider);
+    return child;
+  }
+}

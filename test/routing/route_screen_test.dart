@@ -242,6 +242,8 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
+    String? formVersionId,
+    List<Map<String, Object?>>? answers,
   }) async => (
     result: CheckOutResult(
       routeStopId: routeStopId ?? 's1',
@@ -694,6 +696,7 @@ Widget _screenWith(
             resolvedOpenExecutions,
             resolvedSyncMeta,
             resolvedSyncWorker,
+            resolvedFormDraftStore,
           ),
         ),
     ],
