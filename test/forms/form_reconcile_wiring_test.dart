@@ -150,4 +150,71 @@ void main() {
       expect(items.single.needsReanswer, isFalse);
     },
   );
+
+  test(
+    'formReconciliationProvider invalidates formDraftProvider and '
+    'formDraftCompleteProvider for a stop it actually reconciled — '
+    "regression for the stale-cache bug found writing Task 15's "
+    'integration test: reconcile() correctly rewrote the on-disk draft, but '
+    'nothing told these two cached FutureProviders to recompute, so '
+    'RouteScreen\'s "Concluir" gate and a re-opened FormScreen kept serving '
+    'pre-reconcile state indefinitely',
+    () async {
+      final db = inMemoryDatabase();
+      addTearDown(db.close);
+      final stopProgress = DriftStopProgressStore(db);
+      final formDraftStore = DriftFormDraftStore(db);
+
+      final v1 = FormSchema(
+        formVersionId: 'v1',
+        questions: [_question(stableKey: 'q1', contentHash: 'h1')],
+      );
+      final v2 = FormSchema(
+        formVersionId: 'v2',
+        questions: [_question(stableKey: 'q1', contentHash: 'h2-changed')],
+      );
+
+      await stopProgress.upsertInProgress('stop-1', 'exec-1');
+      await formDraftStore.snapshotFrom('exec-1', 'stop-1', v1);
+      await formDraftStore.setAnswer('exec-1', 'q1', 'old answer');
+
+      final container = ProviderContainer(
+        overrides: [
+          routeRepositoryProvider.overrideWithValue(
+            _FakeRouteRepository([_routeWithForm(v2)]),
+          ),
+          stopProgressStoreProvider.overrideWithValue(stopProgress),
+          formDraftStoreProvider.overrideWithValue(formDraftStore),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // Seed both providers' caches with the PRE-reconcile (v1) state, the
+      // same way RouteScreen/FormScreen would have from being open before
+      // the new form version landed — this is what must NOT stay stale.
+      final beforeItems = await container.read(
+        formDraftProvider('exec-1').future,
+      );
+      expect(beforeItems.single.needsReanswer, isFalse);
+      final beforeComplete = await container.read(
+        formDraftCompleteProvider('exec-1').future,
+      );
+      expect(beforeComplete, isTrue);
+
+      await container.read(myRoutesProvider.future);
+      container.read(formReconciliationProvider);
+      await pumpEventQueue();
+
+      // Both cached providers must have been invalidated and recomputed to
+      // the post-reconcile (v2) state — not the stale AsyncData read above.
+      final afterItems = await container.read(
+        formDraftProvider('exec-1').future,
+      );
+      expect(afterItems.single.needsReanswer, isTrue);
+      final afterComplete = await container.read(
+        formDraftCompleteProvider('exec-1').future,
+      );
+      expect(afterComplete, isFalse);
+    },
+  );
 }

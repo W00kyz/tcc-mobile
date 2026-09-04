@@ -32,22 +32,24 @@ final formReconciliationProvider = Provider<void>((ref) {
   if (routes == null) return;
   final stopProgress = ref.watch(stopProgressStoreProvider);
   final formDraftStore = ref.watch(formDraftStoreProvider);
-  unawaited(_reconcileRoutes(routes, stopProgress, formDraftStore));
+  unawaited(_reconcileRoutes(ref, routes, stopProgress, formDraftStore));
 });
 
 Future<void> _reconcileRoutes(
+  Ref ref,
   List<RouteSummary> routes,
   StopProgressStore stopProgress,
   FormDraftStore formDraftStore,
 ) async {
   for (final route in routes) {
     for (final stop in route.stops) {
-      await _reconcileStopIfStale(stop, stopProgress, formDraftStore);
+      await _reconcileStopIfStale(ref, stop, stopProgress, formDraftStore);
     }
   }
 }
 
 Future<void> _reconcileStopIfStale(
+  Ref ref,
   RouteStopSummary stop,
   StopProgressStore stopProgress,
   FormDraftStore formDraftStore,
@@ -68,6 +70,18 @@ Future<void> _reconcileStopIfStale(
   if (items.first.formVersionId == form.formVersionId) return;
 
   await formDraftStore.reconcile(progress.executionId, stop.id, form);
+  // The reconcile above just rewrote this stop's draft on disk; without this,
+  // `formDraftProvider`/`formDraftCompleteProvider` (both plain, non-
+  // autoDispose `FutureProvider.family`s — see form_providers.dart) would
+  // keep serving their last-cached AsyncValue forever, so a re-opened
+  // FormScreen and RouteScreen's "Concluir" gate would silently show
+  // pre-reconcile state until the field worker happened to answer a question
+  // (form_screen.dart's own invalidate on `setAnswer`). Scoped to only the
+  // stop(s) actually reconciled this pass — invalidating on every tick for
+  // every stop would defeat the caching for no reason.
+  ref
+    ..invalidate(formDraftProvider(progress.executionId))
+    ..invalidate(formDraftCompleteProvider(progress.executionId));
 }
 
 /// Mounts [formReconciliationProvider] for the app's whole lifetime by
