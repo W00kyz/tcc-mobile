@@ -110,7 +110,7 @@ class DriftFormDraftStore implements FormDraftStore {
             options: (jsonDecode(row.optionsJson) as List<dynamic>)
                 .cast<String>(),
             contentHash: row.contentHash,
-            value: row.valueJson == null ? null : jsonDecode(row.valueJson!),
+            value: _decodeValue(row.valueJson),
             needsReanswer: row.needsReanswer,
           ),
         )
@@ -204,6 +204,17 @@ class DriftFormDraftStore implements FormDraftStore {
 
   static String? _encode(Object? value) =>
       value == null ? null : jsonEncode(value);
+
+  // A MULTI_CHOICE answer round-trips as a JSON array; jsonDecode hands back
+  // a `List<dynamic>` regardless of the element type, which breaks the
+  // documented `List<String>` contract on `FormDraftItem.value` (the form
+  // renderer casts it directly for a checkbox-list UI). Cast it here, same
+  // as `options` two call sites above.
+  static Object? _decodeValue(String? valueJson) {
+    if (valueJson == null) return null;
+    final decoded = jsonDecode(valueJson);
+    return decoded is List ? decoded.cast<String>() : decoded;
+  }
 
   FormDraftItemsCompanion _companionFor(
     String executionId,

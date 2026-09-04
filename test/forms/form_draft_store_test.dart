@@ -98,6 +98,31 @@ void main() {
       final item = (await store.itemsFor('exec1')).single;
       expect(item.value, isNull);
     });
+
+    test(
+      'a MULTI_CHOICE answer round-trips as a genuine List<String>',
+      () async {
+        final schema = FormSchema(
+          formVersionId: 'v1',
+          questions: [
+            _question(
+              stableKey: 'q1',
+              type: QuestionType.multiChoice,
+              options: ['baixo', 'médio', 'alto'],
+            ),
+          ],
+        );
+        await store.snapshotFrom('exec1', 'stop1', schema);
+
+        await store.setAnswer('exec1', 'q1', ['baixo', 'médio']);
+
+        final item = (await store.itemsFor('exec1')).single;
+        // `List<dynamic>` (jsonDecode's raw return) would throw on this cast;
+        // only a genuine `List<String>` satisfies it.
+        final value = item.value! as List<String>;
+        expect(value, ['baixo', 'médio']);
+      },
+    );
   });
 
   group('isComplete', () {
