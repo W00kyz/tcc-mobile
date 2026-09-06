@@ -255,7 +255,7 @@ class SyncWorker {
     );
     // No serverDate to return: the impediment response is just the created
     // row, and check-in/out already measure the clock offset (Ruling 7). A
-    // 409 (`RouteNotInProgress`/`StopNotPending`) falls through `_classify`
+    // 409 (`RouteNotInProgress`/`StopNotReassignable`) falls through `_classify`
     // to `SyncErrorClass.hard`, blocking this route's queue.
     return null;
   }

@@ -104,9 +104,10 @@ abstract class ExecutionApi {
   /// a [routeStopId] for one stop, `scope='ROUTE_REMAINDER'` with a null
   /// [routeStopId] for the rest of the route. Returns nothing — the backend's
   /// response is just the created row, and the clock offset is already
-  /// measured on every check-in/out (spec Ruling 7). A 409
-  /// (`RouteNotInProgress`/`StopNotPending`) is a hard failure for the sync
-  /// worker: the report can never succeed for this route state.
+  /// measured on every check-in/out. A 409
+  /// (`RouteNotInProgress`/`StopNotReassignable` — "expected PENDING or
+  /// IN_PROGRESS") is a hard failure for the sync worker: the report can never
+  /// succeed for this route state.
   Future<void> reportImpediment({
     required String routeId,
     required String? routeStopId,

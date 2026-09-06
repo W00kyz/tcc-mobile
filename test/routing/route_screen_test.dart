@@ -2470,6 +2470,10 @@ void main() {
         findsNothing,
       );
 
+      // Regression: the note field is capped at the backend `note` column
+      // (`String(500)`) so an over-long note can't poison the route sync queue.
+      expect(tester.widget<TextField>(find.byType(TextField)).maxLength, 500);
+
       await tester.tap(find.text('Recusa do local'));
       await tester.enterText(find.byType(TextField), 'Portão fechado.');
       await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));

@@ -100,7 +100,11 @@ class _ImpedimentDialogState extends State<ImpedimentDialog> {
             const SizedBox(height: 8),
             TextField(
               controller: _noteController,
-              maxLength: 2000,
+              // Matches the backend `impediments.note` column, `String(500)`
+              // (backend/app/domain/impediments/models.py) and spec §3 — a
+              // longer note would 422 at the API and block the route's sync
+              // queue with a visible chip.
+              maxLength: 500,
               maxLines: 3,
               decoration: const InputDecoration(
                 hintText: 'Observação (opcional)',
