@@ -871,6 +871,57 @@ void main() {
     expect(find.text('Ponto eventual'), findsOneWidget);
   });
 
+  testWidgets('marks a reassigned stop', (tester) async {
+    await tester.pumpWidget(
+      _screenWith(
+        _StaticRouteRepository([
+          _routeWith(
+            stops: const [
+              RouteStopSummary(
+                id: 's1',
+                orderIndex: 1,
+                status: 'PENDING',
+                servicePointName: 'Sala 101',
+                latitude: -7.21,
+                longitude: -35.91,
+                pointType: 'REGULAR',
+                reassigned: true,
+              ),
+            ],
+          ),
+        ]),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reatribuído'), findsOneWidget);
+  });
+
+  testWidgets('hides the reassigned badge for a normal stop', (tester) async {
+    await tester.pumpWidget(
+      _screenWith(
+        _StaticRouteRepository([
+          _routeWith(
+            stops: const [
+              RouteStopSummary(
+                id: 's1',
+                orderIndex: 1,
+                status: 'PENDING',
+                servicePointName: 'Sala 101',
+                latitude: -7.21,
+                longitude: -35.91,
+                pointType: 'REGULAR',
+              ),
+            ],
+          ),
+        ]),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Reatribuído'), findsNothing);
+  });
+
   testWidgets('renders the arrival window when it is set', (tester) async {
     await tester.pumpWidget(
       _screenWith(

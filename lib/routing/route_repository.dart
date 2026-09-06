@@ -21,6 +21,7 @@ class RouteStopSummary {
     this.serviceTypeId,
     this.serviceTypeName,
     this.form,
+    this.reassigned = false,
   });
 
   factory RouteStopSummary.fromJson(Map<String, dynamic> json) =>
@@ -52,6 +53,7 @@ class RouteStopSummary {
         form: json['form'] == null
             ? null
             : FormSchema.fromJson(json['form'] as Map<String, dynamic>),
+        reassigned: json['reassigned'] as bool? ?? false,
       );
 
   final String id;
@@ -75,6 +77,12 @@ class RouteStopSummary {
   /// The stop's PUBLISHED `active_form_version` and its ordered questions
   /// (spec §6.2), or null when the stop's service type has no form attached.
   final FormSchema? form;
+
+  /// True when this stop was moved onto the current route by an emergency
+  /// substitution/reassignment (Etapa 8, RF20) — the substitute sees a
+  /// "Reatribuído" badge. Defaults to false: a stop from an older backend,
+  /// or the common not-reassigned case.
+  final bool reassigned;
 }
 
 class RouteSummary {

@@ -646,6 +646,11 @@ class _StopTile extends StatelessWidget {
                   padding: EdgeInsets.only(left: 8),
                   child: Chip(label: Text('Ponto eventual')),
                 ),
+              if (stop.reassigned)
+                const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Chip(label: Text('Reatribuído')),
+                ),
             ],
           ),
           subtitle: window == null && leg == null

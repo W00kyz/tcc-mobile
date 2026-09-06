@@ -241,6 +241,38 @@ void main() {
     },
   );
 
+  test('fetchMyRoutes parses a reassigned stop flag when set', () async {
+    final payload = _routePayload();
+    final stopsJson = (payload['stops'] as List<dynamic>)
+        .cast<Map<String, dynamic>>();
+    stopsJson[0]['reassigned'] = true;
+    stopsJson[1]['reassigned'] = false;
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _FakeAdapter(statusCode: 200, body: [payload]);
+    final repository = DioRouteRepository(dio);
+
+    final stops = (await repository.fetchMyRoutes()).first.stops;
+
+    expect(stops[0].reassigned, isTrue);
+    expect(stops[1].reassigned, isFalse);
+  });
+
+  test(
+    'fetchMyRoutes defaults reassigned to false when the key is absent',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _FakeAdapter(
+          statusCode: 200,
+          body: [_routePayload()],
+        );
+      final repository = DioRouteRepository(dio);
+
+      final stops = (await repository.fetchMyRoutes()).first.stops;
+
+      expect(stops[0].reassigned, isFalse);
+    },
+  );
+
   test('startRoute posts the captured position', () async {
     final dio = Dio(BaseOptions(baseUrl: 'http://test'));
     late RequestOptions capturedRequest;
