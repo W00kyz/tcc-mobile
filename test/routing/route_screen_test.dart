@@ -2449,8 +2449,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      // s1 (IN_PROGRESS) plus s2/s3 (PENDING) each carry the action now — the
+      // first is s1, the stop this report is about.
       await tester.tap(
-        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+        find.widgetWithText(TextButton, 'Sinalizar impossibilidade').first,
       );
       await tester.pumpAndSettle();
 
@@ -2496,8 +2498,10 @@ void main() {
   );
 
   testWidgets(
-    'no "Sinalizar impossibilidade" action on a PENDING stop',
+    'no "Sinalizar impossibilidade" action on a not-yet-started route',
     (tester) async {
+      // _FakeRouteRepository serves a PLANNED route — the backend rejects an
+      // impediment before the route is IN_PROGRESS (RF16).
       await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
       await tester.pumpAndSettle();
 
@@ -2505,6 +2509,56 @@ void main() {
         find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
         findsNothing,
       );
+    },
+  );
+
+  RouteSummary pendingStopOnInProgressRoute() => _routeWith(
+    status: 'IN_PROGRESS',
+    startedAt: DateTime(2026, 8, 25, 8),
+    stops: const [
+      RouteStopSummary(
+        id: 's1',
+        orderIndex: 1,
+        status: 'PENDING',
+        servicePointName: 'Sala 101',
+        latitude: -7.21,
+        longitude: -35.91,
+        pointType: 'REGULAR',
+      ),
+    ],
+  );
+
+  testWidgets(
+    'tapping "Sinalizar impossibilidade" on a not-yet-reached (PENDING) stop '
+    'enqueues a STOP-scoped impediment for that stop — a worker who cannot '
+    'reach the stop to scan the QR must still be able to signal it',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([pendingStopOnInProgressRoute()]),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Acesso bloqueado'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
+      await tester.pumpAndSettle();
+
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.impediment);
+      expect(rows.single.payload['scope'], 'STOP');
+      expect(rows.single.payload['route_stop_id'], 's1');
+      expect(find.text('Impossibilidade sinalizada.'), findsOneWidget);
     },
   );
 }

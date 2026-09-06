@@ -190,14 +190,21 @@ class RouteScreen extends ConsumerWidget {
             )
           : null,
       formIncomplete: formIncomplete,
-      signalImpossibilityAction: inProgress
+      // PENDING too, not just IN_PROGRESS: a worker who can't even reach a
+      // stop (access blocked → can't scan the QR → can't check in) must still
+      // be able to signal it. Gated on an IN_PROGRESS route — the backend
+      // rejects an impediment on a route that has not started (RF16). A DONE
+      // stop is finished work and offers no such action.
+      signalImpossibilityAction:
+          route.status == 'IN_PROGRESS' &&
+              (inProgress || effectiveStatus == 'PENDING')
           ? () => _signalImpossibility(context, ref, route, stop)
           : null,
     );
   }
 
-  /// Opens [ImpedimentDialog] for an `IN_PROGRESS` stop and, on a non-null
-  /// result, enqueues the report through `ExecutionRepository.reportImpediment`
+  /// Opens [ImpedimentDialog] for a `PENDING` or `IN_PROGRESS` stop and, on a
+  /// non-null result, enqueues it via `ExecutionRepository.reportImpediment`
   /// (spec RF16-RF17). The "resto da rota" switch is only offered when more
   /// than one `PENDING` stop still remains — with one or zero left there is no
   /// remainder worth signalling separately from this stop. Same shape as
@@ -594,9 +601,9 @@ class _StopTile extends StatelessWidget {
   final bool formIncomplete;
 
   /// Opens the "Sinalizar impossibilidade" dialog for this stop, or null to
-  /// hide the action — RouteScreen passes a callback only for an `IN_PROGRESS`
-  /// stop. Same plain-callback pattern as [onConcluir]/[formFillAction] so this
-  /// widget stays ref-free.
+  /// hide the action — RouteScreen passes a callback for a `PENDING` or
+  /// `IN_PROGRESS` stop (never a DONE one). Same plain-callback pattern as
+  /// [onConcluir]/[formFillAction] so this widget stays ref-free.
   final VoidCallback? signalImpossibilityAction;
 
   @override
