@@ -565,6 +565,69 @@ void main() {
     expect(syncWorker.syncedRoutes, ['route-A']);
   });
 
+  test(
+    'reportImpediment enqueues one pending impediment row for a STOP '
+    'scope, does not touch StopProgress and kicks the sync worker once',
+    () async {
+      await repository.reportImpediment(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        scope: 'STOP',
+        reason: 'ROOM_LOCKED',
+        note: 'Sala trancada.',
+      );
+
+      final rows = await store.unsyncedForRoute('route-A');
+      expect(rows, hasLength(1));
+      expect(rows.single.state, PendingOpState.pending);
+      expect(rows.single.kind, PendingOpKind.impediment);
+      expect(rows.single.payload['route_id'], 'route-A');
+      expect(rows.single.payload['route_stop_id'], 'stop-1');
+      expect(rows.single.payload['scope'], 'STOP');
+      expect(rows.single.payload['reason'], 'ROOM_LOCKED');
+      expect(rows.single.payload['note'], 'Sala trancada.');
+      expect(rows.single.payload['reported_at'], isA<String>());
+      expect(
+        () => DateTime.parse(rows.single.payload['reported_at'] as String),
+        returnsNormally,
+      );
+
+      // Signalling never changes the stop's on-device status (unlike checkIn).
+      expect(stopProgress.calls, isEmpty);
+      expect(syncWorker.syncedRoutes, ['route-A']);
+    },
+  );
+
+  test('reportImpediment for a ROUTE_REMAINDER scope enqueues '
+      'route_stop_id: null', () async {
+    await repository.reportImpediment(
+      routeId: 'route-A',
+      routeStopId: null,
+      scope: 'ROUTE_REMAINDER',
+      reason: 'VEHICLE_BREAKDOWN',
+    );
+
+    final rows = await store.unsyncedForRoute('route-A');
+    expect(rows.single.payload.containsKey('route_stop_id'), isTrue);
+    expect(rows.single.payload['route_stop_id'], isNull);
+    expect(rows.single.payload['note'], isNull);
+    expect(syncWorker.syncedRoutes, ['route-A']);
+  });
+
+  test('reportImpediment returns immediately even though the sync kick never '
+      'completes (fire-and-forget)', () async {
+    await repository
+        .reportImpediment(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          scope: 'STOP',
+          reason: 'ROOM_LOCKED',
+        )
+        .timeout(const Duration(seconds: 1));
+
+    expect(syncWorker.syncedRoutes, ['route-A']);
+  });
+
   test('addNote enqueues one pending evidenceNote row and kicks the sync '
       'worker once', () async {
     await repository.addNote(

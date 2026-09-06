@@ -84,6 +84,7 @@ stopSyncChipProvider =
           case PendingOpKind.checkIn:
           case PendingOpKind.checkOut:
           case PendingOpKind.startRoute:
+          case PendingOpKind.impediment:
             return row.payload['route_stop_id'] == routeStopId;
           case PendingOpKind.evidencePhoto:
           case PendingOpKind.evidenceNote:

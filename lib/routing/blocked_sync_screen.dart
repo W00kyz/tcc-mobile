@@ -63,10 +63,14 @@ String _rowLabel(PendingOperationRow row) {
     PendingOpKind.evidencePhoto => 'Foto',
     PendingOpKind.evidenceNote => 'Observação',
     PendingOpKind.startRoute => 'Início de rota',
+    PendingOpKind.impediment => 'Impedimento',
   };
   final reference = switch (row.kind) {
     PendingOpKind.checkIn ||
-    PendingOpKind.checkOut => row.payload['route_stop_id'] as String?,
+    PendingOpKind.checkOut ||
+    // A ROUTE_REMAINDER impediment has a null route_stop_id and falls back
+    // to the kind label alone, same as a bare startRoute row.
+    PendingOpKind.impediment => row.payload['route_stop_id'] as String?,
     PendingOpKind.evidencePhoto ||
     PendingOpKind.evidenceNote => row.payload['execution_id'] as String?,
     PendingOpKind.startRoute => row.routeId,

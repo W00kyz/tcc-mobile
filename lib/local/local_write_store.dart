@@ -13,6 +13,7 @@ enum PendingOpKind {
   evidencePhoto,
   evidenceNote,
   startRoute,
+  impediment,
 }
 
 /// Drain state of a buffered write. `.name` is persisted in the `state` column.

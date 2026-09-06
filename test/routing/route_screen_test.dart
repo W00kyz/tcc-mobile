@@ -253,6 +253,16 @@ class _FakeExecutionApi implements ExecutionApi {
     ),
     serverDate: null,
   );
+
+  @override
+  Future<void> reportImpediment({
+    required String routeId,
+    required String? routeStopId,
+    required String scope,
+    required String reason,
+    required DateTime reportedAt,
+    String? note,
+  }) async => throw UnimplementedError();
 }
 
 /// An in-memory stand-in for the local write-ahead log —

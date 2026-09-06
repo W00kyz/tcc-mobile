@@ -195,6 +195,46 @@ class ExecutionRepository {
     unawaited(_syncWorker.syncRoute(routeId));
   }
 
+  /// Signals an impossibility to execute through the outbox — same drift-first
+  /// shape as [startRoute]: a `pending` [PendingOpKind.impediment] row plus a
+  /// non-blocking [SyncWorker] kick, never touching the network. `reported_at`
+  /// is captured here, at tap time, so a late sync still records when the
+  /// field worker actually raised it (spec RF16-RF17).
+  ///
+  /// Unlike [checkIn], this makes NO optimistic local state change: signalling
+  /// does not change the stop's status on device. The reassignment (done by
+  /// the manager) is what eventually removes or re-homes the stop, and the app
+  /// learns that via the next route sync.
+  ///
+  /// [routeStopId] is null when [scope] is `ROUTE_REMAINDER` (the whole
+  /// remainder of the route), populated when [scope] is `STOP`.
+  Future<void> reportImpediment({
+    required String routeId,
+    required String? routeStopId,
+    required String scope,
+    required String reason,
+    String? note,
+  }) async {
+    final reportedAt = DateTime.now().toUtc();
+    final key = _uuid.v4();
+    await _store.enqueue(
+      id: key,
+      kind: PendingOpKind.impediment,
+      routeId: routeId,
+      payload: {
+        'route_id': routeId,
+        'route_stop_id': routeStopId,
+        'scope': scope,
+        'reason': reason,
+        'note': note,
+        // A String, never a DateTime — LocalWriteStore.enqueue jsonEncodes
+        // this map, which throws on a raw DateTime value.
+        'reported_at': reportedAt.toIso8601String(),
+      },
+    );
+    unawaited(_syncWorker.syncRoute(routeId));
+  }
+
   /// Adds a photo to [executionId]'s evidence list — same drift-first
   /// discipline as `checkIn`/`checkOut`: enqueued as a `pending` row
   /// ([PendingOpKind.evidencePhoto]) that the [SyncWorker] uploads later.

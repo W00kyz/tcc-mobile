@@ -503,6 +503,16 @@ class _RecordingExecutionApi implements ExecutionApi {
     );
   }
 
+  @override
+  Future<void> reportImpediment({
+    required String routeId,
+    required String? routeStopId,
+    required String scope,
+    required String reason,
+    required DateTime reportedAt,
+    String? note,
+  }) async => throw UnimplementedError();
+
   List<String> get calls => _log.where((c) => c.startsWith('check')).toList();
 }
 

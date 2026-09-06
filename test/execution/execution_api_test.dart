@@ -272,6 +272,65 @@ void main() {
       );
     },
   );
+
+  test(
+    'reportImpediment posts the body to /routes/{routeId}/impediments',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'));
+      late RequestOptions captured;
+      dio.httpClientAdapter = _FakeAdapter(
+        statusCode: 201,
+        body: {'id': 'imp-1', 'status': 'OPEN'},
+        onRequest: (options) => captured = options,
+      );
+      final api = DioExecutionApi(dio);
+
+      await api.reportImpediment(
+        routeId: 'route-1',
+        routeStopId: 'stop-1',
+        scope: 'STOP',
+        reason: 'ROOM_LOCKED',
+        note: 'Sala trancada.',
+        reportedAt: DateTime.utc(2026, 8, 25, 8, 20),
+      );
+
+      expect(captured.path, '/routes/route-1/impediments');
+      final body = captured.data as Map;
+      expect(body['route_stop_id'], 'stop-1');
+      expect(body['scope'], 'STOP');
+      expect(body['reason'], 'ROOM_LOCKED');
+      expect(body['note'], 'Sala trancada.');
+      expect(body['reported_at'], '2026-08-25T08:20:00.000Z');
+    },
+  );
+
+  test(
+    'reportImpediment sends a null route_stop_id for a ROUTE_REMAINDER scope',
+    () async {
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'));
+      late RequestOptions captured;
+      dio.httpClientAdapter = _FakeAdapter(
+        statusCode: 201,
+        body: {'id': 'imp-1', 'status': 'OPEN'},
+        onRequest: (options) => captured = options,
+      );
+      final api = DioExecutionApi(dio);
+
+      await api.reportImpediment(
+        routeId: 'route-1',
+        routeStopId: null,
+        scope: 'ROUTE_REMAINDER',
+        reason: 'VEHICLE_BREAKDOWN',
+        reportedAt: DateTime.utc(2026, 8, 25, 8, 20),
+      );
+
+      final body = captured.data as Map;
+      expect(body.containsKey('route_stop_id'), isTrue);
+      expect(body['route_stop_id'], isNull);
+      expect(body['note'], isNull);
+      expect(body['scope'], 'ROUTE_REMAINDER');
+    },
+  );
 }
 
 class _FakeAdapter implements HttpClientAdapter {

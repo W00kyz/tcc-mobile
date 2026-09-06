@@ -172,6 +172,7 @@ class SyncWorker {
       PendingOpKind.checkIn => _performCheckIn(payload),
       PendingOpKind.checkOut => _performCheckOut(payload),
       PendingOpKind.startRoute => _performStartRoute(payload),
+      PendingOpKind.impediment => _performImpediment(payload),
       PendingOpKind.evidencePhoto => _evidenceApi.uploadPhoto(
         executionId: payload['execution_id'] as String,
         bytes: base64Decode(payload['bytes_b64'] as String),
@@ -240,6 +241,22 @@ class SyncWorker {
     // No serverDate to return: `start` carries a client-supplied
     // `started_at` and the response body is a RouteSummary, not a bare
     // instant. Check-in/out already measure the clock offset (Ruling 7).
+    return null;
+  }
+
+  Future<DateTime?> _performImpediment(Map<String, dynamic> payload) async {
+    await _executionApi.reportImpediment(
+      routeId: payload['route_id'] as String,
+      routeStopId: payload['route_stop_id'] as String?,
+      scope: payload['scope'] as String,
+      reason: payload['reason'] as String,
+      note: payload['note'] as String?,
+      reportedAt: DateTime.parse(payload['reported_at'] as String),
+    );
+    // No serverDate to return: the impediment response is just the created
+    // row, and check-in/out already measure the clock offset (Ruling 7). A
+    // 409 (`RouteNotInProgress`/`StopNotPending`) falls through `_classify`
+    // to `SyncErrorClass.hard`, blocking this route's queue.
     return null;
   }
 

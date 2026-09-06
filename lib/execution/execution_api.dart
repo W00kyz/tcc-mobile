@@ -99,6 +99,22 @@ abstract class ExecutionApi {
     String? formVersionId,
     List<Map<String, Object?>>? answers,
   });
+
+  /// Signals an impossibility to execute (spec RF16-RF17): `scope='STOP'` with
+  /// a [routeStopId] for one stop, `scope='ROUTE_REMAINDER'` with a null
+  /// [routeStopId] for the rest of the route. Returns nothing — the backend's
+  /// response is just the created row, and the clock offset is already
+  /// measured on every check-in/out (spec Ruling 7). A 409
+  /// (`RouteNotInProgress`/`StopNotPending`) is a hard failure for the sync
+  /// worker: the report can never succeed for this route state.
+  Future<void> reportImpediment({
+    required String routeId,
+    required String? routeStopId,
+    required String scope,
+    required String reason,
+    required DateTime reportedAt,
+    String? note,
+  });
 }
 
 /// The response's `Date` header parsed to a [DateTime], or null when the
@@ -212,6 +228,27 @@ class DioExecutionApi implements ExecutionApi {
       if (candidates != null) throw AmbiguousRoomException(candidates);
       rethrow;
     }
+  }
+
+  @override
+  Future<void> reportImpediment({
+    required String routeId,
+    required String? routeStopId,
+    required String scope,
+    required String reason,
+    required DateTime reportedAt,
+    String? note,
+  }) async {
+    await _dio.post<Map<String, dynamic>>(
+      '/routes/$routeId/impediments',
+      data: {
+        'route_stop_id': routeStopId,
+        'scope': scope,
+        'reason': reason,
+        'note': note,
+        'reported_at': reportedAt.toUtc().toIso8601String(),
+      },
+    );
   }
 }
 

@@ -36,11 +36,21 @@ class _FakeExecutionApi implements ExecutionApi {
   final List<String> log;
   Exception? checkInError;
   Exception? checkOutError;
+  Exception? impedimentError;
   bool consumeError = true;
   DateTime? serverDate;
   double? lastClientClockOffset;
   String? lastFormVersionId;
   List<Map<String, Object?>>? lastAnswers;
+  ({
+    String routeId,
+    String? routeStopId,
+    String scope,
+    String reason,
+    String? note,
+    DateTime reportedAt,
+  })?
+  lastImpediment;
 
   @override
   Future<({CheckInResult result, DateTime? serverDate})> checkIn({
@@ -101,6 +111,31 @@ class _FakeExecutionApi implements ExecutionApi {
       ),
       serverDate: serverDate,
     );
+  }
+
+  @override
+  Future<void> reportImpediment({
+    required String routeId,
+    required String? routeStopId,
+    required String scope,
+    required String reason,
+    required DateTime reportedAt,
+    String? note,
+  }) async {
+    log.add('impediment:$scope:$routeStopId');
+    lastImpediment = (
+      routeId: routeId,
+      routeStopId: routeStopId,
+      scope: scope,
+      reason: reason,
+      note: note,
+      reportedAt: reportedAt,
+    );
+    final error = impedimentError;
+    if (error != null) {
+      if (consumeError) impedimentError = null;
+      throw error;
+    }
   }
 }
 
@@ -803,6 +838,92 @@ void main() {
       await h.worker.syncRoute('route-R');
 
       expect(h.log, ['start:route-R', 'checkIn:a']);
+    },
+  );
+
+  Map<String, dynamic> impedimentPayload({
+    required DateTime reportedAt,
+    String? routeStopId = 'stop-1',
+    String scope = 'STOP',
+  }) => {
+    'route_id': 'route-R',
+    'route_stop_id': routeStopId,
+    'scope': scope,
+    'reason': 'ROOM_LOCKED',
+    'note': 'Sala trancada.',
+    'reported_at': reportedAt.toIso8601String(),
+  };
+
+  test(
+    'an impediment row dispatches via ExecutionApi.reportImpediment with the '
+    'payload values, typed after the jsonEncode/jsonDecode round-trip',
+    () async {
+      final h = _Harness();
+      final reportedAt = DateTime.utc(2026, 6, 1, 9, 15);
+      h.store.seed(
+        'i',
+        kind: PendingOpKind.impediment,
+        createdAt: 1,
+        payload: impedimentPayload(reportedAt: reportedAt),
+      );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['impediment:STOP:stop-1']);
+      expect(h.store.rows['i']!.state, PendingOpState.synced);
+      expect(h.executionApi.lastImpediment!.routeId, 'route-R');
+      expect(h.executionApi.lastImpediment!.routeStopId, 'stop-1');
+      expect(h.executionApi.lastImpediment!.scope, 'STOP');
+      expect(h.executionApi.lastImpediment!.reason, 'ROOM_LOCKED');
+      expect(h.executionApi.lastImpediment!.note, 'Sala trancada.');
+      expect(h.executionApi.lastImpediment!.reportedAt, reportedAt);
+    },
+  );
+
+  test(
+    'a ROUTE_REMAINDER impediment row forwards a null route_stop_id',
+    () async {
+      final h = _Harness();
+      h.store.seed(
+        'i',
+        kind: PendingOpKind.impediment,
+        createdAt: 1,
+        payload: impedimentPayload(
+          routeStopId: null,
+          scope: 'ROUTE_REMAINDER',
+          reportedAt: DateTime.utc(2026, 6, 1, 9, 15),
+        ),
+      );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.store.rows['i']!.state, PendingOpState.synced);
+      expect(h.executionApi.lastImpediment!.routeStopId, isNull);
+      expect(h.executionApi.lastImpediment!.scope, 'ROUTE_REMAINDER');
+    },
+  );
+
+  test(
+    'a 409 on an impediment row blocks it and halts the route queue',
+    () async {
+      final h = _Harness();
+      h.executionApi.impedimentError = _dio(
+        status: 409,
+        body: {'detail': 'Route is not IN_PROGRESS.'},
+      );
+      h.store
+        ..seed(
+          'i',
+          kind: PendingOpKind.impediment,
+          createdAt: 1,
+          payload: impedimentPayload(reportedAt: DateTime.utc(2026, 6, 1, 9)),
+        )
+        ..seed('b', kind: PendingOpKind.checkOut, createdAt: 2);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.store.rows['i']!.state, PendingOpState.blocked);
+      expect(h.store.rows['b']!.state, PendingOpState.pending);
     },
   );
 }
