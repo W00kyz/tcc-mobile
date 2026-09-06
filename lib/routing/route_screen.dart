@@ -6,6 +6,7 @@ import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/impediment_dialog.dart';
 import 'package:route_monitor/execution/room_picker.dart';
 import 'package:route_monitor/execution/room_resolution.dart';
 import 'package:route_monitor/forms/form_providers.dart';
@@ -189,7 +190,46 @@ class RouteScreen extends ConsumerWidget {
             )
           : null,
       formIncomplete: formIncomplete,
+      signalImpossibilityAction: inProgress
+          ? () => _signalImpossibility(context, ref, route, stop)
+          : null,
     );
+  }
+
+  /// Opens [ImpedimentDialog] for an `IN_PROGRESS` stop and, on a non-null
+  /// result, enqueues the report through `ExecutionRepository.reportImpediment`
+  /// (spec RF16-RF17). The "resto da rota" switch is only offered when more
+  /// than one `PENDING` stop still remains — with one or zero left there is no
+  /// remainder worth signalling separately from this stop. Same shape as
+  /// [_checkOut]: read the repo, call it, then a confirmation snackbar; the
+  /// dialog stays ref-free (pure input collection).
+  Future<void> _signalImpossibility(
+    BuildContext context,
+    WidgetRef ref,
+    RouteSummary route,
+    RouteStopSummary stop,
+  ) async {
+    final pendingCount = route.stops.where((s) => s.status == 'PENDING').length;
+    final choice = await showDialog<ImpedimentChoice>(
+      context: context,
+      builder: (_) => ImpedimentDialog(showRemainderSwitch: pendingCount > 1),
+    );
+    if (choice == null || !context.mounted) return;
+
+    await ref
+        .read(executionRepositoryProvider)
+        .reportImpediment(
+          routeId: route.id,
+          routeStopId: choice.scope == 'ROUTE_REMAINDER' ? null : stop.id,
+          scope: choice.scope,
+          reason: choice.reason,
+          note: choice.note,
+        );
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Impossibilidade sinalizada.')),
+      );
+    }
   }
 
   /// One route-level "Fazer check-in" action, not a per-stop button: the QR
@@ -517,6 +557,7 @@ class _StopTile extends StatelessWidget {
     this.evidenceSection,
     this.formFillAction,
     this.formIncomplete = false,
+    this.signalImpossibilityAction,
   });
 
   final RouteStopSummary stop;
@@ -551,6 +592,12 @@ class _StopTile extends StatelessWidget {
   /// incomplete draft — shows a hint below the tile explaining why
   /// "Concluir" is disabled.
   final bool formIncomplete;
+
+  /// Opens the "Sinalizar impossibilidade" dialog for this stop, or null to
+  /// hide the action — RouteScreen passes a callback only for an `IN_PROGRESS`
+  /// stop. Same plain-callback pattern as [onConcluir]/[formFillAction] so this
+  /// widget stays ref-free.
+  final VoidCallback? signalImpossibilityAction;
 
   @override
   Widget build(BuildContext context) {
@@ -610,7 +657,9 @@ class _StopTile extends StatelessWidget {
                   child: const Text('Concluir'),
                 ),
         ),
-        if (formFillAction != null || formIncomplete)
+        if (formFillAction != null ||
+            formIncomplete ||
+            signalImpossibilityAction != null)
           Padding(
             padding: const EdgeInsets.only(left: 56, right: 16, bottom: 8),
             child: Column(
@@ -623,6 +672,11 @@ class _StopTile extends StatelessWidget {
                   ),
                 if (formIncomplete)
                   const Text('Preencha o formulário para concluir.'),
+                if (signalImpossibilityAction != null)
+                  TextButton(
+                    onPressed: signalImpossibilityAction,
+                    child: const Text('Sinalizar impossibilidade'),
+                  ),
               ],
             ),
           ),

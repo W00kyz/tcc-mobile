@@ -2356,4 +2356,155 @@ void main() {
       expect(items.single.stableKey, 'k1');
     },
   );
+
+  // --- Task 10: "Sinalizar impossibilidade" -----------------------------
+
+  RouteSummary inProgressStopWithTwoPendingRoute() => _routeWith(
+    status: 'IN_PROGRESS',
+    startedAt: DateTime(2026, 8, 25, 8),
+    stops: const [
+      RouteStopSummary(
+        id: 's1',
+        orderIndex: 1,
+        status: 'IN_PROGRESS',
+        servicePointName: 'Sala 101',
+        latitude: -7.21,
+        longitude: -35.91,
+        pointType: 'REGULAR',
+      ),
+      RouteStopSummary(
+        id: 's2',
+        orderIndex: 2,
+        status: 'PENDING',
+        servicePointName: 'Sala 102',
+        latitude: -7.22,
+        longitude: -35.92,
+        pointType: 'REGULAR',
+      ),
+      RouteStopSummary(
+        id: 's3',
+        orderIndex: 3,
+        status: 'PENDING',
+        servicePointName: 'Sala 103',
+        latitude: -7.23,
+        longitude: -35.93,
+        pointType: 'REGULAR',
+      ),
+    ],
+  );
+
+  testWidgets(
+    'tapping "Sinalizar impossibilidade" on an IN_PROGRESS stop, picking a '
+    'reason and confirming enqueues an impediment row scoped to that stop',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Acesso bloqueado'), findsOneWidget);
+      // A single PENDING stop remains (none here) → no "resto da rota" switch.
+      expect(
+        find.text('Sinalizar para o resto da rota também'),
+        findsNothing,
+      );
+
+      await tester.tap(find.text('Recusa do local'));
+      await tester.enterText(find.byType(TextField), 'Portão fechado.');
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
+      await tester.pumpAndSettle();
+
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.impediment);
+      expect(rows.single.payload['scope'], 'STOP');
+      expect(rows.single.payload['route_stop_id'], 's1');
+      expect(rows.single.payload['reason'], 'SITE_REFUSAL');
+      expect(rows.single.payload['note'], 'Portão fechado.');
+      expect(find.text('Impossibilidade sinalizada.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'with two or more PENDING stops left, flipping the "resto da rota" switch '
+    'enqueues a ROUTE_REMAINDER impediment with a null route_stop_id',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopWithTwoPendingRoute()]),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Problema de saúde'));
+      await tester.tap(find.text('Sinalizar para o resto da rota também'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
+      await tester.pumpAndSettle();
+
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.payload['scope'], 'ROUTE_REMAINDER');
+      expect(rows.single.payload['route_stop_id'], isNull);
+      expect(rows.single.payload['reason'], 'HEALTH_ISSUE');
+      expect(rows.single.payload['note'], isNull);
+    },
+  );
+
+  testWidgets(
+    'cancelling the impediment dialog enqueues nothing',
+    (tester) async {
+      final store = _InMemoryLocalWriteStore();
+      await tester.pumpWidget(
+        _screenWith(
+          _StaticRouteRepository([inProgressStopRoute()]),
+          executionApi: _FakeExecutionApi(),
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
+      await tester.pumpAndSettle();
+
+      expect(await store.unsyncedForRoute('r1'), isEmpty);
+      expect(find.text('Impossibilidade sinalizada.'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'no "Sinalizar impossibilidade" action on a PENDING stop',
+    (tester) async {
+      await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+        findsNothing,
+      );
+    },
+  );
 }
