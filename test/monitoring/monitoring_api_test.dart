@@ -70,12 +70,81 @@ void main() {
       ),
     );
   });
+
+  test('fetchNotifications GETs /notifications/me and parses items', () async {
+    late RequestOptions captured;
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _FakeAdapter(
+        statusCode: 200,
+        onRequest: (options) => captured = options,
+        body: {
+          'items': [
+            {
+              'id': 'n1',
+              'kind': 'ROUTE_ASSIGNED',
+              'title': 'Nova rota',
+              'body': 'Você recebeu uma rota para hoje.',
+              'created_at': '2026-09-07T09:00:00Z',
+              'read_at': null,
+            },
+          ],
+          'total': 1,
+          'page': 1,
+          'page_size': 30,
+        },
+      );
+
+    final result = await DioMonitoringApi(dio).fetchNotifications(limit: 15);
+
+    expect(captured.path, '/notifications/me');
+    expect(captured.method, 'GET');
+    expect(captured.queryParameters['page_size'], 15);
+    expect(result, hasLength(1));
+    expect(result.single.id, 'n1');
+    expect(result.single.kind, 'ROUTE_ASSIGNED');
+    expect(result.single.isUnread, isTrue);
+  });
+
+  test('unreadCount GETs /notifications/me/unread-count', () async {
+    late RequestOptions captured;
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _FakeAdapter(
+        statusCode: 200,
+        onRequest: (options) => captured = options,
+        body: {'count': 4},
+      );
+
+    final count = await DioMonitoringApi(dio).unreadCount();
+
+    expect(captured.path, '/notifications/me/unread-count');
+    expect(captured.method, 'GET');
+    expect(count, 4);
+  });
+
+  test('markRead POSTs /notifications/{id}/read', () async {
+    late RequestOptions captured;
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _FakeAdapter(
+        statusCode: 204,
+        onRequest: (options) => captured = options,
+      );
+
+    await DioMonitoringApi(dio).markRead('n1');
+
+    expect(captured.path, '/notifications/n1/read');
+    expect(captured.method, 'POST');
+  });
 }
 
 class _FakeAdapter implements HttpClientAdapter {
-  _FakeAdapter({required this.statusCode, this.onRequest});
+  _FakeAdapter({
+    required this.statusCode,
+    this.onRequest,
+    this.body = const <String, dynamic>{},
+  });
   final int statusCode;
   final void Function(RequestOptions)? onRequest;
+  final Object body;
 
   @override
   void close({bool force = false}) {}
@@ -88,7 +157,7 @@ class _FakeAdapter implements HttpClientAdapter {
   ) async {
     onRequest?.call(options);
     return ResponseBody.fromString(
-      jsonEncode(const <String, dynamic>{}),
+      jsonEncode(body),
       statusCode,
       headers: {
         Headers.contentTypeHeader: [Headers.jsonContentType],

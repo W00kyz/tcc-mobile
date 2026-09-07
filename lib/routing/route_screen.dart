@@ -14,6 +14,8 @@ import 'package:route_monitor/forms/form_screen.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart'
     show StopLocalStatus;
+import 'package:route_monitor/monitoring/monitoring_providers.dart';
+import 'package:route_monitor/monitoring/notifications_screen.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
@@ -76,7 +78,10 @@ class RouteScreen extends ConsumerWidget {
     final routesAsync = ref.watch(myRoutesProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Rota de hoje')),
+      appBar: AppBar(
+        title: const Text('Rota de hoje'),
+        actions: const [_NotificationsBell()],
+      ),
       body: routesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) =>
@@ -432,6 +437,27 @@ class RouteScreen extends ConsumerWidget {
     // Re-read the optimistic marker so the button flips now, without waiting
     // on a myRoutesProvider refetch (spec Ruling 5).
     ref.invalidate(routeStartedLocallyProvider(routeId));
+  }
+}
+
+/// The app-bar bell that opens [NotificationsScreen], with a count badge while
+/// there are unread notifications (RF49). A failed/loading count shows no badge
+/// rather than a spinner in the header.
+class _NotificationsBell extends ConsumerWidget {
+  const _NotificationsBell();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(unreadCountProvider).asData?.value ?? 0;
+    final button = IconButton(
+      icon: const Icon(Icons.notifications_outlined),
+      tooltip: 'Notificações',
+      onPressed: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+      ),
+    );
+    if (unread == 0) return button;
+    return Badge(label: Text('$unread'), child: button);
   }
 }
 

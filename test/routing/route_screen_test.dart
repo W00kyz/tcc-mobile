@@ -22,6 +22,9 @@ import 'package:route_monitor/forms/form_screen.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/monitoring/monitoring_api.dart';
+import 'package:route_monitor/monitoring/monitoring_providers.dart';
+import 'package:route_monitor/monitoring/notifications_screen.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
@@ -205,6 +208,35 @@ class _FailingLocationService implements LocationService {
   Future<Coordinates> getCurrentPosition() async {
     throw StateError('no GPS signal');
   }
+}
+
+/// A stub [MonitoringApi] — the route screen's notification bell watches
+/// `unreadCountProvider`, and navigating to `NotificationsScreen` watches
+/// `notificationsProvider`; both must stay off the real Dio client under
+/// flutter_test.
+class _FakeMonitoringApi implements MonitoringApi {
+  _FakeMonitoringApi({this.unread = 0});
+
+  final int unread;
+
+  @override
+  Future<List<AppNotification>> fetchNotifications({int limit = 30}) async =>
+      const [];
+
+  @override
+  Future<int> unreadCount() async => unread;
+
+  @override
+  Future<void> markRead(String id) async {}
+
+  @override
+  Future<void> reportPosition({
+    required String routeId,
+    required double latitude,
+    required double longitude,
+    required DateTime reportedAt,
+    double? accuracyM,
+  }) async => throw UnimplementedError();
 }
 
 /// A no-op [ExecutionApi] — since Etapa 6 Task 8 the repository never calls
@@ -649,7 +681,9 @@ Widget _screenWith(
   FormDraftStore? formDraftStore,
   String? apiBaseUrl,
   Session? session,
+  MonitoringApi? monitoringApi,
 }) {
+  final resolvedMonitoringApi = monitoringApi ?? _FakeMonitoringApi();
   // Always overridden, regardless of whether the test cares about evidence:
   // any IN_PROGRESS stop builds a _StopEvidenceSection that watches
   // openExecutionForProvider/stopEvidenceProvider/localWriteStoreProvider,
@@ -678,6 +712,7 @@ Widget _screenWith(
   return ProviderScope(
     overrides: [
       routeRepositoryProvider.overrideWithValue(repository),
+      monitoringApiProvider.overrideWithValue(resolvedMonitoringApi),
       syncWorkerProvider.overrideWithValue(resolvedSyncWorker),
       if (locationService != null)
         locationServiceProvider.overrideWithValue(locationService),
@@ -1041,6 +1076,7 @@ void main() {
       ProviderScope(
         overrides: [
           routeRepositoryProvider.overrideWithValue(_FakeRouteRepository()),
+          monitoringApiProvider.overrideWithValue(_FakeMonitoringApi()),
           syncMetaStoreProvider.overrideWithValue(_InMemorySyncMetaStore()),
           syncWorkerProvider.overrideWithValue(_RecordingSyncWorker()),
           stopProgressStoreProvider.overrideWithValue(_NoopStopProgressStore()),
@@ -2616,4 +2652,49 @@ void main() {
       expect(find.text('Impossibilidade sinalizada.'), findsOneWidget);
     },
   );
+
+  testWidgets('shows the unread count on the notification bell badge', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _screenWith(
+        _FakeRouteRepository(),
+        monitoringApi: _FakeMonitoringApi(unread: 3),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(of: find.byType(Badge), matching: find.text('3')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('shows no badge when there are no unread notifications', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _screenWith(_FakeRouteRepository()),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(Badge), findsNothing);
+  });
+
+  testWidgets('tapping the bell opens the notifications screen', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _screenWith(
+        _FakeRouteRepository(),
+        monitoringApi: _FakeMonitoringApi(unread: 1),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.notifications_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NotificationsScreen), findsOneWidget);
+  });
 }

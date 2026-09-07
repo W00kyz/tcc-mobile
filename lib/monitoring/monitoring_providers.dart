@@ -19,6 +19,18 @@ final monitoringApiProvider = Provider<MonitoringApi>((ref) {
   return DioMonitoringApi(dio);
 });
 
+/// The worker's in-app notification list (RF49). Plain `FutureProvider` — the
+/// screen re-fetches via `ref.invalidate` after a `markRead`.
+final notificationsProvider = FutureProvider<List<AppNotification>>((ref) {
+  return ref.watch(monitoringApiProvider).fetchNotifications();
+});
+
+/// The unread-notification count behind the route-screen bell badge.
+/// Invalidated alongside [notificationsProvider] after a `markRead`.
+final unreadCountProvider = FutureProvider<int>((ref) {
+  return ref.watch(monitoringApiProvider).unreadCount();
+});
+
 /// The app-wide position reporter. Long-lived (one timer, not one per screen);
 /// `PositionReportingTrigger` calls `start`/`stop` as the visible route enters
 /// and leaves `IN_PROGRESS`.

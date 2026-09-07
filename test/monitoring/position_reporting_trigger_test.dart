@@ -115,4 +115,17 @@ class _NullApi implements MonitoringApi {
     required DateTime reportedAt,
     double? accuracyM,
   }) async {}
+
+  @override
+  Future<List<AppNotification>> fetchNotifications({int limit = 30}) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<int> unreadCount() async => throw UnimplementedError();
+
+  @override
+  Future<void> markRead(String id) async {
+    throw UnimplementedError();
+  }
 }

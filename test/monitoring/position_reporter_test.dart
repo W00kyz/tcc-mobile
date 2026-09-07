@@ -169,6 +169,19 @@ class _RecordingMonitoringApi implements MonitoringApi {
       _ReportCall(routeId: routeId, latitude: latitude, longitude: longitude),
     );
   }
+
+  @override
+  Future<List<AppNotification>> fetchNotifications({int limit = 30}) async {
+    throw UnimplementedError();
+  }
+
+  @override
+  Future<int> unreadCount() async => throw UnimplementedError();
+
+  @override
+  Future<void> markRead(String id) async {
+    throw UnimplementedError();
+  }
 }
 
 /// Captures the callback [PositionReporter] hands to `Timer.periodic` so a
