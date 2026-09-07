@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/monitoring/monitoring_api.dart';
+import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -31,6 +33,38 @@ class _FakeRouteRepository implements RouteRepository {
     required double latitude,
     required double longitude,
     required DateTime startedAt,
+  }) async => throw UnimplementedError('not exercised in this test');
+}
+
+/// Counts how often the notification endpoints are hit — invalidation of the
+/// monitoring providers only shows up as a re-fetch the next time something
+/// reads them (Riverpod invalidation is lazy).
+class _FakeMonitoringApi implements MonitoringApi {
+  int fetchNotificationsCount = 0;
+  int unreadCountCount = 0;
+
+  @override
+  Future<List<AppNotification>> fetchNotifications({int limit = 30}) async {
+    fetchNotificationsCount++;
+    return const [];
+  }
+
+  @override
+  Future<int> unreadCount() async {
+    unreadCountCount++;
+    return 0;
+  }
+
+  @override
+  Future<void> markRead(String id) async {}
+
+  @override
+  Future<void> reportPosition({
+    required String routeId,
+    required double latitude,
+    required double longitude,
+    required DateTime reportedAt,
+    double? accuracyM,
   }) async => throw UnimplementedError('not exercised in this test');
 }
 
@@ -84,12 +118,15 @@ void main() {
   Future<ProviderContainer> pumpWithContainer(
     WidgetTester tester, {
     required RouteRepository routeRepository,
+    MonitoringApi? monitoringApi,
   }) async {
     final container = ProviderContainer(
       overrides: [
         connectivityProvider.overrideWithValue(connectivity),
         syncWorkerProvider.overrideWithValue(worker),
         routeRepositoryProvider.overrideWithValue(routeRepository),
+        if (monitoringApi != null)
+          monitoringApiProvider.overrideWithValue(monitoringApi),
       ],
     );
     addTearDown(container.dispose);
@@ -158,6 +195,33 @@ void main() {
 
       expect(await container.read(myRoutesProvider.future), isEmpty);
       expect(routeRepository.fetchCount, 2);
+    },
+  );
+
+  testWidgets(
+    'AppLifecycleState.resumed also refreshes the notification providers '
+    '(RF49 — a route assigned mid-shift must bump the bell badge)',
+    (tester) async {
+      connectivity.isOnlineValue = true;
+      final routeRepository = _FakeRouteRepository();
+      final monitoringApi = _FakeMonitoringApi();
+      final container = await pumpWithContainer(
+        tester,
+        routeRepository: routeRepository,
+        monitoringApi: monitoringApi,
+      );
+      await container.read(unreadCountProvider.future);
+      await container.read(notificationsProvider.future);
+      expect(monitoringApi.unreadCountCount, 1);
+      expect(monitoringApi.fetchNotificationsCount, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+
+      expect(await container.read(unreadCountProvider.future), 0);
+      expect(await container.read(notificationsProvider.future), isEmpty);
+      expect(monitoringApi.unreadCountCount, 2);
+      expect(monitoringApi.fetchNotificationsCount, 2);
     },
   );
 

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:route_monitor/monitoring/monitoring_providers.dart'
+    show notificationsProvider, unreadCountProvider;
 import 'package:route_monitor/routing/route_providers.dart'
     show myRoutesProvider;
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -68,9 +70,18 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
   /// resuming with no network yet) would throw on the re-fetch and
   /// `route_screen.dart`'s error branch would replace the whole,
   /// still-perfectly-valid route list with a generic error message.
+  ///
+  /// The notification providers are also refreshed here (RF49): the route
+  /// screen is the home screen and mounts once, so a route assigned/modified
+  /// mid-shift only reaches the bell badge on a resume/reconnect poll. Their
+  /// widgets already tolerate an errored re-fetch (the badge just hides), so
+  /// they don't need the online gate.
   void _sync() {
     unawaited(ref.read(syncWorkerProvider).syncAll());
     unawaited(_invalidateRoutesIfOnline());
+    ref
+      ..invalidate(unreadCountProvider)
+      ..invalidate(notificationsProvider);
   }
 
   Future<void> _invalidateRoutesIfOnline() async {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -75,6 +77,52 @@ void main() {
 
     expect(reporter.stopCount, greaterThanOrEqualTo(1));
   });
+
+  // The `if (routes == null) return child;` guard is the load-bearing
+  // login-screen-crash guard: with no successful route list, the widget must
+  // NOT touch `positionReporterProvider` (it reads `API_BASE_URL`, unset on the
+  // login screen). Here `positionReporterProvider` is deliberately left
+  // un-overridden and pointed at a builder that throws, so any read fails.
+  for (final state in ['error', 'loading']) {
+    testWidgets(
+      'renders child without reading the reporter ($state route list)',
+      (
+        tester,
+      ) async {
+        final guardContainer = ProviderContainer(
+          // No backoff retry timer left pending when the error branch throws.
+          retry: (_, _) => null,
+          overrides: [
+            positionReporterProvider.overrideWith(
+              (ref) =>
+                  throw StateError('positionReporterProvider must not be read'),
+            ),
+            myRoutesProvider.overrideWith((ref) async {
+              if (state == 'error') throw Exception('logged out');
+              return Completer<List<RouteSummary>>().future;
+            }),
+          ],
+        );
+        addTearDown(guardContainer.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: guardContainer,
+            child: const Directionality(
+              textDirection: TextDirection.ltr,
+              child: PositionReportingTrigger(
+                child: Text('guarded-child'),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        expect(find.text('guarded-child'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }
 
 RouteSummary _route(String id, String status) => RouteSummary(
