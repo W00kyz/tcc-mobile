@@ -1,0 +1,89 @@
+// The constructor forwards public named params to private fields: a private
+// field can't be an initializing formal while its param name stays public,
+// and these params stay public so callers and tests can inject fakes (same
+// idiom as sync_worker.dart).
+// ignore_for_file: prefer_initializing_formals
+
+import 'dart:async';
+
+import 'package:dio/dio.dart';
+
+import 'package:route_monitor/monitoring/monitoring_api.dart';
+import 'package:route_monitor/routing/location_service.dart';
+
+/// Builds the periodic timer that drives each report tick. Injected so tests
+/// can capture the callback and fire ticks deterministically instead of
+/// waiting on a real clock (docs/CLAUDE.md — Tests: "Nunca tocar (...) o
+/// relógio (...) Injetar a costura (...) por parâmetro").
+typedef PeriodicTimerFactory =
+    Timer Function(Duration interval, void Function(Timer) onTick);
+
+/// Reports the device's GPS position to the backend on a fixed interval while
+/// a route is `IN_PROGRESS` (spec §2 Ruling 5, RNF11). Fire-and-forget: a
+/// dropped fix does not matter — the next tick covers it — so this never
+/// touches the outbox.
+///
+///     final reporter = PositionReporter(location: gps, api: monitoringApi)
+///       ..start('route-1');
+///     // ... later, when the route ends:
+///     reporter.stop();
+class PositionReporter {
+  PositionReporter({
+    required LocationService location,
+    required MonitoringApi api,
+    Duration interval = const Duration(seconds: 60),
+    PeriodicTimerFactory createTimer = Timer.periodic,
+  }) : _location = location,
+       _api = api,
+       _interval = interval,
+       _createTimer = createTimer;
+
+  final LocationService _location;
+  final MonitoringApi _api;
+  final Duration _interval;
+  final PeriodicTimerFactory _createTimer;
+
+  Timer? _timer;
+  String? _routeId;
+
+  /// Starts reporting for [routeId]. A no-op if already running for the same
+  /// route; restarts (new timer, new route) if running for a different one.
+  void start(String routeId) {
+    if (_timer != null && _routeId == routeId) return;
+    stop();
+    _routeId = routeId;
+    _timer = _createTimer(_interval, (_) => unawaited(_tick()));
+  }
+
+  /// Cancels the timer. Safe to call when not running.
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+    _routeId = null;
+  }
+
+  void dispose() => stop();
+
+  Future<void> _tick() async {
+    final routeId = _routeId;
+    if (routeId == null) return;
+    try {
+      final position = await _location.getCurrentPosition();
+      await _api.reportPosition(
+        routeId: routeId,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        reportedAt: DateTime.now().toUtc(),
+      );
+    } on DioException catch (error) {
+      // 409 = the backend rejected the fix because the route is no longer the
+      // worker's or no longer `IN_PROGRESS` (spec §2 Ruling 5) — reporting can
+      // never succeed again for this route, so stop. Any other HTTP failure is
+      // transient (auth blip, 5xx): swallow it and keep ticking.
+      if (error.response?.statusCode == 409) stop();
+    } on Object {
+      // Transient GPS/permission/network error — swallow, the next tick
+      // retries (fire-and-forget, spec §2 Ruling 5).
+    }
+  }
+}

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:route_monitor/auth/login_screen.dart';
 import 'package:route_monitor/forms/form_reconciliation.dart';
+import 'package:route_monitor/monitoring/position_reporting_trigger.dart';
 import 'package:route_monitor/routing/route_screen.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
 
@@ -39,7 +40,9 @@ class RouteMonitorApp extends StatelessWidget {
       routerConfig: _router,
       builder: (context, child) => SyncTriggers(
         child: FormReconciliationTrigger(
-          child: child ?? const SizedBox.shrink(),
+          child: PositionReportingTrigger(
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );
