@@ -25,6 +25,21 @@ class SessionNotifier extends Notifier<Session?> {
     await storage.saveAccessToken(session.accessToken);
     state = session;
   }
+
+  /// Drops the stored session on "Sair" — clears the secure storage so no
+  /// access token survives the sign-out, then unauthenticates the app.
+  Future<void> logout() async {
+    await ref.read(sessionStorageProvider).clear();
+    state = null;
+  }
+
+  /// Called once the user accepts the consent notice: the backend has recorded
+  /// the acceptance, so the router guard should let this session through.
+  void clearConsentRequirement() {
+    final current = state;
+    if (current == null) return;
+    state = current.copyWith(consentRequired: false);
+  }
 }
 
 final sessionProvider = NotifierProvider<SessionNotifier, Session?>(

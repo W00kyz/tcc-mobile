@@ -32,6 +32,48 @@ void main() {
     expect(session.role, 'FIELD_WORKER');
   });
 
+  test('login reads consent_required off the response', () async {
+    const accessToken = 'a.eyJyb2xlIjoiRklFTERfV09SS0VSIn0.c';
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _FakeAdapter(
+        statusCode: 200,
+        body: {
+          'access_token': accessToken,
+          'refresh_token': 'r',
+          'token_type': 'bearer',
+          'consent_required': true,
+        },
+      );
+    final repository = DioAuthRepository(dio);
+
+    final session = await repository.login(
+      email: 'joao@empresa.com',
+      password: 'senha-forte-o-suficiente',
+    );
+
+    expect(session.consentRequired, isTrue);
+  });
+
+  test(
+    'login defaults consentRequired to false when the key is absent',
+    () async {
+      const accessToken = 'a.eyJyb2xlIjoiRklFTERfV09SS0VSIn0.c';
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _FakeAdapter(
+          statusCode: 200,
+          body: {'access_token': accessToken, 'refresh_token': 'r'},
+        );
+      final repository = DioAuthRepository(dio);
+
+      final session = await repository.login(
+        email: 'joao@empresa.com',
+        password: 'senha-forte-o-suficiente',
+      );
+
+      expect(session.consentRequired, isFalse);
+    },
+  );
+
   test('login throws InvalidCredentialsException on a 401 response', () async {
     final dio = Dio(BaseOptions(baseUrl: 'http://test'))
       ..httpClientAdapter = _FakeAdapter(

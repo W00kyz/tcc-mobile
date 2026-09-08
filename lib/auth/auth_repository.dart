@@ -7,11 +7,24 @@ class Session {
     required this.accessToken,
     required this.refreshToken,
     required this.role,
+    this.consentRequired = false,
   });
 
   final String accessToken;
   final String refreshToken;
   final String role;
+
+  /// True when the backend's login response flagged that this user still owes
+  /// consent to the current data-processing notice (LGPD, RNF10). The router
+  /// guard holds such a session on `/consentimento` until it is cleared.
+  final bool consentRequired;
+
+  Session copyWith({bool? consentRequired}) => Session(
+    accessToken: accessToken,
+    refreshToken: refreshToken,
+    role: role,
+    consentRequired: consentRequired ?? this.consentRequired,
+  );
 }
 
 class InvalidCredentialsException implements Exception {
@@ -47,6 +60,7 @@ class DioAuthRepository implements AuthRepository {
         accessToken: accessToken,
         refreshToken: body['refresh_token'] as String,
         role: _decodeRoleClaim(accessToken),
+        consentRequired: body['consent_required'] as bool? ?? false,
       );
     } on DioException catch (error) {
       if (error.response?.statusCode == 401) {

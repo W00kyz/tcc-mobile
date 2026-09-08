@@ -169,6 +169,7 @@ abstract final class AppStrings {
   static const String consentAcceptButton = 'Li e concordo';
   static const String consentLoadError =
       'Não foi possível carregar o termo de consentimento.';
+  static const String consentExitButton = 'Sair';
 
   // --- "meus dados" screen (Etapa 11 Task 11) ---
   static const String myDataTitle = 'Meus dados';
