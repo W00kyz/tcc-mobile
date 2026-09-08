@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/notification_models.dart';
 
@@ -15,15 +16,15 @@ class NotificationsScreen extends ConsumerWidget {
     final notificationsAsync = ref.watch(notificationsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Notificações')),
+      appBar: AppBar(title: const Text(AppStrings.notificationsAppBarTitle)),
       body: notificationsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => const Center(
-          child: Text('Não foi possível carregar as notificações.'),
+          child: Text(AppStrings.notificationsLoadError),
         ),
         data: (notifications) {
           if (notifications.isEmpty) {
-            return const Center(child: Text('Nenhuma notificação.'));
+            return const Center(child: Text(AppStrings.notificationsEmpty));
           }
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(notificationsProvider),
@@ -53,10 +54,10 @@ class NotificationsScreen extends ConsumerWidget {
 /// `NotificationKind`). An unknown kind falls back to the raw value rather
 /// than hiding the row.
 String _kindLabel(String kind) => switch (kind) {
-  'ALERT' => 'Alerta',
-  'ROUTE_ASSIGNED' => 'Nova rota',
-  'ROUTE_MODIFIED' => 'Rota alterada',
-  'STOP_REASSIGNED' => 'Ponto reatribuído',
+  'ALERT' => AppStrings.notificationKindAlert,
+  'ROUTE_ASSIGNED' => AppStrings.notificationKindRouteAssigned,
+  'ROUTE_MODIFIED' => AppStrings.notificationKindRouteModified,
+  'STOP_REASSIGNED' => AppStrings.notificationKindStopReassigned,
   _ => kind,
 };
 
@@ -96,8 +97,10 @@ class _NotificationTile extends StatelessWidget {
           Text(notification.body),
           const SizedBox(height: 4),
           Text(
-            '${_kindLabel(notification.kind)} · '
-            '${_formatTimestamp(notification.createdAt)}',
+            AppStrings.notificationMeta(
+              _kindLabel(notification.kind),
+              _formatTimestamp(notification.createdAt),
+            ),
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],

@@ -19,6 +19,7 @@ import 'package:route_monitor/forms/form_draft_store.dart';
 import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/forms/form_schema.dart';
 import 'package:route_monitor/forms/form_screen.dart';
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
@@ -766,7 +767,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Sala 101'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Iniciar rota'), findsOneWidget);
+    expect(
+      find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+      findsOneWidget,
+    );
   });
 
   testWidgets(
@@ -788,11 +792,16 @@ void main() {
       await tester.pumpAndSettle();
       expect(repository.fetchCount, 1);
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Iniciar rota'));
+      await tester.tap(
+        find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+      );
       await tester.pumpAndSettle();
 
-      expect(find.widgetWithText(FilledButton, 'Iniciar rota'), findsNothing);
-      expect(find.text('Rota iniciada'), findsOneWidget);
+      expect(
+        find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+        findsNothing,
+      );
+      expect(find.text(AppStrings.routeStartedHeader), findsOneWidget);
       expect(repository.fetchCount, 1);
 
       final rows = await store.unsyncedForRoute('r1');
@@ -818,11 +827,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Iniciar rota'));
+      await tester.tap(
+        find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+      );
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Não foi possível obter sua localização.'),
+        find.text(AppStrings.routeLocationUnavailable),
         findsOneWidget,
       );
       expect(await store.unsyncedForRoute('r1'), isEmpty);
@@ -833,7 +844,7 @@ void main() {
     await tester.pumpWidget(_screenWith(_StaticRouteRepository(const [])));
     await tester.pumpAndSettle();
 
-    expect(find.text('Nenhuma rota atribuída para hoje.'), findsOneWidget);
+    expect(find.text(AppStrings.routeEmpty), findsOneWidget);
   });
 
   testWidgets('shows the error state when the fetch fails', (tester) async {
@@ -841,7 +852,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text('Não foi possível carregar sua rota.'),
+      find.text(AppStrings.routeLoadError),
       findsOneWidget,
     );
   });
@@ -871,14 +882,20 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(Chip, 'EVENTUAL'), findsOneWidget);
+    expect(
+      find.widgetWithText(Chip, AppStrings.routeOccasionalChip),
+      findsOneWidget,
+    );
   });
 
   testWidgets('hides the EVENTUAL chip for a regular route', (tester) async {
     await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(Chip, 'EVENTUAL'), findsNothing);
+    expect(
+      find.widgetWithText(Chip, AppStrings.routeOccasionalChip),
+      findsNothing,
+    );
   });
 
   testWidgets('marks an occasional stop', (tester) async {
@@ -903,7 +920,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Ponto eventual'), findsOneWidget);
+    expect(find.text(AppStrings.routeStopOccasionalChip), findsOneWidget);
   });
 
   testWidgets('marks a reassigned stop', (tester) async {
@@ -929,7 +946,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Reatribuído'), findsOneWidget);
+    expect(find.text(AppStrings.routeStopReassignedChip), findsOneWidget);
   });
 
   testWidgets('hides the reassigned badge for a normal stop', (tester) async {
@@ -954,7 +971,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Reatribuído'), findsNothing);
+    expect(find.text(AppStrings.routeStopReassignedChip), findsNothing);
   });
 
   testWidgets('renders the arrival window when it is set', (tester) async {
@@ -1008,7 +1025,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Janela: 08:00'), findsOneWidget);
+    expect(find.text(AppStrings.routeWindow('08:00')), findsOneWidget);
     expect(find.textContaining('–'), findsNothing);
   });
 
@@ -1089,13 +1106,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(FilledButton, 'Ver no mapa'), findsOneWidget);
+    expect(
+      find.widgetWithText(FilledButton, AppStrings.routeViewMapButton),
+      findsOneWidget,
+    );
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Ver no mapa'));
+    await tester.tap(
+      find.widgetWithText(FilledButton, AppStrings.routeViewMapButton),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(MapScreen), findsOneWidget);
-    expect(find.text('Trajeto da rota'), findsOneWidget);
+    expect(find.text(AppStrings.mapAppBarTitle), findsOneWidget);
   });
 
   testWidgets(
@@ -1105,7 +1127,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(FilledButton, 'Fazer check-in'),
+        find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
         findsNothing,
       );
     },
@@ -1139,7 +1161,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(FilledButton, 'Fazer check-in'),
+        find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
         findsOneWidget,
       );
     },
@@ -1172,7 +1194,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(FilledButton, 'Fazer check-in'),
+        find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
         findsNothing,
       );
     },
@@ -1210,7 +1232,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(FilledButton, 'Fazer check-in'),
+        find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
         findsNothing,
       );
     },
@@ -1250,7 +1272,9 @@ void main() {
     WidgetTester tester,
     String rawValue,
   ) async {
-    await tester.tap(find.widgetWithText(FilledButton, 'Fazer check-in'));
+    await tester.tap(
+      find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(ScanScreen), findsOneWidget);
@@ -1259,7 +1283,9 @@ void main() {
   }
 
   Future<void> tapConcluirAndScan(WidgetTester tester, String rawValue) async {
-    await tester.tap(find.widgetWithText(TextButton, 'Concluir'));
+    await tester.tap(
+      find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(ScanScreen), findsOneWidget);
@@ -1306,7 +1332,7 @@ void main() {
       expect(rows.single.payload['qr_payload'], 'v1.floor.1.sig');
       expect(rows.single.payload['latitude'], -7.23);
       expect(rows.single.payload['longitude'], -35.88);
-      expect(find.text('Check-in registrado.'), findsOneWidget);
+      expect(find.text(AppStrings.routeCheckInDone), findsOneWidget);
     },
   );
 
@@ -1324,7 +1350,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Fazer check-in'));
+      await tester.tap(
+        find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
+      );
       await tester.pumpAndSettle();
       final scanScreenContext = tester.element(find.byType(ScanScreen));
       Navigator.of(scanScreenContext).pop();
@@ -1332,7 +1360,7 @@ void main() {
 
       expect(await store.unsyncedForRoute('r1'), isEmpty);
       expect(
-        find.widgetWithText(FilledButton, 'Fazer check-in'),
+        find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
         findsOneWidget,
       );
     },
@@ -1450,14 +1478,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Vários pontos correspondem — escolha o certo:'),
+        find.text(AppStrings.roomPickerPrompt),
         findsNothing,
       );
       final rows = await store.unsyncedForRoute('r1');
       expect(rows, hasLength(1));
       expect(rows.single.kind, PendingOpKind.checkIn);
       expect(rows.single.payload['route_stop_id'], 's1');
-      expect(find.text('Check-in registrado.'), findsOneWidget);
+      expect(find.text(AppStrings.routeCheckInDone), findsOneWidget);
     },
   );
 
@@ -1480,7 +1508,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Vários pontos correspondem — escolha o certo:'),
+        find.text(AppStrings.roomPickerPrompt),
         findsOneWidget,
       );
       // Nearest ("Sala 101", s1) renders first and pre-selected; pick the
@@ -1499,7 +1527,7 @@ void main() {
       final rows = await store.unsyncedForRoute('r1');
       expect(rows, hasLength(1));
       expect(rows.single.payload['route_stop_id'], 's2');
-      expect(find.text('Check-in registrado.'), findsOneWidget);
+      expect(find.text(AppStrings.routeCheckInDone), findsOneWidget);
     },
   );
 
@@ -1524,7 +1552,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(await store.unsyncedForRoute('r1'), isEmpty);
-      expect(find.text('Check-in registrado.'), findsNothing);
+      expect(find.text(AppStrings.routeCheckInDone), findsNothing);
     },
   );
 
@@ -1551,7 +1579,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Vários pontos correspondem — escolha o certo:'),
+        find.text(AppStrings.roomPickerPrompt),
         findsNothing,
       );
       final rows = await store.unsyncedForRoute('r1');
@@ -1578,7 +1606,10 @@ void main() {
       await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
       await tester.pumpAndSettle();
 
-      expect(find.widgetWithText(TextButton, 'Concluir'), findsNothing);
+      expect(
+        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
+        findsNothing,
+      );
     },
   );
 
@@ -1607,7 +1638,7 @@ void main() {
       expect(rows.single.kind, PendingOpKind.checkOut);
       expect(rows.single.payload['qr_payload'], 'v1.floor.1.sig');
       expect(rows.single.payload['route_stop_id'], 's1');
-      expect(find.text('Check-out registrado.'), findsOneWidget);
+      expect(find.text(AppStrings.routeCheckOutDone), findsOneWidget);
       expect(repository.fetchCount, 2);
     },
   );
@@ -1621,8 +1652,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Adicionar foto'), findsNothing);
-      expect(find.text('Adicionar observação'), findsNothing);
+      expect(find.text(AppStrings.routeAddPhotoButton), findsNothing);
+      expect(find.text(AppStrings.routeAddNoteButton), findsNothing);
     },
   );
 
@@ -1639,11 +1670,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(TextButton, 'Adicionar foto'),
+        find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton),
         findsOneWidget,
       );
       expect(
-        find.widgetWithText(TextButton, 'Adicionar observação'),
+        find.widgetWithText(TextButton, AppStrings.routeAddNoteButton),
         findsOneWidget,
       );
     },
@@ -1708,13 +1739,16 @@ void main() {
 
       // IN_PROGRESS (s2): "Concluir" plus both evidence actions, and exactly
       // one of each across the whole list — s1/s3 get neither.
-      expect(find.widgetWithText(TextButton, 'Concluir'), findsOneWidget);
       expect(
-        find.widgetWithText(TextButton, 'Adicionar foto'),
+        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
         findsOneWidget,
       );
       expect(
-        find.widgetWithText(TextButton, 'Adicionar observação'),
+        find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(TextButton, AppStrings.routeAddNoteButton),
         findsOneWidget,
       );
 
@@ -1725,7 +1759,7 @@ void main() {
       // PENDING stop has a route-level entry point, not a per-stop button —
       // the single "Fazer check-in" button below the list.
       expect(
-        find.widgetWithText(FilledButton, 'Fazer check-in'),
+        find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
         findsOneWidget,
       );
     },
@@ -1750,7 +1784,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
+      await tester.tap(
+        find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton),
+      );
       await tester.pumpAndSettle();
 
       final rows = await store.unsyncedForRoute('r1');
@@ -1758,7 +1794,7 @@ void main() {
       expect(rows.single.kind, PendingOpKind.evidencePhoto);
       expect(rows.single.payload['execution_id'], 'exec-1');
       expect(rows.single.payload['sha256'], 'abc123');
-      expect(find.text('Foto adicionada.'), findsOneWidget);
+      expect(find.text(AppStrings.routePhotoAdded), findsOneWidget);
     },
   );
 
@@ -1778,13 +1814,15 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
+      await tester.tap(
+        find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton),
+      );
       await tester.pumpAndSettle();
 
       expect(evidenceApi.uploadedPhotoExecutionIds, isEmpty);
-      expect(find.text('Foto adicionada.'), findsNothing);
+      expect(find.text(AppStrings.routePhotoAdded), findsNothing);
       expect(
-        find.text('Não foi possível adicionar a foto.'),
+        find.text(AppStrings.routePhotoAddError),
         findsNothing,
       );
     },
@@ -1814,11 +1852,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(TextButton, 'Adicionar foto'));
+      await tester.tap(
+        find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton),
+      );
       await tester.pumpAndSettle();
 
       expect(evidenceApi.uploadedPhotoExecutionIds, isEmpty);
-      expect(find.text('Não foi possível adicionar a foto.'), findsOneWidget);
+      expect(find.text(AppStrings.routePhotoAddError), findsOneWidget);
     },
   );
 
@@ -1838,7 +1878,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, 'Adicionar observação'),
+        find.widgetWithText(TextButton, AppStrings.routeAddNoteButton),
       );
       await tester.pumpAndSettle();
 
@@ -1851,7 +1891,7 @@ void main() {
       expect(rows, hasLength(1));
       expect(rows.single.kind, PendingOpKind.evidenceNote);
       expect(rows.single.payload['text_body'], 'Sala trancada.');
-      expect(find.text('Observação adicionada.'), findsOneWidget);
+      expect(find.text(AppStrings.routeNoteAdded), findsOneWidget);
     },
   );
 
@@ -1869,7 +1909,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, 'Adicionar observação'),
+        find.widgetWithText(TextButton, AppStrings.routeAddNoteButton),
       );
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'not saved');
@@ -1877,7 +1917,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(evidenceApi.uploadedNoteTexts, isEmpty);
-      expect(find.text('Observação adicionada.'), findsNothing);
+      expect(find.text(AppStrings.routeNoteAdded), findsNothing);
     },
   );
 
@@ -1922,7 +1962,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Sala trancada.'), findsOneWidget);
-      expect(find.text('Foto'), findsOneWidget);
+      expect(find.text(AppStrings.routeEvidencePhotoLabel), findsOneWidget);
       expect(find.byIcon(Icons.cloud_done), findsOneWidget);
       expect(find.byIcon(Icons.cloud_upload), findsOneWidget);
       expect(find.byType(Image), findsOneWidget);
@@ -2026,8 +2066,14 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.widgetWithText(TextButton, 'Concluir'), findsOneWidget);
-      expect(find.widgetWithText(TextButton, 'Adicionar foto'), findsOneWidget);
+      expect(
+        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton),
+        findsOneWidget,
+      );
       expect(find.byIcon(Icons.check_circle), findsNothing);
     },
   );
@@ -2048,11 +2094,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('2 ações aguardando sincronização'),
+        find.text(AppStrings.routePendingSync(2)),
         findsOneWidget,
       );
       await tester.tap(
-        find.widgetWithText(FilledButton, 'Sincronizar agora'),
+        find.widgetWithText(FilledButton, AppStrings.routeSyncNowButton),
       );
       await tester.pumpAndSettle();
       expect(worker.syncAllCount, 1);
@@ -2074,7 +2120,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Tudo sincronizado'), findsOneWidget);
+      expect(find.text(AppStrings.routeAllSynced), findsOneWidget);
       expect(find.textContaining('aguardando sincronização'), findsNothing);
     },
   );
@@ -2106,10 +2152,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Sincronização bloqueada — toque para ver'),
+        find.text(AppStrings.routeSyncBlockedBanner),
         findsOneWidget,
       );
-      await tester.tap(find.text('Sincronização bloqueada — toque para ver'));
+      await tester.tap(find.text(AppStrings.routeSyncBlockedBanner));
       await tester.pumpAndSettle();
       expect(find.byType(BlockedSyncScreen), findsOneWidget);
     },
@@ -2159,8 +2205,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Pendente'), findsOneWidget);
-      expect(find.text('Bloqueado'), findsNothing);
+      expect(find.text(AppStrings.routeChipPending), findsOneWidget);
+      expect(find.text(AppStrings.routeChipBlocked), findsNothing);
     },
   );
 
@@ -2184,7 +2230,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Pendente'), findsOneWidget);
+      expect(find.text(AppStrings.routeChipPending), findsOneWidget);
     },
   );
 
@@ -2207,8 +2253,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Bloqueado'), findsOneWidget);
-      expect(find.text('Pendente'), findsNothing);
+      expect(find.text(AppStrings.routeChipBlocked), findsOneWidget);
+      expect(find.text(AppStrings.routeChipPending), findsNothing);
     },
   );
 
@@ -2239,8 +2285,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Bloqueado'), findsOneWidget);
-      expect(find.text('Pendente'), findsNothing);
+      expect(find.text(AppStrings.routeChipBlocked), findsOneWidget);
+      expect(find.text(AppStrings.routeChipPending), findsNothing);
     },
   );
 
@@ -2258,7 +2304,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('1 ação aguardando sincronização'), findsOneWidget);
+      expect(find.text(AppStrings.routePendingSync(1)), findsOneWidget);
     },
   );
 
@@ -2315,15 +2361,15 @@ void main() {
       await tester.pumpAndSettle();
 
       final concluir = tester.widget<TextButton>(
-        find.widgetWithText(TextButton, 'Concluir'),
+        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
       );
       expect(concluir.onPressed, isNull);
       expect(
-        find.widgetWithText(TextButton, 'Preencher formulário'),
+        find.widgetWithText(TextButton, AppStrings.routeFillFormButton),
         findsOneWidget,
       );
       expect(
-        find.text('Preencha o formulário para concluir.'),
+        find.text(AppStrings.routeFormIncompleteHint),
         findsOneWidget,
       );
     },
@@ -2348,7 +2394,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, 'Preencher formulário'),
+        find.widgetWithText(TextButton, AppStrings.routeFillFormButton),
       );
       await tester.pumpAndSettle();
 
@@ -2356,15 +2402,17 @@ void main() {
 
       await tester.enterText(find.byType(TextFormField), 'Tudo certo.');
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(OutlinedButton, 'Voltar'));
+      await tester.tap(
+        find.widgetWithText(OutlinedButton, AppStrings.commonBack),
+      );
       await tester.pumpAndSettle();
 
       final concluir = tester.widget<TextButton>(
-        find.widgetWithText(TextButton, 'Concluir'),
+        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
       );
       expect(concluir.onPressed, isNotNull);
       expect(
-        find.text('Preencha o formulário para concluir.'),
+        find.text(AppStrings.routeFormIncompleteHint),
         findsNothing,
       );
     },
@@ -2383,11 +2431,11 @@ void main() {
       await tester.pumpAndSettle();
 
       final concluir = tester.widget<TextButton>(
-        find.widgetWithText(TextButton, 'Concluir'),
+        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
       );
       expect(concluir.onPressed, isNotNull);
       expect(
-        find.widgetWithText(TextButton, 'Preencher formulário'),
+        find.widgetWithText(TextButton, AppStrings.routeFillFormButton),
         findsNothing,
       );
     },
@@ -2495,14 +2543,20 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+        find.widgetWithText(
+          TextButton,
+          AppStrings.routeSignalImpossibilityButton,
+        ),
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Acesso bloqueado'), findsOneWidget);
+      expect(
+        find.text(AppStrings.impedimentReasonAccessBlocked),
+        findsOneWidget,
+      );
       // A single PENDING stop remains (none here) → no "resto da rota" switch.
       expect(
-        find.text('Sinalizar para o resto da rota também'),
+        find.text(AppStrings.impedimentRemainderSwitch),
         findsNothing,
       );
 
@@ -2510,7 +2564,7 @@ void main() {
       // (`String(500)`) so an over-long note can't poison the route sync queue.
       expect(tester.widget<TextField>(find.byType(TextField)).maxLength, 500);
 
-      await tester.tap(find.text('Recusa do local'));
+      await tester.tap(find.text(AppStrings.impedimentReasonSiteRefusal));
       await tester.enterText(find.byType(TextField), 'Portão fechado.');
       await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
       await tester.pumpAndSettle();
@@ -2522,7 +2576,7 @@ void main() {
       expect(rows.single.payload['route_stop_id'], 's1');
       expect(rows.single.payload['reason'], 'SITE_REFUSAL');
       expect(rows.single.payload['note'], 'Portão fechado.');
-      expect(find.text('Impossibilidade sinalizada.'), findsOneWidget);
+      expect(find.text(AppStrings.routeImpedimentReported), findsOneWidget);
     },
   );
 
@@ -2543,12 +2597,17 @@ void main() {
       // s1 (IN_PROGRESS) plus s2/s3 (PENDING) each carry the action now — the
       // first is s1, the stop this report is about.
       await tester.tap(
-        find.widgetWithText(TextButton, 'Sinalizar impossibilidade').first,
+        find
+            .widgetWithText(
+              TextButton,
+              AppStrings.routeSignalImpossibilityButton,
+            )
+            .first,
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Problema de saúde'));
-      await tester.tap(find.text('Sinalizar para o resto da rota também'));
+      await tester.tap(find.text(AppStrings.impedimentReasonHealthIssue));
+      await tester.tap(find.text(AppStrings.impedimentRemainderSwitch));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
       await tester.pumpAndSettle();
@@ -2576,7 +2635,10 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+        find.widgetWithText(
+          TextButton,
+          AppStrings.routeSignalImpossibilityButton,
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -2584,7 +2646,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(await store.unsyncedForRoute('r1'), isEmpty);
-      expect(find.text('Impossibilidade sinalizada.'), findsNothing);
+      expect(find.text(AppStrings.routeImpedimentReported), findsNothing);
     },
   );
 
@@ -2597,7 +2659,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+        find.widgetWithText(
+          TextButton,
+          AppStrings.routeSignalImpossibilityButton,
+        ),
         findsNothing,
       );
     },
@@ -2635,11 +2700,14 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, 'Sinalizar impossibilidade'),
+        find.widgetWithText(
+          TextButton,
+          AppStrings.routeSignalImpossibilityButton,
+        ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Acesso bloqueado'));
+      await tester.tap(find.text(AppStrings.impedimentReasonAccessBlocked));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
       await tester.pumpAndSettle();
@@ -2649,7 +2717,7 @@ void main() {
       expect(rows.single.kind, PendingOpKind.impediment);
       expect(rows.single.payload['scope'], 'STOP');
       expect(rows.single.payload['route_stop_id'], 's1');
-      expect(find.text('Impossibilidade sinalizada.'), findsOneWidget);
+      expect(find.text(AppStrings.routeImpedimentReported), findsOneWidget);
     },
   );
 

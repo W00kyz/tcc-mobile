@@ -13,6 +13,7 @@ import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/forms/form_reconciliation.dart';
 import 'package:route_monitor/forms/form_schema.dart';
 import 'package:route_monitor/forms/form_screen.dart';
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/location_service.dart';
@@ -84,7 +85,7 @@ void main() {
       // ---- Open FormScreen for real, answer all 3 v1 questions through
       // real widget interaction (tap/enter text), same patterns as
       // test/forms/form_screen_test.dart ----------------------------------
-      await tester.tap(find.text('Preencher formulário'));
+      await tester.tap(find.text(AppStrings.routeFillFormButton));
       await tester.pumpAndSettle();
       expect(find.byType(FormScreen), findsOneWidget);
 
@@ -98,7 +99,7 @@ void main() {
       await tester.tap(find.text('médio')); // q3 SINGLE_CHOICE
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Voltar'));
+      await tester.tap(find.text(AppStrings.commonBack));
       await tester.pumpAndSettle();
       expect(find.byType(FormScreen), findsNothing);
 
@@ -148,7 +149,7 @@ void main() {
 
       // ---- Re-open the form: answer q2 again (clears needsReanswer) and
       // q4, the newly-added required question -----------------------------
-      await tester.tap(find.text('Preencher formulário'));
+      await tester.tap(find.text(AppStrings.routeFillFormButton));
       await tester.pumpAndSettle();
 
       // Two TEXT fields are now on screen (q2 + q4); enterText by index.
@@ -160,11 +161,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Esta pergunta mudou — responda de novo.'),
+        find.text(AppStrings.formQuestionChanged),
         findsNothing,
       );
 
-      await tester.tap(find.text('Voltar'));
+      await tester.tap(find.text(AppStrings.commonBack));
       await tester.pumpAndSettle();
 
       expect(await fixture.formDraftStore.isComplete(executionId), isTrue);
@@ -326,7 +327,7 @@ final _formV2 = FormSchema(
 /// Finds the "Concluir" `TextButton` on the mounted `RouteScreen` stop tile.
 TextButton _concluirButton(WidgetTester tester) => tester.widget<TextButton>(
   find.ancestor(
-    of: find.text('Concluir'),
+    of: find.text(AppStrings.routeConcludeButton),
     matching: find.byType(TextButton),
   ),
 );

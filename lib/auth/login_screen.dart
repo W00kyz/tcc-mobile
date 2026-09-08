@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
+import 'package:route_monitor/l10n/strings.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -32,7 +33,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           );
       if (mounted) context.go('/rota');
     } on InvalidCredentialsException {
-      setState(() => _errorMessage = 'E-mail ou senha incorretos.');
+      setState(() => _errorMessage = AppStrings.loginInvalidCredentials);
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -47,24 +48,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text('PU · UFCG', style: TextStyle(letterSpacing: 1.2)),
+              const Text(
+                AppStrings.loginBrand,
+                style: TextStyle(letterSpacing: 1.2),
+              ),
               const SizedBox(height: 4),
               const Text(
-                'Monitoramento de Rotas',
+                AppStrings.loginTitle,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 24),
               TextField(
                 key: const Key('email-field'),
                 controller: _emailController,
-                decoration: const InputDecoration(labelText: 'E-mail'),
+                decoration: const InputDecoration(
+                  labelText: AppStrings.loginEmailLabel,
+                ),
                 keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 12),
               TextField(
                 key: const Key('password-field'),
                 controller: _passwordController,
-                decoration: const InputDecoration(labelText: 'Senha'),
+                decoration: const InputDecoration(
+                  labelText: AppStrings.loginPasswordLabel,
+                ),
                 obscureText: true,
               ),
               if (_errorMessage != null) ...[
@@ -78,7 +86,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               FilledButton(
                 key: const Key('login-button'),
                 onPressed: _isSubmitting ? null : _submit,
-                child: Text(_isSubmitting ? 'Entrando…' : 'Entrar'),
+                child: Text(
+                  _isSubmitting
+                      ? AppStrings.loginSubmitting
+                      : AppStrings.loginSubmitButton,
+                ),
               ),
             ],
           ),

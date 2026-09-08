@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:route_monitor/checkin/checkin_providers.dart';
 import 'package:route_monitor/checkin/qr_verifier.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
+import 'package:route_monitor/l10n/strings.dart';
 
 // Same fixture as qr_verifier_test.dart: a payload signed by the test key
 // "11"*32 for floor_id=00000000-0000-0000-0000-000000000001.
@@ -80,7 +81,7 @@ void main() {
       scanner.onDetect!(_captureWith('not-a-qr-payload'));
       await tester.pumpAndSettle();
 
-      expect(find.text('QR Code inválido ou adulterado.'), findsOneWidget);
+      expect(find.text(AppStrings.scanInvalidQr), findsOneWidget);
       expect(poppedValue, 'not-popped-yet');
       expect(find.byType(ScanScreen), findsOneWidget);
     },

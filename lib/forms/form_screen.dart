@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:route_monitor/forms/form_draft_store.dart';
 import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/forms/form_schema.dart' show QuestionType;
+import 'package:route_monitor/l10n/strings.dart';
 
 /// The dynamic form renderer (spec §6.5) — a stop's draft questions, one
 /// widget per `QuestionType`, edited in place while the stop is
@@ -20,11 +21,11 @@ class FormScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final itemsAsync = ref.watch(formDraftProvider(executionId));
     return Scaffold(
-      appBar: AppBar(title: const Text('Formulário')),
+      appBar: AppBar(title: const Text(AppStrings.formAppBarTitle)),
       body: itemsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => const Center(
-          child: Text('Não foi possível carregar o formulário.'),
+          child: Text(AppStrings.formLoadError),
         ),
         data: (items) {
           // `itemsFor` already orders by `orderIndex`; re-sorting here is
@@ -79,7 +80,7 @@ class _QuestionField extends ConsumerWidget {
   }
 
   String get _promptLabel =>
-      item.required ? '${item.prompt} (obrigatória)' : item.prompt;
+      item.required ? AppStrings.formRequiredPrompt(item.prompt) : item.prompt;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -178,7 +179,7 @@ class _QuestionField extends ConsumerWidget {
               const Padding(
                 padding: EdgeInsets.only(bottom: 4),
                 child: Text(
-                  'Esta pergunta mudou — responda de novo.',
+                  AppStrings.formQuestionChanged,
                   style: TextStyle(
                     color: Colors.brown,
                     fontWeight: FontWeight.bold,
@@ -220,8 +221,8 @@ class _Footer extends ConsumerWidget {
                 ? const SizedBox.shrink()
                 : Text(
                     pending == 0
-                        ? 'Formulário completo'
-                        : '$pending pendências',
+                        ? AppStrings.formComplete
+                        : AppStrings.formPending(pending),
                     style: TextStyle(
                       color: pending == 0 ? Colors.green : Colors.orange,
                       fontWeight: FontWeight.bold,
@@ -230,7 +231,7 @@ class _Footer extends ConsumerWidget {
           ),
           OutlinedButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Voltar'),
+            child: const Text(AppStrings.commonBack),
           ),
         ],
       ),

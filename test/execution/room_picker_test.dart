@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/room_picker.dart';
 import 'package:route_monitor/execution/room_resolution.dart';
+import 'package:route_monitor/l10n/strings.dart';
 
 const _far = RoomCandidateLocal(
   routeStopId: 's-far',
@@ -49,7 +50,7 @@ void main() {
       await _openPicker(tester, [_far, _near, _unknown], []);
 
       expect(
-        find.text('Vários pontos correspondem — escolha o certo:'),
+        find.text(AppStrings.roomPickerPrompt),
         findsOneWidget,
       );
 

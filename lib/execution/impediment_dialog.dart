@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 
+import 'package:route_monitor/l10n/strings.dart';
+
 /// The reason options offered by [ImpedimentDialog]. The first element of each
 /// pair is the backend wire value (see
 /// `backend/app/domain/impediments/models.py::ImpedimentReason`) — it is what
 /// gets sent as `reason`; the second is the pt-BR label shown to the field
-/// worker (no i18n mechanism exists in this app yet — tech debt M-1).
+/// worker (from [AppStrings], RNF02).
 const _reasonOptions = <(String, String)>[
-  ('ACCESS_BLOCKED', 'Acesso bloqueado'),
-  ('SITE_REFUSAL', 'Recusa do local'),
-  ('HEALTH_ISSUE', 'Problema de saúde'),
-  ('OTHER', 'Outro'),
+  ('ACCESS_BLOCKED', AppStrings.impedimentReasonAccessBlocked),
+  ('SITE_REFUSAL', AppStrings.impedimentReasonSiteRefusal),
+  ('HEALTH_ISSUE', AppStrings.impedimentReasonHealthIssue),
+  ('OTHER', AppStrings.impedimentReasonOther),
 ];
 
 /// The outcome of [ImpedimentDialog]: the reason wire value, the derived
@@ -76,7 +78,7 @@ class _ImpedimentDialogState extends State<ImpedimentDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Sinalizar impossibilidade'),
+      title: const Text(AppStrings.impedimentDialogTitle),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -107,7 +109,7 @@ class _ImpedimentDialogState extends State<ImpedimentDialog> {
               maxLength: 500,
               maxLines: 3,
               decoration: const InputDecoration(
-                hintText: 'Observação (opcional)',
+                hintText: AppStrings.impedimentNoteHint,
               ),
             ),
             if (widget.showRemainderSwitch)
@@ -115,7 +117,7 @@ class _ImpedimentDialogState extends State<ImpedimentDialog> {
                 contentPadding: EdgeInsets.zero,
                 value: _forRemainder,
                 onChanged: (value) => setState(() => _forRemainder = value),
-                title: const Text('Sinalizar para o resto da rota também'),
+                title: const Text(AppStrings.impedimentRemainderSwitch),
               ),
           ],
         ),
@@ -123,11 +125,11 @@ class _ImpedimentDialogState extends State<ImpedimentDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
+          child: const Text(AppStrings.commonCancel),
         ),
         FilledButton(
           onPressed: _reason == null ? null : _confirm,
-          child: const Text('Confirmar'),
+          child: const Text(AppStrings.commonConfirm),
         ),
       ],
     );

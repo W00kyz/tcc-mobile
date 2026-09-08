@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -121,12 +122,25 @@ void main() {
     await tester.pumpWidget(_screen(store, worker));
     await tester.pumpAndSettle();
 
-    expect(find.text('Check-in — s1'), findsOneWidget);
-    expect(find.text('Foto — exec-9'), findsOneWidget);
+    expect(
+      find.text(
+        AppStrings.blockedSyncRowLabel(AppStrings.blockedSyncKindCheckIn, 's1'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+        AppStrings.blockedSyncRowLabel(
+          AppStrings.blockedSyncKindPhoto,
+          'exec-9',
+        ),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('HTTP 422 FLOOR_NOT_ON_ROUTE'), findsOneWidget);
     expect(find.text('HTTP 413 payload too large'), findsOneWidget);
     expect(
-      find.widgetWithText(TextButton, 'Tentar de novo'),
+      find.widgetWithText(TextButton, AppStrings.blockedSyncRetryButton),
       findsNWidgets(2),
     );
   });
@@ -146,7 +160,15 @@ void main() {
       await tester.pumpWidget(_screen(store, worker));
       await tester.pumpAndSettle();
 
-      expect(find.text('Início de rota — r1'), findsOneWidget);
+      expect(
+        find.text(
+          AppStrings.blockedSyncRowLabel(
+            AppStrings.blockedSyncKindStartRoute,
+            'r1',
+          ),
+        ),
+        findsOneWidget,
+      );
     },
   );
 
@@ -173,14 +195,32 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, 'Tentar de novo').first,
+        find
+            .widgetWithText(TextButton, AppStrings.blockedSyncRetryButton)
+            .first,
       );
       await tester.pumpAndSettle();
 
       expect(worker.unblocked, ['op-1']);
       expect(worker.syncAllCount, 1);
-      expect(find.text('Check-in — s1'), findsNothing);
-      expect(find.text('Check-out — s2'), findsOneWidget);
+      expect(
+        find.text(
+          AppStrings.blockedSyncRowLabel(
+            AppStrings.blockedSyncKindCheckIn,
+            's1',
+          ),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.text(
+          AppStrings.blockedSyncRowLabel(
+            AppStrings.blockedSyncKindCheckOut,
+            's2',
+          ),
+        ),
+        findsOneWidget,
+      );
     },
   );
 
@@ -193,6 +233,6 @@ void main() {
     await tester.pumpWidget(_screen(store, worker));
     await tester.pumpAndSettle();
 
-    expect(find.text('Nenhuma operação bloqueada.'), findsOneWidget);
+    expect(find.text(AppStrings.blockedSyncEmpty), findsOneWidget);
   });
 }

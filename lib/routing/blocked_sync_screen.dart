@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 
@@ -18,22 +19,24 @@ class BlockedSyncScreen extends ConsumerWidget {
     final blockedAsync = ref.watch(blockedOperationsProvider(routeId));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Sincronização bloqueada')),
+      appBar: AppBar(title: const Text(AppStrings.blockedSyncAppBarTitle)),
       body: blockedAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => const Center(
-          child: Text('Não foi possível carregar as operações bloqueadas.'),
+          child: Text(AppStrings.blockedSyncLoadError),
         ),
         data: (rows) {
           if (rows.isEmpty) {
-            return const Center(child: Text('Nenhuma operação bloqueada.'));
+            return const Center(child: Text(AppStrings.blockedSyncEmpty));
           }
           return ListView(
             children: [
               for (final row in rows)
                 ListTile(
                   title: Text(_rowLabel(row)),
-                  subtitle: Text(row.lastError ?? 'Erro desconhecido'),
+                  subtitle: Text(
+                    row.lastError ?? AppStrings.blockedSyncUnknownError,
+                  ),
                   trailing: TextButton(
                     onPressed: () async {
                       final worker = ref.read(syncWorkerProvider);
@@ -41,7 +44,7 @@ class BlockedSyncScreen extends ConsumerWidget {
                       ref.invalidate(blockedOperationsProvider(routeId));
                       await worker.syncAll();
                     },
-                    child: const Text('Tentar de novo'),
+                    child: const Text(AppStrings.blockedSyncRetryButton),
                   ),
                 ),
             ],
@@ -58,12 +61,12 @@ class BlockedSyncScreen extends ConsumerWidget {
 /// `startRoute` row IS the truth signal for a stuck local "iniciada" marker).
 String _rowLabel(PendingOperationRow row) {
   final kind = switch (row.kind) {
-    PendingOpKind.checkIn => 'Check-in',
-    PendingOpKind.checkOut => 'Check-out',
-    PendingOpKind.evidencePhoto => 'Foto',
-    PendingOpKind.evidenceNote => 'Observação',
-    PendingOpKind.startRoute => 'Início de rota',
-    PendingOpKind.impediment => 'Impedimento',
+    PendingOpKind.checkIn => AppStrings.blockedSyncKindCheckIn,
+    PendingOpKind.checkOut => AppStrings.blockedSyncKindCheckOut,
+    PendingOpKind.evidencePhoto => AppStrings.blockedSyncKindPhoto,
+    PendingOpKind.evidenceNote => AppStrings.blockedSyncKindNote,
+    PendingOpKind.startRoute => AppStrings.blockedSyncKindStartRoute,
+    PendingOpKind.impediment => AppStrings.blockedSyncKindImpediment,
   };
   final reference = switch (row.kind) {
     PendingOpKind.checkIn ||
@@ -75,5 +78,7 @@ String _rowLabel(PendingOperationRow row) {
     PendingOpKind.evidenceNote => row.payload['execution_id'] as String?,
     PendingOpKind.startRoute => row.routeId,
   };
-  return reference == null ? kind : '$kind — $reference';
+  return reference == null
+      ? kind
+      : AppStrings.blockedSyncRowLabel(kind, reference);
 }

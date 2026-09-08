@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
@@ -69,7 +70,7 @@ void main() {
     await tester.pumpWidget(_harness(_fakeRoute));
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('Trajeto da rota'), findsOneWidget);
+    expect(find.text(AppStrings.mapAppBarTitle), findsOneWidget);
     expect(find.byType(FlutterMap), findsOneWidget);
     expect(find.byType(CampusMap), findsOneWidget);
 
@@ -114,7 +115,7 @@ void main() {
     await tester.pumpWidget(_harness(_fakeRoute));
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('trajeto aproximado'), findsOneWidget);
+    expect(find.text(AppStrings.mapApproximateLegLabel), findsOneWidget);
   });
 
   testWidgets('hides the caption when every leg has real geometry', (
@@ -140,6 +141,6 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.text('trajeto aproximado'), findsNothing);
+    expect(find.text(AppStrings.mapApproximateLegLabel), findsNothing);
   });
 }

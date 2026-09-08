@@ -11,6 +11,7 @@ import 'package:route_monitor/execution/room_picker.dart';
 import 'package:route_monitor/execution/room_resolution.dart';
 import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/forms/form_screen.dart';
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart'
     show StopLocalStatus;
@@ -79,17 +80,17 @@ class RouteScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Rota de hoje'),
+        title: const Text(AppStrings.routeAppBarTitle),
         actions: const [_NotificationsBell()],
       ),
       body: routesAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) =>
-            const Center(child: Text('Não foi possível carregar sua rota.')),
+            const Center(child: Text(AppStrings.routeLoadError)),
         data: (routes) {
           if (routes.isEmpty) {
             return const Center(
-              child: Text('Nenhuma rota atribuída para hoje.'),
+              child: Text(AppStrings.routeEmpty),
             );
           }
           final route = routes.first;
@@ -115,7 +116,7 @@ class RouteScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
-                  child: const Text('Ver no mapa'),
+                  child: const Text(AppStrings.routeViewMapButton),
                 ),
                 const SizedBox(height: 16),
                 Expanded(
@@ -129,12 +130,12 @@ class RouteScreen extends ConsumerWidget {
                 if (!started)
                   FilledButton(
                     onPressed: () => _startRoute(context, ref, route.id),
-                    child: const Text('Iniciar rota'),
+                    child: const Text(AppStrings.routeStartButton),
                   ),
                 if (_canCheckIn(route))
                   FilledButton(
                     onPressed: () => _checkIn(context, ref, route),
-                    child: const Text('Fazer check-in'),
+                    child: const Text(AppStrings.routeCheckInButton),
                   ),
               ],
             ),
@@ -239,7 +240,7 @@ class RouteScreen extends ConsumerWidget {
         );
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Impossibilidade sinalizada.')),
+        const SnackBar(content: Text(AppStrings.routeImpedimentReported)),
       );
     }
   }
@@ -316,7 +317,9 @@ class RouteScreen extends ConsumerWidget {
     if (context.mounted) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Check-in registrado.')));
+      ).showSnackBar(
+        const SnackBar(content: Text(AppStrings.routeCheckInDone)),
+      );
     }
   }
 
@@ -350,7 +353,7 @@ class RouteScreen extends ConsumerWidget {
     ref.invalidate(myRoutesProvider);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Check-out registrado.')),
+        const SnackBar(content: Text(AppStrings.routeCheckOutDone)),
       );
     }
   }
@@ -388,10 +391,7 @@ class RouteScreen extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Não foi possível obter sua localização; check-in seguirá '
-              'sem GPS.',
-            ),
+            content: Text(AppStrings.routeLocationUnavailableCheckIn),
           ),
         );
       }
@@ -416,7 +416,7 @@ class RouteScreen extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Não foi possível obter sua localização.'),
+            content: Text(AppStrings.routeLocationUnavailable),
           ),
         );
       }
@@ -451,7 +451,7 @@ class _NotificationsBell extends ConsumerWidget {
     final unread = ref.watch(unreadCountProvider).asData?.value ?? 0;
     final button = IconButton(
       icon: const Icon(Icons.notifications_outlined),
-      tooltip: 'Notificações',
+      tooltip: AppStrings.routeNotificationsTooltip,
       onPressed: () => Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
       ),
@@ -476,14 +476,16 @@ class _RouteHeader extends StatelessWidget {
       children: [
         Flexible(
           child: Text(
-            started ? 'Rota iniciada' : 'Rota não iniciada',
+            started
+                ? AppStrings.routeStartedHeader
+                : AppStrings.routeNotStartedHeader,
             style: Theme.of(context).textTheme.titleMedium,
           ),
         ),
         if (route.routeType == 'OCCASIONAL')
           const Padding(
             padding: EdgeInsets.only(left: 8),
-            child: Chip(label: Text('EVENTUAL')),
+            child: Chip(label: Text(AppStrings.routeOccasionalChip)),
           ),
       ],
     );
@@ -520,7 +522,7 @@ class _SyncBanner extends ConsumerWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Sincronização bloqueada — toque para ver',
+                  AppStrings.routeSyncBlockedBanner,
                   style: TextStyle(color: scheme.onErrorContainer),
                 ),
               ),
@@ -531,18 +533,15 @@ class _SyncBanner extends ConsumerWidget {
     }
 
     if (status.pending > 0) {
-      final noun = status.pending == 1 ? 'ação' : 'ações';
       return Row(
         children: [
           Expanded(
-            child: Text(
-              '${status.pending} $noun aguardando sincronização',
-            ),
+            child: Text(AppStrings.routePendingSync(status.pending)),
           ),
           const SizedBox(width: 8),
           FilledButton.tonal(
             onPressed: () => ref.read(syncWorkerProvider).syncAll(),
-            child: const Text('Sincronizar agora'),
+            child: const Text(AppStrings.routeSyncNowButton),
           ),
         ],
       );
@@ -552,7 +551,7 @@ class _SyncBanner extends ConsumerWidget {
       children: [
         Icon(Icons.cloud_done, size: 16, color: Colors.green),
         SizedBox(width: 8),
-        Text('Tudo sincronizado'),
+        Text(AppStrings.routeAllSynced),
       ],
     );
   }
@@ -569,8 +568,8 @@ class _StopSyncChipLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (chip) {
-      StopSyncChip.pending => ('Pendente', Colors.orange),
-      StopSyncChip.blocked => ('Bloqueado', Colors.red),
+      StopSyncChip.pending => (AppStrings.routeChipPending, Colors.orange),
+      StopSyncChip.blocked => (AppStrings.routeChipBlocked, Colors.red),
       StopSyncChip.none => ('', Colors.transparent),
     };
     return Chip(
@@ -670,12 +669,12 @@ class _StopTile extends StatelessWidget {
               if (stop.pointType == 'OCCASIONAL')
                 const Padding(
                   padding: EdgeInsets.only(left: 8),
-                  child: Chip(label: Text('Ponto eventual')),
+                  child: Chip(label: Text(AppStrings.routeStopOccasionalChip)),
                 ),
               if (stop.reassigned)
                 const Padding(
                   padding: EdgeInsets.only(left: 8),
-                  child: Chip(label: Text('Reatribuído')),
+                  child: Chip(label: Text(AppStrings.routeStopReassignedChip)),
                 ),
             ],
           ),
@@ -684,15 +683,15 @@ class _StopTile extends StatelessWidget {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (leg != null) Text('a $leg'),
-                    if (window != null) Text('Janela: $window'),
+                    if (leg != null) Text(AppStrings.routeLeg(leg)),
+                    if (window != null) Text(AppStrings.routeWindow(window)),
                   ],
                 ),
           trailing: onConcluir == null && formFillAction == null
               ? null
               : TextButton(
                   onPressed: onConcluir,
-                  child: const Text('Concluir'),
+                  child: const Text(AppStrings.routeConcludeButton),
                 ),
         ),
         if (formFillAction != null ||
@@ -706,14 +705,16 @@ class _StopTile extends StatelessWidget {
                 if (formFillAction != null)
                   TextButton(
                     onPressed: formFillAction,
-                    child: const Text('Preencher formulário'),
+                    child: const Text(AppStrings.routeFillFormButton),
                   ),
                 if (formIncomplete)
-                  const Text('Preencha o formulário para concluir.'),
+                  const Text(AppStrings.routeFormIncompleteHint),
                 if (signalImpossibilityAction != null)
                   TextButton(
                     onPressed: signalImpossibilityAction,
-                    child: const Text('Sinalizar impossibilidade'),
+                    child: const Text(
+                      AppStrings.routeSignalImpossibilityButton,
+                    ),
                   ),
               ],
             ),
@@ -778,12 +779,12 @@ class _EvidenceSection extends ConsumerWidget {
               TextButton.icon(
                 onPressed: () => _addPhoto(context, ref, query),
                 icon: const Icon(Icons.add_a_photo),
-                label: const Text('Adicionar foto'),
+                label: const Text(AppStrings.routeAddPhotoButton),
               ),
               TextButton.icon(
                 onPressed: () => _addNote(context, ref, query),
                 icon: const Icon(Icons.note_add),
-                label: const Text('Adicionar observação'),
+                label: const Text(AppStrings.routeAddNoteButton),
               ),
             ],
           ),
@@ -798,8 +799,7 @@ class _EvidenceSection extends ConsumerWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             ),
-            error: (_, _) =>
-                const Text('Não foi possível carregar as evidências.'),
+            error: (_, _) => const Text(AppStrings.routeEvidenceLoadError),
           ),
         ],
       ),
@@ -821,7 +821,9 @@ class _EvidenceSection extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Foto adicionada.')));
+        ).showSnackBar(
+          const SnackBar(content: Text(AppStrings.routePhotoAdded)),
+        );
       }
       // Deliberately broad: a compression failure (StateError), a network
       // failure (DioException) or any other capture/upload error all map to
@@ -830,7 +832,7 @@ class _EvidenceSection extends ConsumerWidget {
     } catch (_) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível adicionar a foto.')),
+          const SnackBar(content: Text(AppStrings.routePhotoAddError)),
         );
       }
     }
@@ -851,7 +853,7 @@ class _EvidenceSection extends ConsumerWidget {
       ref.invalidate(stopEvidenceProvider(query));
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Observação adicionada.')),
+          const SnackBar(content: Text(AppStrings.routeNoteAdded)),
         );
       }
       // Deliberately broad: same rationale as _addPhoto above.
@@ -860,7 +862,7 @@ class _EvidenceSection extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Não foi possível adicionar a observação.'),
+            content: Text(AppStrings.routeNoteAddError),
           ),
         );
       }
@@ -876,23 +878,23 @@ Future<String?> _showNoteDialog(BuildContext context) {
   return showDialog<String>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Adicionar observação'),
+      title: const Text(AppStrings.formAddNoteDialogTitle),
       content: TextField(
         controller: controller,
         maxLength: 2000,
         maxLines: 4,
         autofocus: true,
-        decoration: const InputDecoration(hintText: 'Descreva a observação'),
+        decoration: const InputDecoration(hintText: AppStrings.routeNoteHint),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(dialogContext).pop(),
-          child: const Text('Cancelar'),
+          child: const Text(AppStrings.commonCancel),
         ),
         FilledButton(
           onPressed: () =>
               Navigator.of(dialogContext).pop(controller.text.trim()),
-          child: const Text('Salvar'),
+          child: const Text(AppStrings.commonSave),
         ),
       ],
     ),
@@ -928,7 +930,11 @@ class _EvidenceTile extends ConsumerWidget {
           _thumbnail(ref),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(item.kind == 'NOTE' ? (item.textBody ?? '') : 'Foto'),
+            child: Text(
+              item.kind == 'NOTE'
+                  ? (item.textBody ?? '')
+                  : AppStrings.routeEvidencePhotoLabel,
+            ),
           ),
           const SizedBox(width: 8),
           _syncIcon(),

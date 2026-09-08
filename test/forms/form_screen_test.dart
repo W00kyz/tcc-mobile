@@ -6,6 +6,7 @@ import 'package:route_monitor/forms/form_draft_store.dart';
 import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/forms/form_schema.dart';
 import 'package:route_monitor/forms/form_screen.dart';
+import 'package:route_monitor/l10n/strings.dart';
 
 import '../support/in_memory_database.dart';
 
@@ -180,7 +181,7 @@ void main() {
       await _pumpForm(tester, store);
 
       expect(
-        find.text('Esta pergunta mudou — responda de novo.'),
+        find.text(AppStrings.formQuestionChanged),
         findsOneWidget,
       );
 
@@ -191,7 +192,7 @@ void main() {
       expect(items.single.needsReanswer, isFalse);
 
       expect(
-        find.text('Esta pergunta mudou — responda de novo.'),
+        find.text(AppStrings.formQuestionChanged),
         findsNothing,
       );
     },

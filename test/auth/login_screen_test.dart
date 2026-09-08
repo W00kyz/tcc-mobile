@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/auth/login_screen.dart';
+import 'package:route_monitor/l10n/strings.dart';
 
 class _FakeAuthRepository implements AuthRepository {
   _FakeAuthRepository({this.shouldFail = false});
@@ -55,6 +56,6 @@ void main() {
     await tester.tap(find.byKey(const Key('login-button')));
     await tester.pumpAndSettle();
 
-    expect(find.text('E-mail ou senha incorretos.'), findsOneWidget);
+    expect(find.text(AppStrings.loginInvalidCredentials), findsOneWidget);
   });
 }

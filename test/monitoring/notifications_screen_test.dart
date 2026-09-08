@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/notifications_screen.dart';
@@ -77,7 +78,10 @@ void main() {
     await tester.pumpWidget(_screen(api));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Nova rota'), findsOneWidget);
+    expect(
+      find.textContaining(AppStrings.notificationKindRouteAssigned),
+      findsOneWidget,
+    );
   });
 
   testWidgets('tapping an unread notification marks it read and refetches', (
@@ -114,6 +118,6 @@ void main() {
     await tester.pumpWidget(_screen(_FakeMonitoringApi([])));
     await tester.pumpAndSettle();
 
-    expect(find.text('Nenhuma notificação.'), findsOneWidget);
+    expect(find.text(AppStrings.notificationsEmpty), findsOneWidget);
   });
 }

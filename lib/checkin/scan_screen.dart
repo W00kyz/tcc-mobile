@@ -4,6 +4,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'package:route_monitor/checkin/checkin_providers.dart';
 import 'package:route_monitor/checkin/qr_verifier.dart';
+import 'package:route_monitor/l10n/strings.dart';
 
 /// A pure scanner: verifies the QR signature offline (RF29, RNF13 — no
 /// network in a basement) and, on a valid QR, pops with the raw scanned
@@ -45,7 +46,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
       payload = null;
     }
     if (payload == null) {
-      _showMessage('QR Code inválido ou adulterado.');
+      _showMessage(AppStrings.scanInvalidQr);
       if (mounted) setState(() => _isProcessing = false);
       return;
     }
@@ -63,7 +64,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Ler QR Code')),
+      appBar: AppBar(title: const Text(AppStrings.scanAppBarTitle)),
       body: MobileScanner(
         controller: widget.controller,
         onDetect: _handleDetection,

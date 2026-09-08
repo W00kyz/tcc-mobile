@@ -7,6 +7,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:pmtiles/pmtiles.dart';
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
@@ -349,7 +350,7 @@ class _ApproximateLegend extends StatelessWidget {
                 ),
                 SizedBox(width: 8),
                 Text(
-                  'trajeto aproximado',
+                  AppStrings.mapApproximateLegLabel,
                   style: TextStyle(fontSize: 12, color: Color(0xFF424242)),
                 ),
               ],

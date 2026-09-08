@@ -17,6 +17,7 @@ import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
@@ -92,7 +93,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
       expect(
-        find.text('6 ações aguardando sincronização'),
+        find.text(AppStrings.routePendingSync(6)),
         findsOneWidget,
       );
 
@@ -166,7 +167,7 @@ void main() {
       expect(await fixture.store.unsyncedForRoute(_routeId), isEmpty);
 
       // Banner flips to the all-clear state.
-      expect(find.text('Tudo sincronizado'), findsOneWidget);
+      expect(find.text(AppStrings.routeAllSynced), findsOneWidget);
 
       // ---- Idempotent re-drain -----------------------------------------
       await fixture.worker.syncAll();

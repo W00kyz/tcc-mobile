@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart' show TileProvider;
 
+import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
@@ -19,7 +20,7 @@ class MapScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Trajeto da rota')),
+      appBar: AppBar(title: const Text(AppStrings.mapAppBarTitle)),
       body: CampusMap(
         data: buildRouteMapData(route),
         tileProviderOverride: tileProviderOverride,

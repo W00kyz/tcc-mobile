@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:route_monitor/execution/room_resolution.dart';
+import 'package:route_monitor/l10n/strings.dart';
 
 /// Shows the room-disambiguation bottom sheet when the offline resolution
 /// (spec §4.4 Ruling 4 / §6.5 Ruling 16) finds more than one plausible
@@ -54,7 +55,7 @@ class _RoomPickerSheetState extends State<_RoomPickerSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Vários pontos correspondem — escolha o certo:',
+              AppStrings.roomPickerPrompt,
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             for (final candidate in widget.candidates)
@@ -81,7 +82,7 @@ class _RoomPickerSheetState extends State<_RoomPickerSheet> {
       title: Text(candidate.servicePointName),
       subtitle: candidate.distanceM == null
           ? null
-          : Text('${candidate.distanceM!.round()} m'),
+          : Text(AppStrings.meters(candidate.distanceM!.round())),
       onTap: () => setState(() => _selected = candidate),
     );
   }
@@ -92,12 +93,12 @@ class _RoomPickerSheetState extends State<_RoomPickerSheet> {
       children: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancelar'),
+          child: const Text(AppStrings.commonCancel),
         ),
         const SizedBox(width: 8),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_selected),
-          child: const Text('Confirmar'),
+          child: const Text(AppStrings.commonConfirm),
         ),
       ],
     );
