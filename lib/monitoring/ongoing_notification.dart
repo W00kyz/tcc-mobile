@@ -32,9 +32,12 @@ class LocalOngoingNotification implements OngoingNotification {
 
   static const int _notificationId = 4711;
   static const String _channelId = 'collection_ongoing';
-  static const String _channelName = 'Coleta de localização';
+  // User-facing copy (shown in Android notification settings) lives in
+  // AppStrings (RNF02).
+  static const String _channelName =
+      AppStrings.collectionNotificationChannelName;
   static const String _channelDescription =
-      'Aviso persistente enquanto a localização é registrada durante a rota.';
+      AppStrings.collectionNotificationChannelDescription;
 
   bool _initialized = false;
 

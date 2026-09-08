@@ -215,6 +215,10 @@ abstract final class AppStrings {
       'fiscalização.';
   static const String collectionBannerText =
       'Coleta de localização ativa durante a rota.';
+  static const String collectionNotificationChannelName =
+      'Coleta de localização';
+  static const String collectionNotificationChannelDescription =
+      'Aviso persistente enquanto a localização é registrada durante a rota.';
   static const String locationPurposeRationale =
       'A localização é usada apenas para confirmar a presença nos pontos da '
       'rota e não é compartilhada fora da Prefeitura Universitária.';

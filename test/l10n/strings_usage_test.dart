@@ -12,7 +12,9 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('no user-facing string literals outside AppStrings', () {
     final offenders = <String>[];
-    final re = RegExp(r'''Text\(\s*['"][^'"]*\s[^'"]*['"]''');
+    final re = RegExp(
+      r'''(?:Text\(\s*|(?:name|message|tooltip|channelName|channelDescription):\s*)['"][^'"]*\s[^'"]*['"]''',
+    );
     final entries = Directory('lib').listSync(recursive: true);
     for (final f in entries.whereType<File>()) {
       if (!f.path.endsWith('.dart') || f.path.endsWith('.g.dart')) continue;
