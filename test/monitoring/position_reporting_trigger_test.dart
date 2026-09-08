@@ -176,8 +176,9 @@ class _FakeOngoingNotification implements OngoingNotification {
 
 class _NullLocation implements LocationService {
   @override
-  Future<Coordinates> getCurrentPosition() async =>
-      const Coordinates(latitude: 0, longitude: 0);
+  Future<Coordinates> getCurrentPosition({
+    required LocationPurpose purpose,
+  }) async => const Coordinates(latitude: 0, longitude: 0);
 }
 
 class _NullApi implements MonitoringApi {

@@ -405,8 +405,9 @@ class _Fixture {
 
 class _FakeLocationService implements LocationService {
   @override
-  Future<Coordinates> getCurrentPosition() async =>
-      const Coordinates(latitude: -7.23, longitude: -35.88);
+  Future<Coordinates> getCurrentPosition({
+    required LocationPurpose purpose,
+  }) async => const Coordinates(latitude: -7.23, longitude: -35.88);
 }
 
 class _FakeConnectivity implements Connectivity {

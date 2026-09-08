@@ -77,7 +77,9 @@ class PositionReporter {
     final routeId = _routeId;
     if (routeId == null) return;
     try {
-      final position = await _location.getCurrentPosition();
+      final position = await _location.getCurrentPosition(
+        purpose: LocationPurpose.tracking,
+      );
       await _api.reportPosition(
         routeId: routeId,
         latitude: position.latitude,

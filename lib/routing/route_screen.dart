@@ -402,7 +402,9 @@ class RouteScreen extends ConsumerWidget {
     WidgetRef ref,
   ) async {
     try {
-      return await ref.read(locationServiceProvider).getCurrentPosition();
+      return await ref
+          .read(locationServiceProvider)
+          .getCurrentPosition(purpose: LocationPurpose.checkin);
       // Deliberately broad: GeolocatorLocationService can fail with a
       // StateError (permission denied), a platform exception, or a timeout
       // — all of them mean "proceed without GPS" here, never "block".
@@ -427,7 +429,9 @@ class RouteScreen extends ConsumerWidget {
     final location = ref.read(locationServiceProvider);
     final Coordinates position;
     try {
-      position = await location.getCurrentPosition();
+      position = await location.getCurrentPosition(
+        purpose: LocationPurpose.checkin,
+      );
       // Deliberately broad: GeolocatorLocationService can fail with a
       // StateError (permission denied), a platform exception, or a timeout
       // — all of them map to the same user-facing message here.

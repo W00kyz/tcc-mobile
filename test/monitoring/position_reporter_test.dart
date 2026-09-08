@@ -42,6 +42,9 @@ void main() {
         expect(call.latitude, -7.21);
         expect(call.longitude, -35.90);
       }
+      // RNF22: the long-running in-route stream asks for the battery-sparing
+      // `tracking` accuracy, never the one-shot check-in profile.
+      expect(location.lastPurpose, LocationPurpose.tracking);
     },
   );
 
@@ -187,9 +190,13 @@ class _FakeOngoingNotification implements OngoingNotification {
 
 class _FakeLocationService implements LocationService {
   Object? error;
+  LocationPurpose? lastPurpose;
 
   @override
-  Future<Coordinates> getCurrentPosition() async {
+  Future<Coordinates> getCurrentPosition({
+    required LocationPurpose purpose,
+  }) async {
+    lastPurpose = purpose;
     // ignore: only_throw_errors — a fake replaying whatever the test injects.
     if (error != null) throw error!;
     return const Coordinates(latitude: -7.21, longitude: -35.90);

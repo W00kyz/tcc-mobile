@@ -197,8 +197,9 @@ class _ThrowingRouteRepository implements RouteRepository {
 
 class _FakeLocationService implements LocationService {
   @override
-  Future<Coordinates> getCurrentPosition() async =>
-      const Coordinates(latitude: -7.23, longitude: -35.88);
+  Future<Coordinates> getCurrentPosition({
+    required LocationPurpose purpose,
+  }) async => const Coordinates(latitude: -7.23, longitude: -35.88);
 }
 
 /// GPS is unavailable (e.g. a basement, RF29/RNF13) — every failure shape
@@ -206,7 +207,9 @@ class _FakeLocationService implements LocationService {
 /// GPS" behavior in RouteScreen, so a single StateError stands in for all.
 class _FailingLocationService implements LocationService {
   @override
-  Future<Coordinates> getCurrentPosition() async {
+  Future<Coordinates> getCurrentPosition({
+    required LocationPurpose purpose,
+  }) async {
     throw StateError('no GPS signal');
   }
 }
