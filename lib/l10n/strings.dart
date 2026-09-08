@@ -179,6 +179,33 @@ abstract final class AppStrings {
   static const String myDataSectionProfile = 'Perfil';
   static const String myDataSectionConsent = 'Consentimento';
   static const String myDataSectionActivity = 'Atividade';
+  static const String myDataSectionFieldWorker = 'Cadastro de campo';
+  static const String myDataSectionAuthEvents = 'Acessos à conta';
+  static const String myDataSectionExecutions = 'Execuções de rota';
+  static const String myDataSectionEvidence = 'Evidências';
+  static const String myDataSectionPositions = 'Registros de localização';
+  static const String myDataSectionNotifications = 'Notificações';
+  static const String myDataFieldEmail = 'E-mail';
+  static const String myDataFieldName = 'Nome';
+  static const String myDataFieldRole = 'Perfil de acesso';
+  static const String myDataFieldActive = 'Conta ativa';
+  static const String myDataFieldInactive = 'Conta inativa';
+  static const String myDataFieldCreatedAt = 'Criada em';
+  static const String myDataFieldFullName = 'Nome completo';
+  static const String myDataFieldCompany = 'Empresa contratada';
+  static const String myDataFieldServiceTypes = 'Tipos de serviço';
+  static const String myDataFieldTotal = 'Total';
+  static const String myDataFieldFirstAt = 'Primeiro registro';
+  static const String myDataFieldLastAt = 'Último registro';
+  static const String myDataFieldEvidenceItems = 'Itens';
+  static const String myDataFieldEvidenceBytes = 'Tamanho aproximado';
+  static const String myDataFieldNotificationsUnread = 'Não lidas';
+
+  /// A `versão <n>` label for a consent-history entry.
+  static String myDataConsentVersion(int version) => 'versão $version';
+
+  /// An approximate size rendered in kilobytes, e.g. `~ 1234 KB`.
+  static String myDataKilobytes(int bytes) => '~ ${(bytes / 1024).round()} KB';
 
   // --- data-collection notice (Etapa 11 Task 12) ---
   static const String collectionNotificationTitle =
