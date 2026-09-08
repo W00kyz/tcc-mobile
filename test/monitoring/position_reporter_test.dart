@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
+import 'package:route_monitor/monitoring/ongoing_notification.dart';
 import 'package:route_monitor/monitoring/position_reporter.dart';
 import 'package:route_monitor/routing/location_service.dart';
 
@@ -10,15 +11,21 @@ void main() {
   late _FakeLocationService location;
   late _RecordingMonitoringApi api;
   late _FakeTimer timer;
+  late _FakeOngoingNotification notification;
 
   setUp(() {
     location = _FakeLocationService();
     api = _RecordingMonitoringApi();
     timer = _FakeTimer();
+    notification = _FakeOngoingNotification();
   });
 
-  PositionReporter build() =>
-      PositionReporter(location: location, api: api, createTimer: timer.create);
+  PositionReporter build() => PositionReporter(
+    location: location,
+    api: api,
+    notification: notification,
+    createTimer: timer.create,
+  );
 
   test(
     'each tick reports the current position for the started route',
@@ -125,6 +132,57 @@ void main() {
     expect(api.attempts, 0);
     expect(timer.cancelled, isFalse);
   });
+
+  test('start() posts the ongoing collection notice (RNF11)', () {
+    build().start('r1');
+
+    expect(notification.shows, 1);
+  });
+
+  test('start() for the same route does not re-post the notice', () {
+    build()
+      ..start('r1')
+      ..start('r1');
+
+    expect(notification.shows, 1);
+  });
+
+  test('stop() cancels the ongoing collection notice', () {
+    build()
+      ..start('r1')
+      ..stop();
+
+    expect(notification.hides, greaterThanOrEqualTo(1));
+  });
+
+  test('a 409 on a tick stops the reporter and cancels the notice', () async {
+    api.error = DioException(
+      requestOptions: RequestOptions(path: '/worker-positions'),
+      response: Response<void>(
+        requestOptions: RequestOptions(path: '/worker-positions'),
+        statusCode: 409,
+      ),
+    );
+    build().start('r1');
+
+    await timer.tick();
+
+    expect(timer.cancelled, isTrue);
+    expect(notification.hides, greaterThanOrEqualTo(1));
+  });
+}
+
+/// Records `show`/`hide` calls so a test can assert the persistent
+/// location-collection notice tracks the reporter's lifecycle (RNF11).
+class _FakeOngoingNotification implements OngoingNotification {
+  int shows = 0;
+  int hides = 0;
+
+  @override
+  Future<void> show() async => shows++;
+
+  @override
+  Future<void> hide() async => hides++;
 }
 
 class _FakeLocationService implements LocationService {

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
+import 'package:route_monitor/monitoring/ongoing_notification.dart';
 import 'package:route_monitor/monitoring/position_reporter.dart';
 import 'package:route_monitor/monitoring/position_reporting_trigger.dart';
 import 'package:route_monitor/routing/location_service.dart';
@@ -76,6 +77,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(reporter.stopCount, greaterThanOrEqualTo(1));
+    // Auto-stop tears down the persistent collection notice too (RNF11).
+    expect(reporter.notification.hides, greaterThanOrEqualTo(1));
   });
 
   // The `if (routes == null) return child;` guard is the load-bearing
@@ -136,16 +139,39 @@ RouteSummary _route(String id, String status) => RouteSummary(
 );
 
 class _SpyReporter extends PositionReporter {
-  _SpyReporter() : super(location: _NullLocation(), api: _NullApi());
+  _SpyReporter()
+    : notification = _FakeOngoingNotification(),
+      super(
+        location: _NullLocation(),
+        api: _NullApi(),
+        notification: _FakeOngoingNotification(),
+      );
 
+  final _FakeOngoingNotification notification;
   final List<String> started = [];
   int stopCount = 0;
 
   @override
-  void start(String routeId) => started.add(routeId);
+  void start(String routeId) {
+    started.add(routeId);
+    unawaited(notification.show());
+  }
 
   @override
-  void stop() => stopCount++;
+  void stop() {
+    stopCount++;
+    unawaited(notification.hide());
+  }
+}
+
+class _FakeOngoingNotification implements OngoingNotification {
+  int hides = 0;
+
+  @override
+  Future<void> show() async {}
+
+  @override
+  Future<void> hide() async => hides++;
 }
 
 class _NullLocation implements LocationService {

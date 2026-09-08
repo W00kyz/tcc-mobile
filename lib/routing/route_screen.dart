@@ -16,6 +16,7 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart'
     show StopLocalStatus;
+import 'package:route_monitor/monitoring/collection_banner.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/notifications_screen.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
@@ -91,64 +92,75 @@ class RouteScreen extends ConsumerWidget {
           const _NotificationsBell(),
         ],
       ),
-      body: routesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) =>
-            const Center(child: Text(AppStrings.routeLoadError)),
-        data: (routes) {
-          if (routes.isEmpty) {
-            return const Center(
-              child: Text(AppStrings.routeEmpty),
-            );
-          }
-          final route = routes.first;
-          final startedLocally =
-              ref.watch(routeStartedLocallyProvider(route.id)).asData?.value ??
-              false;
-          final started = route.startedAt != null || startedLocally;
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _RouteHeader(route: route, started: started),
-                const SizedBox(height: 12),
-                _SyncBanner(routeId: route.id),
-                const SizedBox(height: 12),
-                FilledButton.tonal(
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => MapScreen(
-                        route: route,
-                        tileProviderOverride: mapTileProvider,
-                      ),
-                    ),
-                  ),
-                  child: const Text(AppStrings.routeViewMapButton),
-                ),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: ListView(
+      body: Column(
+        children: [
+          // Renders itself only while a route is IN_PROGRESS (RNF11).
+          const CollectionBanner(),
+          Expanded(
+            child: routesAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (error, _) =>
+                  const Center(child: Text(AppStrings.routeLoadError)),
+              data: (routes) {
+                if (routes.isEmpty) {
+                  return const Center(
+                    child: Text(AppStrings.routeEmpty),
+                  );
+                }
+                final route = routes.first;
+                final startedLocally =
+                    ref
+                        .watch(routeStartedLocallyProvider(route.id))
+                        .asData
+                        ?.value ??
+                    false;
+                final started = route.startedAt != null || startedLocally;
+                return Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      for (final stop in route.stops)
-                        _buildStopRow(context, ref, route, stop),
+                      _RouteHeader(route: route, started: started),
+                      const SizedBox(height: 12),
+                      _SyncBanner(routeId: route.id),
+                      const SizedBox(height: 12),
+                      FilledButton.tonal(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => MapScreen(
+                              route: route,
+                              tileProviderOverride: mapTileProvider,
+                            ),
+                          ),
+                        ),
+                        child: const Text(AppStrings.routeViewMapButton),
+                      ),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: ListView(
+                          children: [
+                            for (final stop in route.stops)
+                              _buildStopRow(context, ref, route, stop),
+                          ],
+                        ),
+                      ),
+                      if (!started)
+                        FilledButton(
+                          onPressed: () => _startRoute(context, ref, route.id),
+                          child: const Text(AppStrings.routeStartButton),
+                        ),
+                      if (_canCheckIn(route))
+                        FilledButton(
+                          onPressed: () => _checkIn(context, ref, route),
+                          child: const Text(AppStrings.routeCheckInButton),
+                        ),
                     ],
                   ),
-                ),
-                if (!started)
-                  FilledButton(
-                    onPressed: () => _startRoute(context, ref, route.id),
-                    child: const Text(AppStrings.routeStartButton),
-                  ),
-                if (_canCheckIn(route))
-                  FilledButton(
-                    onPressed: () => _checkIn(context, ref, route),
-                    child: const Text(AppStrings.routeCheckInButton),
-                  ),
-              ],
+                );
+              },
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }

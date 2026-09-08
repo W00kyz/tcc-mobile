@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 
 import 'package:route_monitor/monitoring/monitoring_api.dart';
+import 'package:route_monitor/monitoring/ongoing_notification.dart';
 import 'package:route_monitor/routing/location_service.dart';
 
 /// Builds the periodic timer that drives each report tick. Injected so tests
@@ -31,15 +32,18 @@ class PositionReporter {
   PositionReporter({
     required LocationService location,
     required MonitoringApi api,
+    required OngoingNotification notification,
     Duration interval = const Duration(seconds: 60),
     PeriodicTimerFactory createTimer = Timer.periodic,
   }) : _location = location,
        _api = api,
+       _notification = notification,
        _interval = interval,
        _createTimer = createTimer;
 
   final LocationService _location;
   final MonitoringApi _api;
+  final OngoingNotification _notification;
   final Duration _interval;
   final PeriodicTimerFactory _createTimer;
 
@@ -53,6 +57,9 @@ class PositionReporter {
     stop();
     _routeId = routeId;
     _timer = _createTimer(_interval, (_) => unawaited(_tick()));
+    // LGPD transparency (RNF11): the persistent notice goes up only when the
+    // loop actually (re)starts, never on the same-route no-op above.
+    unawaited(_notification.show());
   }
 
   /// Cancels the timer. Safe to call when not running.
@@ -60,6 +67,8 @@ class PositionReporter {
     _timer?.cancel();
     _timer = null;
     _routeId = null;
+    // Idempotent — safe when the loop was never running.
+    unawaited(_notification.hide());
   }
 
   void dispose() => stop();
