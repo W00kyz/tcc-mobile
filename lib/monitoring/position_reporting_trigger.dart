@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:route_monitor/auth/auth_providers.dart' show sessionProvider;
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/route_providers.dart'
     show myRoutesProvider;
@@ -18,6 +19,18 @@ class PositionReportingTrigger extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // RNF10: GPS collection must not run above the consent gate. A session that
+    // still owes acceptance of the current privacy notice keeps the reporter
+    // stopped regardless of route state.
+    final session = ref.watch(sessionProvider);
+    // Logged out: nothing is reporting and `positionReporterProvider` reads
+    // `API_BASE_URL` (unset on the login screen), so don't even build it.
+    if (session == null) return child;
+    if (session.consentRequired) {
+      ref.read(positionReporterProvider).stop();
+      return child;
+    }
+
     // `ref.watch` re-runs this build on the first load and on every later
     // refetch (resume/reconnect invalidates `myRoutesProvider`); the last
     // known list is kept while a refetch is in flight (`asData`).

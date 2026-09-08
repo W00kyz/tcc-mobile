@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/auth/auth_providers.dart';
+import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/ongoing_notification.dart';
@@ -24,6 +26,7 @@ void main() {
       overrides: [
         positionReporterProvider.overrideWithValue(reporter),
         myRoutesProvider.overrideWith((ref) async => currentRoutes),
+        sessionProvider.overrideWithBuild((ref, notifier) => _session()),
       ],
     );
     addTearDown(container.dispose);
@@ -81,6 +84,29 @@ void main() {
     expect(reporter.notification.hides, greaterThanOrEqualTo(1));
   });
 
+  testWidgets(
+    'never starts the reporter while the session still owes consent (RNF10)',
+    (tester) async {
+      currentRoutes = [_route('r1', 'IN_PROGRESS')];
+      container = ProviderContainer(
+        overrides: [
+          positionReporterProvider.overrideWithValue(reporter),
+          myRoutesProvider.overrideWith((ref) async => currentRoutes),
+          sessionProvider.overrideWithBuild(
+            (ref, notifier) => _session(consentRequired: true),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await pump(tester);
+      await tester.pumpAndSettle();
+
+      expect(reporter.started, isEmpty);
+      expect(reporter.stopCount, greaterThanOrEqualTo(1));
+    },
+  );
+
   // The `if (routes == null) return child;` guard is the load-bearing
   // login-screen-crash guard: with no successful route list, the widget must
   // NOT touch `positionReporterProvider` (it reads `API_BASE_URL`, unset on the
@@ -127,6 +153,13 @@ void main() {
     );
   }
 }
+
+Session _session({bool consentRequired = false}) => Session(
+  accessToken: 'a-test-token',
+  refreshToken: 'a-refresh-token',
+  role: 'FIELD_WORKER',
+  consentRequired: consentRequired,
+);
 
 RouteSummary _route(String id, String status) => RouteSummary(
   id: id,
