@@ -18,12 +18,19 @@ class _RegisteringAuthRepository implements AuthRepository {
 
   final List<Exception> _failures;
   final List<Map<String, Object>> registrations = [];
+  int companyFetches = 0;
 
+  /// Both companies on the first fetch; "Verde Vivo" is gone afterwards, as
+  /// if the manager removed it while the worker filled the form.
   @override
-  Future<List<CompanyOption>> publicCompanies() async => const [
-    CompanyOption(id: 'c-1', name: 'Limpa Tudo'),
-    CompanyOption(id: 'c-2', name: 'Verde Vivo'),
-  ];
+  Future<List<CompanyOption>> publicCompanies() async {
+    companyFetches++;
+    return [
+      const CompanyOption(id: 'c-1', name: 'Limpa Tudo'),
+      if (companyFetches == 1)
+        const CompanyOption(id: 'c-2', name: 'Verde Vivo'),
+    ];
+  }
 
   @override
   Future<void> register({
@@ -122,16 +129,14 @@ Future<void> _pump(
 
 Future<void> _fill(
   WidgetTester tester, {
+  String email = 'ana@empresa.com',
   String password = 'senha-longa-1',
 }) async {
   await tester.enterText(
     find.byKey(const Key('registration-name')),
     'Ana Souza',
   );
-  await tester.enterText(
-    find.byKey(const Key('registration-email')),
-    'ana@empresa.com',
-  );
+  await tester.enterText(find.byKey(const Key('registration-email')), email);
   await tester.enterText(
     find.byKey(const Key('registration-password')),
     password,
@@ -247,6 +252,109 @@ void main() {
 
     expect(auth.registrations.map((r) => r['noticeVersion']), [7, 8]);
     expect(find.text('entrar-screen'), findsOneWidget);
+  });
+
+  testWidgets('refuses an e-mail without a domain suffix', (tester) async {
+    final auth = _RegisteringAuthRepository();
+    await _pump(tester, auth: auth);
+
+    await _fill(tester, email: 'ana@gmail');
+    await _acceptAndSubmit(tester);
+
+    expect(find.text(AppStrings.registrationEmailInvalid), findsOneWidget);
+    expect(auth.registrations, isEmpty);
+  });
+
+  testWidgets('refuses a password over 128 characters', (tester) async {
+    final auth = _RegisteringAuthRepository();
+    await _pump(tester, auth: auth);
+
+    await _fill(tester, password: 'a' * 129);
+    await _acceptAndSubmit(tester);
+
+    expect(find.text(AppStrings.registrationPasswordTooLong), findsOneWidget);
+    expect(auth.registrations, isEmpty);
+  });
+
+  testWidgets('counts the password in code points, as the backend does', (
+    tester,
+  ) async {
+    // 100 emoji: 100 code points (accepted by the backend) but 200 UTF-16
+    // units, which a `String.length` check would wrongly refuse.
+    final auth = _RegisteringAuthRepository();
+    await _pump(tester, auth: auth);
+
+    await _fill(tester, password: '🔒' * 100);
+    await _acceptAndSubmit(tester);
+
+    expect(auth.registrations, hasLength(1));
+  });
+
+  testWidgets('data the server refuses asks the worker to check it', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      auth: _RegisteringAuthRepository(
+        failures: [const InvalidRegistrationException()],
+      ),
+    );
+
+    await _fill(tester);
+    await _acceptAndSubmit(tester);
+
+    expect(find.text(AppStrings.registrationInvalidData), findsOneWidget);
+    expect(find.text(AppStrings.registrationError), findsNothing);
+  });
+
+  testWidgets('a company removed meanwhile reloads the list to choose again', (
+    tester,
+  ) async {
+    final auth = _RegisteringAuthRepository(
+      failures: [const UnknownCompanyException()],
+    );
+    await _pump(tester, auth: auth);
+
+    await _fill(tester);
+    await _acceptAndSubmit(tester);
+
+    expect(auth.companyFetches, 2);
+    expect(find.text(AppStrings.registrationCompanyGone), findsOneWidget);
+    expect(find.text('Verde Vivo'), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const Key('registration-submit')));
+    await tester.tap(find.byKey(const Key('registration-submit')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(AppStrings.registrationCompanyRequired),
+      findsOneWidget,
+      reason: 'the removed company must not stay selected',
+    );
+    expect(auth.registrations, hasLength(1));
+  });
+
+  testWidgets('a server failure is not blamed on the connection', (
+    tester,
+  ) async {
+    final request = RequestOptions(path: '/auth/register');
+    await _pump(
+      tester,
+      auth: _RegisteringAuthRepository(
+        failures: [
+          DioException(
+            requestOptions: request,
+            response: Response<void>(requestOptions: request, statusCode: 500),
+          ),
+        ],
+      ),
+    );
+
+    await _fill(tester);
+    await _acceptAndSubmit(tester);
+
+    expect(find.text(AppStrings.registrationServerError), findsOneWidget);
+    expect(find.text(AppStrings.registrationError), findsNothing);
   });
 
   testWidgets('an unreachable server is reported', (tester) async {

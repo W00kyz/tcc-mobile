@@ -26,6 +26,9 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
   static const _minPasswordLength = 8;
   static const _maxPasswordLength = 128;
   static const _maxNameLength = 200;
+  // `local@domain.tld`: the backend's EmailStr refuses a domain without a
+  // dot (`ana@gmail`), and that typo must be caught here, not as a 422.
+  static final _emailShape = RegExp(r'^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$');
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
@@ -68,19 +71,35 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
       );
       context.go('/entrar');
     } on EmailTakenException {
-      setState(() => _errorMessage = AppStrings.registrationEmailTaken);
+      _showError(AppStrings.registrationEmailTaken);
     } on NoticeOutdatedException {
       // A new notice was published meanwhile: show it and ask again.
+      if (!mounted) return;
       ref.invalidate(currentNoticeProvider);
-      setState(() {
-        _noticeAccepted = false;
-        _errorMessage = AppStrings.registrationNoticeOutdated;
-      });
-    } on DioException {
-      setState(() => _errorMessage = AppStrings.registrationError);
+      _noticeAccepted = false;
+      _showError(AppStrings.registrationNoticeOutdated);
+    } on UnknownCompanyException {
+      // Removed while the form was open: reload the list, choose again.
+      if (!mounted) return;
+      ref.invalidate(publicCompaniesProvider);
+      _companyId = null;
+      _showError(AppStrings.registrationCompanyGone);
+    } on InvalidRegistrationException {
+      _showError(AppStrings.registrationInvalidData);
+    } on DioException catch (error) {
+      // Only a failure with no response is the connection's fault.
+      _showError(
+        error.response == null
+            ? AppStrings.registrationError
+            : AppStrings.registrationServerError,
+      );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  void _showError(String message) {
+    if (mounted) setState(() => _errorMessage = message);
   }
 
   void _retryLoading() {
@@ -154,6 +173,20 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
     );
   }
 
+  /// Counted in code points (`runes`), the way the backend's `len()` counts,
+  /// not in UTF-16 units (`length`) or graphemes. No input formatter caps it:
+  /// silently truncating a password would leave the worker unable to log in.
+  static String? _validatePassword(String? value) {
+    final codePoints = (value ?? '').runes.length;
+    if (codePoints < _minPasswordLength) {
+      return AppStrings.registrationPasswordTooShort;
+    }
+    if (codePoints > _maxPasswordLength) {
+      return AppStrings.registrationPasswordTooLong;
+    }
+    return null;
+  }
+
   List<Widget> _accountFields(List<CompanyOption> companies) => [
     TextFormField(
       key: const Key('registration-name'),
@@ -175,7 +208,7 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
         labelText: AppStrings.registrationEmailLabel,
       ),
       keyboardType: TextInputType.emailAddress,
-      validator: (value) => (value ?? '').contains('@')
+      validator: (value) => _emailShape.hasMatch((value ?? '').trim())
           ? null
           : AppStrings.registrationEmailInvalid,
     ),
@@ -187,10 +220,7 @@ class _RegistrationScreenState extends ConsumerState<RegistrationScreen> {
         labelText: AppStrings.registrationPasswordLabel,
       ),
       obscureText: true,
-      inputFormatters: [LengthLimitingTextInputFormatter(_maxPasswordLength)],
-      validator: (value) => (value ?? '').length < _minPasswordLength
-          ? AppStrings.registrationPasswordTooShort
-          : null,
+      validator: _validatePassword,
     ),
     const SizedBox(height: 12),
     DropdownButtonFormField<String>(

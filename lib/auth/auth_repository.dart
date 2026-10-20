@@ -132,6 +132,17 @@ class NoticeOutdatedException implements Exception {
   const NoticeOutdatedException();
 }
 
+/// Sign-up refused: the company chosen no longer exists (removed between
+/// loading the list and sending).
+class UnknownCompanyException implements Exception {
+  const UnknownCompanyException();
+}
+
+/// Sign-up refused: the server's validation rejected a field (422).
+class InvalidRegistrationException implements Exception {
+  const InvalidRegistrationException();
+}
+
 /// The seam DioAuthRepository is tested behind (docs/CLAUDE.base.md —
 /// Dependencies: "wrap third-party libs behind a thin interface").
 abstract class AuthRepository {
@@ -151,7 +162,8 @@ abstract class AuthRepository {
 
   /// Self-registration of a field worker, accepting the privacy notice of
   /// [noticeVersion]; a manager approves the account before it can work.
-  /// Throws [EmailTakenException] or [NoticeOutdatedException].
+  /// Throws [EmailTakenException], [NoticeOutdatedException],
+  /// [UnknownCompanyException] or [InvalidRegistrationException].
   Future<void> register({
     required String name,
     required String email,
@@ -252,7 +264,8 @@ class DioAuthRepository implements AuthRepository {
         },
       );
     } on DioException catch (error) {
-      if (error.response?.statusCode == 409) {
+      final status = error.response?.statusCode;
+      if (status == 409) {
         switch (apiErrorCode(error)) {
           case 'EMAIL_TAKEN':
             throw const EmailTakenException();
@@ -260,9 +273,21 @@ class DioAuthRepository implements AuthRepository {
             throw const NoticeOutdatedException();
         }
       }
+      if (status == 422) throw _registrationRefusal(error);
       rethrow;
     }
   }
+}
+
+/// A 422 from `/auth/register`: field validation answers FastAPI's list of
+/// errors, while the one plain-string `detail` it can send is the unknown
+/// company (backend `app/api/auth.py::register`).
+Exception _registrationRefusal(DioException error) {
+  final data = error.response?.data;
+  final isUnknownCompany = data is Map && data['detail'] is String;
+  return isUnknownCompany
+      ? const UnknownCompanyException()
+      : const InvalidRegistrationException();
 }
 
 /// Reads the `role` claim off the access token without verifying the

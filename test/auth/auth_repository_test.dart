@@ -247,9 +247,31 @@ void registrationTests() {
     );
   });
 
-  test('register lets any other failure through', () async {
+  test('register maps the 422 for a company that no longer exists', () async {
     await expectLater(
       registerAnswered(422, {'detail': 'Unknown contractor company.'}),
+      throwsA(isA<UnknownCompanyException>()),
+    );
+  });
+
+  test('register maps a 422 validation error to invalid data', () async {
+    await expectLater(
+      registerAnswered(422, {
+        'detail': [
+          {
+            'loc': ['body', 'email'],
+            'msg': 'value is not a valid email address',
+            'type': 'value_error',
+          },
+        ],
+      }),
+      throwsA(isA<InvalidRegistrationException>()),
+    );
+  });
+
+  test('register lets any other failure through', () async {
+    await expectLater(
+      registerAnswered(500, {'detail': 'Internal Server Error'}),
       throwsA(isA<DioException>()),
     );
   });

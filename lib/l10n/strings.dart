@@ -54,6 +54,8 @@ abstract final class AppStrings {
   static const String registrationEmailInvalid = 'Informe um e-mail válido.';
   static const String registrationPasswordTooShort =
       'A senha precisa ter pelo menos 8 caracteres.';
+  static const String registrationPasswordTooLong =
+      'A senha pode ter no máximo 128 caracteres.';
   static const String registrationCompanyRequired = 'Escolha sua empresa.';
   static const String registrationAcceptNotice = 'Li e aceito';
   static const String registrationSubmit = 'Enviar cadastro';
@@ -67,6 +69,13 @@ abstract final class AppStrings {
   static const String registrationError =
       'Não foi possível enviar o cadastro. Verifique a conexão e tente '
       'novamente.';
+  static const String registrationInvalidData =
+      'Verifique os dados informados.';
+  static const String registrationCompanyGone =
+      'A empresa escolhida não está mais disponível. Escolha novamente.';
+  static const String registrationServerError =
+      'O servidor não conseguiu registrar o cadastro. Tente novamente mais '
+      'tarde.';
   static const String registrationLoadError =
       'Não foi possível carregar as empresas e o aviso de privacidade.';
   static const String registrationRetry = 'Tentar novamente';
