@@ -1,16 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:route_monitor/api/api_client.dart';
-import 'package:route_monitor/api/env.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/privacy/consent_repository.dart';
 
 final consentRepositoryProvider = Provider<ConsentRepository>((ref) {
-  final session = ref.watch(sessionProvider);
-  final dio = buildDio(
-    baseUrl: apiBaseUrlFromEnvironment(),
-    accessToken: session?.accessToken,
-  );
+  final dio = buildSessionDio(ref);
   return DioConsentRepository(dio);
 });
 

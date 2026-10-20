@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:route_monitor/forms/form_schema.dart';
+import 'package:route_monitor/routing/route_snapshot_cache.dart';
 
 DateTime? _parseOptionalTimestamp(Object? raw) =>
     raw == null ? null : DateTime.parse(raw as String);
@@ -12,7 +15,6 @@ class RouteStopSummary {
     required this.servicePointName,
     required this.latitude,
     required this.longitude,
-    required this.pointType,
     this.expectedArrivalFrom,
     this.expectedArrivalTo,
     this.distanceFromPrevM,
@@ -32,7 +34,6 @@ class RouteStopSummary {
         servicePointName: json['service_point_name'] as String,
         latitude: (json['latitude'] as num).toDouble(),
         longitude: (json['longitude'] as num).toDouble(),
-        pointType: json['point_type'] as String,
         expectedArrivalFrom: _parseOptionalTimestamp(
           json['expected_arrival_from'],
         ),
@@ -62,7 +63,6 @@ class RouteStopSummary {
   final String servicePointName;
   final double latitude;
   final double longitude;
-  final String pointType;
   final DateTime? expectedArrivalFrom;
   final DateTime? expectedArrivalTo;
   final double? distanceFromPrevM;
@@ -130,22 +130,49 @@ abstract class RouteRepository {
 }
 
 class DioRouteRepository implements RouteRepository {
-  DioRouteRepository(this._dio);
+  /// With a [cache] (and the signed-in [userId] that keys it), today's route
+  /// list is saved after every successful fetch and served from the device
+  /// when the network is unreachable.
+  DioRouteRepository(this._dio, {RouteSnapshotCache? cache, String? userId})
+    // Public named params can't be initializing formals for private fields
+    // (same idiom as sync_worker.dart).
+    // ignore: prefer_initializing_formals
+    : _cache = cache,
+      // Same reason as `_cache` above.
+      // ignore: prefer_initializing_formals
+      _userId = userId;
 
   final Dio _dio;
+  final RouteSnapshotCache? _cache;
+  final String? _userId;
 
   @override
   Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async {
-    final response = await _dio.get<List<dynamic>>(
-      '/routes/me',
-      queryParameters: {
-        if (date != null) 'date': date.toIso8601String().split('T').first,
-      },
-    );
-    return response.data!
-        .map((raw) => RouteSummary.fromJson(raw as Map<String, dynamic>))
-        .toList();
+    // Only "today" (no explicit date) is cached — it is the list the worker
+    // acts on.
+    final cache = date == null ? _cache : null;
+    final userId = _userId ?? '';
+    try {
+      final response = await _dio.get<List<dynamic>>(
+        '/routes/me',
+        queryParameters: {
+          if (date != null) 'date': date.toIso8601String().split('T').first,
+        },
+      );
+      await cache?.save(userId, jsonEncode(response.data));
+      return _parseRoutes(response.data!);
+    } on DioException catch (error) {
+      // No HTTP response at all = no network: fall back to the last list
+      // this device saw. An HTTP error (401, 500) is a real answer — rethrow.
+      final cached = error.response == null ? await cache?.load(userId) : null;
+      if (cached == null) rethrow;
+      return _parseRoutes(jsonDecode(cached) as List<dynamic>);
+    }
   }
+
+  List<RouteSummary> _parseRoutes(List<dynamic> body) => body
+      .map((raw) => RouteSummary.fromJson(raw as Map<String, dynamic>))
+      .toList();
 
   @override
   Future<RouteSummary> startRoute({

@@ -28,8 +28,13 @@ void main() {
   );
 
   test(
-    'each tick reports the current position for the started route',
+    'each tick reports the current position while the worker moves',
     () async {
+      location.route = [
+        const Coordinates(latitude: -7.21, longitude: -35.90),
+        const Coordinates(latitude: -7.211, longitude: -35.90),
+        const Coordinates(latitude: -7.212, longitude: -35.90),
+      ];
       build().start('r1');
 
       await timer.tick();
@@ -39,14 +44,45 @@ void main() {
       expect(api.calls, hasLength(3));
       for (final call in api.calls) {
         expect(call.routeId, 'r1');
-        expect(call.latitude, -7.21);
         expect(call.longitude, -35.90);
       }
+      expect(api.calls.map((call) => call.latitude), [-7.21, -7.211, -7.212]);
       // RNF22: the long-running in-route stream asks for the battery-sparing
       // `tracking` accuracy, never the one-shot check-in profile.
       expect(location.lastPurpose, LocationPurpose.tracking);
     },
   );
+
+  test(
+    'a parked worker is sampled less and less often (RNF22)',
+    () async {
+      // Same spot every time: report, skip 1, report, skip 3, report, skip 4…
+      build().start('r1');
+
+      for (var i = 0; i < 12; i++) {
+        await timer.tick();
+      }
+
+      expect(location.fixes, 4);
+      expect(api.calls, hasLength(4));
+    },
+  );
+
+  test('moving again restores the base cadence (RNF22)', () async {
+    build().start('r1');
+    await timer.tick(); // first fix
+    await timer.tick(); // same spot → skip the next tick
+    await timer.tick(); // skipped
+    location.route = [
+      const Coordinates(latitude: -7.22, longitude: -35.90),
+      const Coordinates(latitude: -7.23, longitude: -35.90),
+    ];
+
+    await timer.tick(); // moved ~1.1 km
+    await timer.tick(); // moved again — no skip in between
+
+    expect(location.fixes, 4);
+  });
 
   test('stop() cancels the timer — no further reports', () async {
     final reporter = build()..start('r1');
@@ -191,14 +227,21 @@ class _FakeOngoingNotification implements OngoingNotification {
 class _FakeLocationService implements LocationService {
   Object? error;
   LocationPurpose? lastPurpose;
+  int fixes = 0;
+
+  /// Fixes handed out in order; once exhausted (or never set) the worker
+  /// stays parked at the default spot.
+  List<Coordinates> route = [];
 
   @override
   Future<Coordinates> getCurrentPosition({
     required LocationPurpose purpose,
   }) async {
     lastPurpose = purpose;
+    fixes++;
     // ignore: only_throw_errors — a fake replaying whatever the test injects.
     if (error != null) throw error!;
+    if (route.isNotEmpty) return route.removeAt(0);
     return const Coordinates(latitude: -7.21, longitude: -35.90);
   }
 }

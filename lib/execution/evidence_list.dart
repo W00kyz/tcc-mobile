@@ -18,6 +18,7 @@ class EvidenceListEntry {
     this.photoBytes,
     this.textBody,
     this.contentUrl,
+    this.idempotencyKey,
   });
 
   /// 'PHOTO' | 'NOTE' — `EvidenceKind`
@@ -35,6 +36,10 @@ class EvidenceListEntry {
   /// Set only for a synced item — the relative path the UI resolves against
   /// `apiBaseUrlFromEnvironment()` to render `Image.network`.
   final String? contentUrl;
+
+  /// The upload's key, local or synced alike — how a MEDIA form answer finds
+  /// its photos in this list.
+  final String? idempotencyKey;
 }
 
 EvidenceListEntry _fromPendingRow(PendingOperationRow row) {
@@ -45,6 +50,7 @@ EvidenceListEntry _fromPendingRow(PendingOperationRow row) {
     capturedAt: DateTime.parse(row.payload['captured_at'] as String),
     photoBytes: encodedBytes == null ? null : base64Decode(encodedBytes),
     textBody: row.payload['text_body'] as String?,
+    idempotencyKey: row.payload['idempotency_key'] as String?,
   );
 }
 
@@ -54,6 +60,7 @@ EvidenceListEntry _fromApiItem(EvidenceItem item) => EvidenceListEntry(
   capturedAt: item.capturedAt,
   textBody: item.textBody,
   contentUrl: item.contentUrl,
+  idempotencyKey: item.idempotencyKey,
 );
 
 /// Loads one stop's evidence list for its [executionId]: the backend's

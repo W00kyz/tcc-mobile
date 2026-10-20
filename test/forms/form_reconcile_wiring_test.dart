@@ -55,7 +55,6 @@ RouteSummary _routeWithForm(FormSchema form) => RouteSummary(
       servicePointName: 'Sala 101',
       latitude: -7.2,
       longitude: -35.9,
-      pointType: 'ROOM',
       form: form,
     ),
   ],

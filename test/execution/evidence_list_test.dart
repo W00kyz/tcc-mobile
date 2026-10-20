@@ -111,6 +111,7 @@ void main() {
           capturedAt: DateTime.utc(2026, 8, 25, 8),
           createdAt: DateTime.utc(2026, 8, 25, 8, 1),
           contentUrl: '/evidence/e1/content',
+          idempotencyKey: 'key-synced',
         ),
       ]);
       final photoBytes = base64Encode(Uint8List.fromList([1, 2, 3]));
@@ -122,6 +123,7 @@ void main() {
             'execution_id': 'exec-1',
             'bytes_b64': photoBytes,
             'captured_at': '2026-08-25T08:05:00.000Z',
+            'idempotency_key': 'key-pending',
           },
         ),
         _row(
@@ -153,6 +155,9 @@ void main() {
       expect(entries[2].kind, 'PHOTO');
       expect(entries[2].syncState, PendingOpState.pending);
       expect(entries[2].photoBytes, [1, 2, 3]);
+      // Both sources carry the key a MEDIA answer uses to find its photos.
+      expect(entries[0].idempotencyKey, 'key-synced');
+      expect(entries[2].idempotencyKey, 'key-pending');
     },
   );
 

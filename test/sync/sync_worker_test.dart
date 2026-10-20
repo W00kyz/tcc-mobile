@@ -636,6 +636,26 @@ void main() {
     },
   );
 
+  test(
+    'a 401 leaves the row pending and untouched and halts the pass',
+    () async {
+      // The token refresh already failed (Dio interceptor): only a new login
+      // helps. Blocking here used to strand a whole offline route's writes.
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(status: 401);
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.evidencePhoto, createdAt: 2);
+
+      await h.worker.syncRoute('route-R');
+
+      final row = h.store.rows['a']!;
+      expect(row.state, PendingOpState.pending);
+      expect(row.attempts, 0);
+      expect(h.log, ['checkIn:a']);
+    },
+  );
+
   test('a non-Dio error blocks the row', () async {
     final h = _Harness();
     h.executionApi.checkInError = const FormatException('boom');

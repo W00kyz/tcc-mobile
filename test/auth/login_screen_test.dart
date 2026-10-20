@@ -26,9 +26,21 @@ class _FakeAuthRepository implements AuthRepository {
       role: 'FIELD_WORKER',
     );
   }
+
+  @override
+  Future<String> refreshAccessToken(String refreshToken) async => 'fresh';
+
+  @override
+  Future<void> requestPasswordReset(String email) async {
+    resetRequestedFor = email;
+  }
+
+  String? resetRequestedFor;
 }
 
 void main() {
+  forgotPasswordTests();
+
   testWidgets('shows an error message on invalid credentials', (tester) async {
     final router = GoRouter(
       routes: [GoRoute(path: '/', builder: (_, _) => const LoginScreen())],
@@ -57,5 +69,34 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(AppStrings.loginInvalidCredentials), findsOneWidget);
+  });
+}
+
+void forgotPasswordTests() {
+  testWidgets('"Esqueci minha senha" requests a reset link (RF03)', (
+    tester,
+  ) async {
+    final repository = _FakeAuthRepository();
+    final router = GoRouter(
+      routes: [GoRoute(path: '/', builder: (_, _) => const LoginScreen())],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [authRepositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+
+    await tester.enterText(
+      find.byKey(const Key('email-field')),
+      'joao@empresa.com',
+    );
+    await tester.tap(find.byKey(const Key('forgot-password-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('forgot-password-send')));
+    await tester.pumpAndSettle();
+
+    expect(repository.resetRequestedFor, 'joao@empresa.com');
+    expect(find.text(AppStrings.forgotPasswordSent), findsOneWidget);
   });
 }

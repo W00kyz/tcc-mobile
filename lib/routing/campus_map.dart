@@ -35,7 +35,6 @@ class RouteMapStop {
     required this.position,
     required this.order,
     required this.pending,
-    required this.occasional,
   });
 
   /// Where the pin sits.
@@ -47,9 +46,6 @@ class RouteMapStop {
   /// `true` while the stop still has to be visited; drives a distinct pin
   /// colour from an already-done stop.
   final bool pending;
-
-  /// `true` for an OCCASIONAL point, drawn with a distinct pin outline.
-  final bool occasional;
 }
 
 /// One segment of the drawn trajectory.
@@ -82,7 +78,6 @@ RouteMapData buildRouteMapData(RouteSummary route) {
         position: LatLng(stop.latitude, stop.longitude),
         order: stop.orderIndex,
         pending: stop.status == 'PENDING',
-        occasional: stop.pointType == 'OCCASIONAL',
       ),
   ];
 
@@ -288,8 +283,7 @@ Future<CampusTiles> loadCampusTiles() async {
   );
 }
 
-/// A numbered circular pin. Pending stops are blue, done stops green;
-/// an occasional point gets a thicker white ring.
+/// A numbered circular pin. Pending stops are blue, done stops green.
 class _StopPin extends StatelessWidget {
   const _StopPin({required this.stop});
 
@@ -301,10 +295,7 @@ class _StopPin extends StatelessWidget {
       decoration: BoxDecoration(
         color: stop.pending ? const Color(0xFF1565C0) : const Color(0xFF2E7D32),
         shape: BoxShape.circle,
-        border: Border.all(
-          color: Colors.white,
-          width: stop.occasional ? 4 : 2,
-        ),
+        border: Border.all(color: Colors.white, width: 2),
       ),
       child: Center(
         child: Text(

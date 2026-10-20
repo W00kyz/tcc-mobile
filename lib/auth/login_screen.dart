@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -34,8 +35,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (mounted) context.go('/rota');
     } on InvalidCredentialsException {
       setState(() => _errorMessage = AppStrings.loginInvalidCredentials);
+    } on DioException {
+      // Unreachable server (no signal, wrong LAN): say so instead of failing
+      // silently with the button re-enabled.
+      setState(() => _errorMessage = AppStrings.loginNetworkError);
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  /// RF03: e-mails a reset link; the link opens the panel's reset page.
+  Future<void> _forgotPassword() async {
+    final email = await showDialog<String>(
+      context: context,
+      builder: (_) =>
+          _ForgotPasswordDialog(initialEmail: _emailController.text),
+    );
+    if (email == null || email.trim().isEmpty || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(authRepositoryProvider).requestPasswordReset(email.trim());
+      messenger.showSnackBar(
+        const SnackBar(content: Text(AppStrings.forgotPasswordSent)),
+      );
+    } on DioException {
+      messenger.showSnackBar(
+        const SnackBar(content: Text(AppStrings.forgotPasswordError)),
+      );
     }
   }
 
@@ -92,10 +118,67 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       : AppStrings.loginSubmitButton,
                 ),
               ),
+              const SizedBox(height: 8),
+              TextButton(
+                key: const Key('forgot-password-button'),
+                onPressed: _isSubmitting ? null : _forgotPassword,
+                child: const Text(AppStrings.loginForgotPassword),
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _ForgotPasswordDialog extends StatefulWidget {
+  const _ForgotPasswordDialog({required this.initialEmail});
+
+  final String initialEmail;
+
+  @override
+  State<_ForgotPasswordDialog> createState() => _ForgotPasswordDialogState();
+}
+
+class _ForgotPasswordDialogState extends State<_ForgotPasswordDialog> {
+  late final _controller = TextEditingController(text: widget.initialEmail);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text(AppStrings.forgotPasswordTitle),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(AppStrings.forgotPasswordIntro),
+          TextField(
+            key: const Key('forgot-password-email'),
+            controller: _controller,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: AppStrings.loginEmailLabel,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text(AppStrings.forgotPasswordCancel),
+        ),
+        FilledButton(
+          key: const Key('forgot-password-send'),
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: const Text(AppStrings.forgotPasswordSend),
+        ),
+      ],
     );
   }
 }

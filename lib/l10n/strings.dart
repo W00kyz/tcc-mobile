@@ -29,6 +29,19 @@ abstract final class AppStrings {
   static const String loginSubmitButton = 'Entrar';
   static const String loginSubmitting = 'Entrando…';
   static const String loginInvalidCredentials = 'E-mail ou senha incorretos.';
+  static const String loginNetworkError =
+      'Sem conexão com o servidor. Tente novamente quando houver sinal.';
+  static const String loginForgotPassword = 'Esqueci minha senha';
+  static const String forgotPasswordTitle = 'Recuperar senha';
+  static const String forgotPasswordIntro =
+      'Informe seu e-mail cadastrado. Enviaremos um link para definir uma '
+      'nova senha.';
+  static const String forgotPasswordSend = 'Enviar link';
+  static const String forgotPasswordCancel = 'Cancelar';
+  static const String forgotPasswordSent =
+      'Se o e-mail estiver cadastrado, você receberá um link em instantes.';
+  static const String forgotPasswordError =
+      'Não foi possível enviar o link. Verifique a conexão e tente novamente.';
 
   // --- route screen ---
   static const String routeAppBarTitle = 'Rota de hoje';
@@ -40,8 +53,10 @@ abstract final class AppStrings {
   static const String routeStartedHeader = 'Rota iniciada';
   static const String routeNotStartedHeader = 'Rota não iniciada';
   static const String routeOccasionalChip = 'EVENTUAL';
-  static const String routeStopOccasionalChip = 'Ponto eventual';
   static const String routeStopReassignedChip = 'Reatribuído';
+  static const String formMediaTakePhoto = 'Tirar foto';
+  static const String formMediaRemove = 'Remover foto';
+  static const String formMediaLimit = 'Limite de 10 fotos por pergunta.';
   static const String routeConcludeButton = 'Concluir';
   static const String routeFillFormButton = 'Preencher formulário';
   static const String routeFormIncompleteHint =

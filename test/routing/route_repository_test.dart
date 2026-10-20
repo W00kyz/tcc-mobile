@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/route_snapshot_cache.dart';
 
 Map<String, dynamic> _routePayload() => {
   'id': 'r1',
@@ -21,7 +22,6 @@ Map<String, dynamic> _routePayload() => {
       'service_point_name': 'Sala 101',
       'latitude': -7.21,
       'longitude': -35.91,
-      'point_type': 'REGULAR',
       'expected_arrival_from': null,
       'expected_arrival_to': null,
       'distance_from_prev_m': null,
@@ -35,7 +35,6 @@ Map<String, dynamic> _routePayload() => {
       'service_point_name': 'Sala 202',
       'latitude': -7.22,
       'longitude': -35.92,
-      'point_type': 'OCCASIONAL',
       'expected_arrival_from': '2026-08-25T09:00:00Z',
       'expected_arrival_to': '2026-08-25T09:30:00Z',
       'distance_from_prev_m': 1234.5,
@@ -50,6 +49,60 @@ Map<String, dynamic> _routePayload() => {
 };
 
 void main() {
+  group('offline snapshot (RF35, RNF21)', () {
+    test('a successful fetch is saved and served back offline', () async {
+      final cache = InMemoryRouteSnapshotCache();
+      final online = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _FakeAdapter(
+          statusCode: 200,
+          body: [_routePayload()],
+        );
+      await DioRouteRepository(
+        online,
+        cache: cache,
+        userId: 'u1',
+      ).fetchMyRoutes();
+
+      final offline = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _OfflineAdapter();
+      final routes = await DioRouteRepository(
+        offline,
+        cache: cache,
+        userId: 'u1',
+      ).fetchMyRoutes();
+
+      expect(routes.single.id, 'r1');
+      expect(routes.single.stops, hasLength(2));
+    });
+
+    test("another user's snapshot is never served", () async {
+      final cache = InMemoryRouteSnapshotCache()
+        ..snapshots['u1'] = jsonEncode([_routePayload()]);
+      final offline = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _OfflineAdapter();
+
+      await expectLater(
+        DioRouteRepository(offline, cache: cache, userId: 'u2').fetchMyRoutes(),
+        throwsA(isA<DioException>()),
+      );
+    });
+
+    test('an HTTP error is a real answer, not a reason to use the cache', () {
+      final cache = InMemoryRouteSnapshotCache()
+        ..snapshots['u1'] = jsonEncode([_routePayload()]);
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _FakeAdapter(
+          statusCode: 500,
+          body: <String, Object>{},
+        );
+
+      expect(
+        DioRouteRepository(dio, cache: cache, userId: 'u1').fetchMyRoutes(),
+        throwsA(isA<DioException>()),
+      );
+    });
+  });
+
   test('fetchMyRoutes parses the stops in order', () async {
     final dio = Dio(BaseOptions(baseUrl: 'http://test'))
       ..httpClientAdapter = _FakeAdapter(
@@ -113,7 +166,6 @@ void main() {
       expect(stops[0].expectedArrivalFrom, isNull);
       expect(stops[1].latitude, -7.22);
       expect(stops[1].longitude, -35.92);
-      expect(stops[1].pointType, 'OCCASIONAL');
       expect(
         stops[1].expectedArrivalFrom,
         DateTime.parse('2026-08-25T09:00:00Z'),
@@ -320,6 +372,24 @@ void main() {
       );
     },
   );
+}
+
+/// Every request fails before any HTTP response — the device is offline.
+class _OfflineAdapter implements HttpClientAdapter {
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    throw DioException.connectionError(
+      requestOptions: options,
+      reason: 'offline',
+    );
+  }
 }
 
 class _FakeAdapter implements HttpClientAdapter {

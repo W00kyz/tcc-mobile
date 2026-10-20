@@ -89,7 +89,6 @@ final _unstartedRoute = RouteSummary(
       servicePointName: 'Sala 101',
       latitude: -7.21,
       longitude: -35.91,
-      pointType: 'REGULAR',
     ),
   ],
 );
@@ -876,7 +875,6 @@ void main() {
                 servicePointName: 'Sala 101',
                 latitude: -7.21,
                 longitude: -35.91,
-                pointType: 'REGULAR',
               ),
             ],
           ),
@@ -901,31 +899,6 @@ void main() {
     );
   });
 
-  testWidgets('marks an occasional stop', (tester) async {
-    await tester.pumpWidget(
-      _screenWith(
-        _StaticRouteRepository([
-          _routeWith(
-            stops: const [
-              RouteStopSummary(
-                id: 's1',
-                orderIndex: 1,
-                status: 'PENDING',
-                servicePointName: 'Sala 101',
-                latitude: -7.21,
-                longitude: -35.91,
-                pointType: 'OCCASIONAL',
-              ),
-            ],
-          ),
-        ]),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text(AppStrings.routeStopOccasionalChip), findsOneWidget);
-  });
-
   testWidgets('marks a reassigned stop', (tester) async {
     await tester.pumpWidget(
       _screenWith(
@@ -939,7 +912,6 @@ void main() {
                 servicePointName: 'Sala 101',
                 latitude: -7.21,
                 longitude: -35.91,
-                pointType: 'REGULAR',
                 reassigned: true,
               ),
             ],
@@ -965,7 +937,6 @@ void main() {
                 servicePointName: 'Sala 101',
                 latitude: -7.21,
                 longitude: -35.91,
-                pointType: 'REGULAR',
               ),
             ],
           ),
@@ -990,7 +961,6 @@ void main() {
                 servicePointName: 'Sala 101',
                 latitude: -7.21,
                 longitude: -35.91,
-                pointType: 'REGULAR',
                 expectedArrivalFrom: DateTime(2026, 8, 25, 8),
                 expectedArrivalTo: DateTime(2026, 8, 25, 8, 30),
               ),
@@ -1018,7 +988,6 @@ void main() {
                 servicePointName: 'Sala 101',
                 latitude: -7.21,
                 longitude: -35.91,
-                pointType: 'REGULAR',
                 expectedArrivalFrom: DateTime(2026, 8, 25, 8),
               ),
             ],
@@ -1054,7 +1023,6 @@ void main() {
                 servicePointName: 'Sala 101',
                 latitude: -7.21,
                 longitude: -35.91,
-                pointType: 'REGULAR',
               ),
               RouteStopSummary(
                 id: 's2',
@@ -1063,7 +1031,6 @@ void main() {
                 servicePointName: 'Sala 102',
                 latitude: -7.22,
                 longitude: -35.92,
-                pointType: 'REGULAR',
                 distanceFromPrevM: 120,
                 durationFromPrevS: 180,
               ),
@@ -1154,7 +1121,6 @@ void main() {
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
                   longitude: -35.91,
-                  pointType: 'REGULAR',
                 ),
               ],
             ),
@@ -1187,7 +1153,6 @@ void main() {
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
                   longitude: -35.91,
-                  pointType: 'REGULAR',
                 ),
               ],
             ),
@@ -1225,7 +1190,6 @@ void main() {
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
                   longitude: -35.91,
-                  pointType: 'REGULAR',
                 ),
               ],
             ),
@@ -1252,7 +1216,6 @@ void main() {
         servicePointName: 'Sala 101',
         latitude: -7.21,
         longitude: -35.91,
-        pointType: 'REGULAR',
       ),
     ],
   );
@@ -1307,7 +1270,6 @@ void main() {
         servicePointName: 'Sala 101',
         latitude: -7.21,
         longitude: -35.91,
-        pointType: 'REGULAR',
       ),
     ],
   );
@@ -1421,7 +1383,6 @@ void main() {
         servicePointName: 'Sala 101',
         latitude: -7.23,
         longitude: -35.88,
-        pointType: 'REGULAR',
       ),
       RouteStopSummary(
         id: 's2',
@@ -1431,7 +1392,6 @@ void main() {
         // ~2.5 km away — well outside the 50 m check radius.
         latitude: -7.25,
         longitude: -35.90,
-        pointType: 'REGULAR',
       ),
     ],
   );
@@ -1447,7 +1407,6 @@ void main() {
         servicePointName: 'Sala 101',
         latitude: -7.23,
         longitude: -35.88,
-        pointType: 'REGULAR',
       ),
       RouteStopSummary(
         id: 's2',
@@ -1457,7 +1416,6 @@ void main() {
         // ~11 m from the GPS fix — inside the radius, but farther than s1.
         latitude: -7.2301,
         longitude: -35.88,
-        pointType: 'REGULAR',
       ),
     ],
   );
@@ -1703,7 +1661,6 @@ void main() {
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
                   longitude: -35.91,
-                  pointType: 'REGULAR',
                 ),
                 RouteStopSummary(
                   id: 's2',
@@ -1712,7 +1669,6 @@ void main() {
                   servicePointName: 'Sala 102',
                   latitude: -7.22,
                   longitude: -35.92,
-                  pointType: 'REGULAR',
                 ),
                 RouteStopSummary(
                   id: 's3',
@@ -1721,7 +1677,6 @@ void main() {
                   servicePointName: 'Sala 103',
                   latitude: -7.23,
                   longitude: -35.93,
-                  pointType: 'REGULAR',
                 ),
               ],
             ),
@@ -2189,7 +2144,6 @@ void main() {
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
                   longitude: -35.91,
-                  pointType: 'REGULAR',
                 ),
                 RouteStopSummary(
                   id: 's2',
@@ -2198,7 +2152,6 @@ void main() {
                   servicePointName: 'Sala 102',
                   latitude: -7.22,
                   longitude: -35.92,
-                  pointType: 'REGULAR',
                 ),
               ],
             ),
@@ -2339,7 +2292,6 @@ void main() {
         servicePointName: 'Sala 101',
         latitude: -7.21,
         longitude: -35.91,
-        pointType: 'REGULAR',
         form: oneTextQuestionSchema(),
       ),
     ],
@@ -2468,7 +2420,6 @@ void main() {
             servicePointName: 'Sala 101',
             latitude: -7.21,
             longitude: -35.91,
-            pointType: 'REGULAR',
             form: oneTextQuestionSchema(),
           ),
         ],
@@ -2508,7 +2459,6 @@ void main() {
         servicePointName: 'Sala 101',
         latitude: -7.21,
         longitude: -35.91,
-        pointType: 'REGULAR',
       ),
       RouteStopSummary(
         id: 's2',
@@ -2517,7 +2467,6 @@ void main() {
         servicePointName: 'Sala 102',
         latitude: -7.22,
         longitude: -35.92,
-        pointType: 'REGULAR',
       ),
       RouteStopSummary(
         id: 's3',
@@ -2526,7 +2475,6 @@ void main() {
         servicePointName: 'Sala 103',
         latitude: -7.23,
         longitude: -35.93,
-        pointType: 'REGULAR',
       ),
     ],
   );
@@ -2682,7 +2630,6 @@ void main() {
         servicePointName: 'Sala 101',
         latitude: -7.21,
         longitude: -35.91,
-        pointType: 'REGULAR',
       ),
     ],
   );

@@ -16,6 +16,7 @@ class EvidenceItem {
     this.contentType,
     this.byteSize,
     this.contentUrl,
+    this.idempotencyKey,
   });
 
   factory EvidenceItem.fromJson(Map<String, dynamic> json) => EvidenceItem(
@@ -28,6 +29,7 @@ class EvidenceItem {
     byteSize: (json['byte_size'] as num?)?.toInt(),
     createdAt: DateTime.parse(json['created_at'] as String),
     contentUrl: json['content_url'] as String?,
+    idempotencyKey: json['idempotency_key'] as String?,
   );
 
   final String id;
@@ -38,6 +40,9 @@ class EvidenceItem {
   final int? byteSize;
   final DateTime createdAt;
   final String? contentUrl;
+
+  /// The key this device generated for the upload; a MEDIA answer lists it.
+  final String? idempotencyKey;
 }
 
 // This interface is the seam that keeps callers off the real HTTP client

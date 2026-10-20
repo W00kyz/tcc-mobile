@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show FutureProviderFamily;
 
-import 'package:route_monitor/api/api_client.dart';
 import 'package:route_monitor/api/env.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
@@ -46,20 +45,12 @@ final stopProgressStoreProvider = Provider<StopProgressStore>(
 );
 
 final executionApiProvider = Provider<ExecutionApi>((ref) {
-  final session = ref.watch(sessionProvider);
-  final dio = buildDio(
-    baseUrl: apiBaseUrlFromEnvironment(),
-    accessToken: session?.accessToken,
-  );
+  final dio = buildSessionDio(ref);
   return DioExecutionApi(dio);
 });
 
 final evidenceApiProvider = Provider<EvidenceApi>((ref) {
-  final session = ref.watch(sessionProvider);
-  final dio = buildDio(
-    baseUrl: apiBaseUrlFromEnvironment(),
-    accessToken: session?.accessToken,
-  );
+  final dio = buildSessionDio(ref);
   return DioEvidenceApi(dio);
 });
 

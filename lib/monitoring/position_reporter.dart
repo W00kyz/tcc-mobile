@@ -5,9 +5,12 @@
 // ignore_for_file: prefer_initializing_formals
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 
+import 'package:route_monitor/execution/room_resolution.dart'
+    show haversineMeters;
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/ongoing_notification.dart';
 import 'package:route_monitor/routing/location_service.dart';
@@ -50,12 +53,27 @@ class PositionReporter {
   Timer? _timer;
   String? _routeId;
 
+  /// RNF22 — battery saving while the worker is parked (cleaning one room
+  /// takes ~30 min). A fix within [_stationaryRadiusM] of the last reported
+  /// one means "still here": the next ticks are skipped without even waking
+  /// the GPS, doubling the gap each time (1, 2, 4 min…) up to one fix every
+  /// `interval * (_maxSkippedTicks + 1)` — 5 min at the default 60 s. Any
+  /// real move resets to the base cadence.
+  static const _stationaryRadiusM = 25.0;
+  static const _maxSkippedTicks = 4;
+  Coordinates? _lastReported;
+  int _stationaryStreak = 0;
+  int _ticksToSkip = 0;
+
   /// Starts reporting for [routeId]. A no-op if already running for the same
   /// route; restarts (new timer, new route) if running for a different one.
   void start(String routeId) {
     if (_timer != null && _routeId == routeId) return;
     stop();
     _routeId = routeId;
+    _lastReported = null;
+    _stationaryStreak = 0;
+    _ticksToSkip = 0;
     _timer = _createTimer(_interval, (_) => unawaited(_tick()));
     // LGPD transparency (RNF11): the persistent notice goes up only when the
     // loop actually (re)starts, never on the same-route no-op above.
@@ -73,9 +91,32 @@ class PositionReporter {
 
   void dispose() => stop();
 
+  void _adjustCadence(Coordinates position) {
+    final previous = _lastReported;
+    _lastReported = position;
+    final parked =
+        previous != null &&
+        haversineMeters(
+              previous.latitude,
+              previous.longitude,
+              position.latitude,
+              position.longitude,
+            ) <
+            _stationaryRadiusM;
+    _stationaryStreak = parked ? _stationaryStreak + 1 : 0;
+    // Skipped ticks per streak: 1, 3, 4, 4… (capped).
+    _ticksToSkip = parked
+        ? math.min((1 << _stationaryStreak) - 1, _maxSkippedTicks)
+        : 0;
+  }
+
   Future<void> _tick() async {
     final routeId = _routeId;
     if (routeId == null) return;
+    if (_ticksToSkip > 0) {
+      _ticksToSkip--;
+      return;
+    }
     try {
       final position = await _location.getCurrentPosition(
         purpose: LocationPurpose.tracking,
@@ -86,6 +127,7 @@ class PositionReporter {
         longitude: position.longitude,
         reportedAt: DateTime.now().toUtc(),
       );
+      _adjustCadence(position);
     } on DioException catch (error) {
       // 409 = the backend rejected the fix because the route is no longer the
       // worker's or no longer `IN_PROGRESS` (spec §2 Ruling 5) — reporting can

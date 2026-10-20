@@ -15,7 +15,6 @@ RouteStopSummary _stop(
   servicePointName: name ?? 'Sala $id',
   latitude: latitude,
   longitude: longitude,
-  pointType: 'REGULAR',
 );
 
 // The check-in GPS fix every resolveRoomLocally test below measures against.

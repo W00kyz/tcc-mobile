@@ -545,7 +545,7 @@ void main() {
 
   test('addPhoto enqueues one pending evidencePhoto row and kicks the sync '
       'worker once', () async {
-    await repository.addPhoto(
+    final key = await repository.addPhoto(
       routeId: 'route-A',
       executionId: 'exec-1',
       photo: CapturedPhoto(
@@ -561,7 +561,8 @@ void main() {
     expect(rows.single.payload['execution_id'], 'exec-1');
     expect(rows.single.payload['bytes_b64'], isA<String>());
     expect(rows.single.payload['sha256'], 'abc123');
-    expect(rows.single.payload['idempotency_key'], isA<String>());
+    // The key a MEDIA answer lists: the one the upload will carry.
+    expect(rows.single.payload['idempotency_key'], key);
     expect(syncWorker.syncedRoutes, ['route-A']);
   });
 

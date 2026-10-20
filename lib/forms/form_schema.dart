@@ -10,7 +10,11 @@ enum QuestionType {
   number,
   boolean,
   singleChoice,
-  multiChoice;
+  multiChoice,
+
+  /// The answer is a list of photos: their evidence `idempotency_key`s
+  /// (docs/specs/2026-10-19-pergunta-midia-design.md).
+  media;
 
   static QuestionType fromWire(String value) => switch (value) {
     'TEXT' => QuestionType.text,
@@ -18,9 +22,10 @@ enum QuestionType {
     'BOOLEAN' => QuestionType.boolean,
     'SINGLE_CHOICE' => QuestionType.singleChoice,
     'MULTI_CHOICE' => QuestionType.multiChoice,
+    'MEDIA' => QuestionType.media,
     _ => throw ArgumentError(
       'Unknown question_type "$value"; expected TEXT, NUMBER, BOOLEAN, '
-      'SINGLE_CHOICE or MULTI_CHOICE.',
+      'SINGLE_CHOICE, MULTI_CHOICE or MEDIA.',
     ),
   };
 
@@ -30,6 +35,7 @@ enum QuestionType {
     QuestionType.boolean => 'BOOLEAN',
     QuestionType.singleChoice => 'SINGLE_CHOICE',
     QuestionType.multiChoice => 'MULTI_CHOICE',
+    QuestionType.media => 'MEDIA',
   };
 }
 

@@ -22,6 +22,13 @@ enum SyncErrorClass {
 
   /// Permanent for this payload — block the row and halt the route's queue.
   hard,
+
+  /// 401 even after the token refresh: the session must be renewed (a new
+  /// login). Nothing is wrong with the row — leave it `pending`, untouched,
+  /// and halt the pass; the next sync after login replays it. Classifying
+  /// this as [hard] blocked every queued write of a route that outlived the
+  /// 15-minute access token.
+  awaitingAuth,
 }
 
 /// Drains the local outbox ([LocalWriteStore]) to the backend, strictly FIFO
@@ -137,6 +144,7 @@ class SyncWorker {
         await _store.markSynced(row.id);
         return true;
       }
+      if (classification == SyncErrorClass.awaitingAuth) return false;
       final message = error.toString();
       if (classification == SyncErrorClass.hard) {
         await _store.markBlocked(row.id, message);
@@ -280,6 +288,7 @@ class SyncWorker {
     if (response == null) return SyncErrorClass.soft;
 
     final status = response.statusCode;
+    if (status == 401) return SyncErrorClass.awaitingAuth;
     if (status != null && const {500, 502, 503, 504, 429}.contains(status)) {
       return SyncErrorClass.soft;
     }

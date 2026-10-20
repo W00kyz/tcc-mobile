@@ -241,8 +241,9 @@ class ExecutionRepository {
   /// [photo]'s bytes are base64-encoded into the payload (never a raw
   /// `Uint8List` — `LocalWriteStore.enqueue` `jsonEncode`s the map) so a
   /// `pending`/`failed` row still has what it needs to render a local
-  /// thumbnail before the backend has a copy.
-  Future<void> addPhoto({
+  /// thumbnail before the backend has a copy. Returns the photo's
+  /// idempotency key, which a MEDIA form answer lists to point at it.
+  Future<String> addPhoto({
     required String routeId,
     required String executionId,
     required CapturedPhoto photo,
@@ -262,6 +263,7 @@ class ExecutionRepository {
       },
     );
     unawaited(_syncWorker.syncRoute(routeId));
+    return key;
   }
 
   /// Adds a text note to [executionId]'s evidence list — same lifecycle as

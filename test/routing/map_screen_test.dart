@@ -14,7 +14,6 @@ RouteStopSummary _stop({
   required String status,
   required double lat,
   required double lng,
-  String pointType = 'REGULAR',
   List<List<double>>? legGeometry,
 }) => RouteStopSummary(
   id: id,
@@ -23,7 +22,6 @@ RouteStopSummary _stop({
   servicePointName: 'Ponto $id',
   latitude: lat,
   longitude: lng,
-  pointType: pointType,
   legGeometry: legGeometry,
 );
 
@@ -37,7 +35,7 @@ RouteSummary _routeWith(List<RouteStopSummary> stops) => RouteSummary(
   stops: stops,
 );
 
-// s2 has real geometry, s3 (occasional) has none -> one approximate leg.
+// s2 has real geometry, s3 has none -> one approximate leg.
 final RouteSummary _fakeRoute = _routeWith([
   _stop(id: 's1', order: 1, status: 'DONE', lat: -7.210, lng: -35.910),
   _stop(
@@ -57,7 +55,6 @@ final RouteSummary _fakeRoute = _routeWith([
     status: 'PENDING',
     lat: -7.216,
     lng: -35.916,
-    pointType: 'OCCASIONAL',
   ),
 ]);
 

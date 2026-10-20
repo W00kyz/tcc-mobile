@@ -1,21 +1,33 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/auth/session_storage.dart';
 
+const _session = Session(
+  accessToken: 'a-token',
+  refreshToken: 'r-token',
+  role: 'FIELD_WORKER',
+  consentRequired: true,
+);
+
 void main() {
-  test('InMemorySessionStorage round-trips a token', () async {
+  test('InMemorySessionStorage round-trips the whole session', () async {
     final storage = InMemorySessionStorage();
 
-    await storage.saveAccessToken('a-token');
+    await storage.saveSession(_session);
 
-    expect(await storage.readAccessToken(), 'a-token');
+    final restored = await storage.readSession();
+    expect(restored?.accessToken, 'a-token');
+    expect(restored?.refreshToken, 'r-token');
+    expect(restored?.role, 'FIELD_WORKER');
+    expect(restored?.consentRequired, isTrue);
   });
 
-  test('InMemorySessionStorage clears the token', () async {
+  test('InMemorySessionStorage clears the session', () async {
     final storage = InMemorySessionStorage();
-    await storage.saveAccessToken('a-token');
+    await storage.saveSession(_session);
 
     await storage.clear();
 
-    expect(await storage.readAccessToken(), isNull);
+    expect(await storage.readSession(), isNull);
   });
 }

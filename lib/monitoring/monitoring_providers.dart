@@ -1,7 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:route_monitor/api/api_client.dart';
-import 'package:route_monitor/api/env.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/ongoing_notification.dart';
@@ -12,11 +10,7 @@ import 'package:route_monitor/routing/route_providers.dart'
 /// Mirrors `executionApiProvider` — a fresh Dio bound to the current session's
 /// bearer token, rebuilt whenever the session changes.
 final monitoringApiProvider = Provider<MonitoringApi>((ref) {
-  final session = ref.watch(sessionProvider);
-  final dio = buildDio(
-    baseUrl: apiBaseUrlFromEnvironment(),
-    accessToken: session?.accessToken,
-  );
+  final dio = buildSessionDio(ref);
   return DioMonitoringApi(dio);
 });
 

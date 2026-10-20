@@ -451,7 +451,6 @@ class _MutableFormRouteRepository implements RouteRepository {
           servicePointName: 'Sala 101',
           latitude: -7.23,
           longitude: -35.88,
-          pointType: 'REGULAR',
           serviceTypeId: 'svc-cleaning',
           serviceTypeName: 'Limpeza',
           form: form,

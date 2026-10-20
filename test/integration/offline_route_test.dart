@@ -579,7 +579,6 @@ class _RecordingRouteRepository implements RouteRepository {
           servicePointName: 'Sala 101',
           latitude: -7.23,
           longitude: -35.88,
-          pointType: 'REGULAR',
         ),
         RouteStopSummary(
           id: _stop2,
@@ -588,7 +587,6 @@ class _RecordingRouteRepository implements RouteRepository {
           servicePointName: 'Sala 102',
           latitude: -7.24,
           longitude: -35.89,
-          pointType: 'REGULAR',
         ),
       ],
     ),

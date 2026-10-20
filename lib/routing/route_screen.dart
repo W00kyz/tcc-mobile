@@ -3,9 +3,9 @@ import 'package:flutter_map/flutter_map.dart' show TileProvider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
+import 'package:route_monitor/execution/evidence_thumbnail.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/impediment_dialog.dart';
 import 'package:route_monitor/execution/room_picker.dart';
@@ -144,7 +144,9 @@ class RouteScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
-                      if (!started)
+                      // Only a PLANNED route can start: a manager may close an
+                      // unstarted route by hand (RF53), leaving it DONE.
+                      if (!started && route.status == 'PLANNED')
                         FilledButton(
                           onPressed: () => _startRoute(context, ref, route.id),
                           child: const Text(AppStrings.routeStartButton),
@@ -211,7 +213,8 @@ class RouteScreen extends ConsumerWidget {
       formFillAction: (inProgress && stopForm != null && executionId != null)
           ? () => Navigator.of(context).push(
               MaterialPageRoute<void>(
-                builder: (_) => FormScreen(executionId: executionId),
+                builder: (_) =>
+                    FormScreen(routeId: route.id, executionId: executionId),
               ),
             )
           : null,
@@ -690,11 +693,6 @@ class _StopTile extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 8),
                   child: _StopSyncChipLabel(syncChip),
                 ),
-              if (stop.pointType == 'OCCASIONAL')
-                const Padding(
-                  padding: EdgeInsets.only(left: 8),
-                  child: Chip(label: Text(AppStrings.routeStopOccasionalChip)),
-                ),
               if (stop.reassigned)
                 const Padding(
                   padding: EdgeInsets.only(left: 8),
@@ -951,7 +949,7 @@ class _EvidenceTile extends ConsumerWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _thumbnail(ref),
+          EvidenceThumbnail(item),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -965,39 +963,6 @@ class _EvidenceTile extends ConsumerWidget {
         ],
       ),
     );
-  }
-
-  Widget _thumbnail(WidgetRef ref) {
-    if (item.kind != 'PHOTO') return const SizedBox.shrink();
-    if (item.photoBytes != null) {
-      return Image.memory(
-        item.photoBytes!,
-        width: 40,
-        height: 40,
-        fit: BoxFit.cover,
-      );
-    }
-    if (item.contentUrl != null) {
-      // NetworkImage's own `headers` map is enough for the bearer token here
-      // — simpler than a custom Dio-backed ImageProvider, and the offline
-      // map screen already established that a plain network fetch (no
-      // redirect handling needed) is fine for this backend. Reads the base
-      // URL through apiBaseUrlProvider (not apiBaseUrlFromEnvironment()
-      // directly) so a test can override it with a fixed value instead of
-      // requiring a real --dart-define.
-      final token = ref.watch(sessionProvider)?.accessToken;
-      final baseUrl = ref.watch(apiBaseUrlProvider);
-      return Image(
-        image: NetworkImage(
-          '$baseUrl${item.contentUrl}',
-          headers: token == null ? null : {'Authorization': 'Bearer $token'},
-        ),
-        width: 40,
-        height: 40,
-        fit: BoxFit.cover,
-      );
-    }
-    return const SizedBox.shrink();
   }
 
   Widget _syncIcon() {

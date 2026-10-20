@@ -12,6 +12,7 @@ void main() {
         QuestionType.singleChoice,
       );
       expect(QuestionType.fromWire('MULTI_CHOICE'), QuestionType.multiChoice);
+      expect(QuestionType.fromWire('MEDIA'), QuestionType.media);
     });
 
     test('round-trips through wireName', () {

@@ -6,15 +6,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:route_monitor/forms/form_draft_store.dart';
 import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/forms/form_schema.dart' show QuestionType;
+import 'package:route_monitor/forms/media_question_field.dart';
 import 'package:route_monitor/l10n/strings.dart';
 
 /// The dynamic form renderer (spec §6.5) — a stop's draft questions, one
 /// widget per `QuestionType`, edited in place while the stop is
-/// `IN_PROGRESS`. `executionId` is the only input; everything else comes
-/// from [formDraftProvider].
+/// `IN_PROGRESS`. Everything else comes from [formDraftProvider]; `routeId`
+/// is where a MEDIA question queues its photos.
 class FormScreen extends ConsumerWidget {
-  const FormScreen({required this.executionId, super.key});
+  const FormScreen({
+    required this.routeId,
+    required this.executionId,
+    super.key,
+  });
 
+  final String routeId;
   final String executionId;
 
   @override
@@ -42,6 +48,7 @@ class FormScreen extends ConsumerWidget {
                     for (final item in sorted)
                       _QuestionField(
                         key: ValueKey(item.stableKey),
+                        routeId: routeId,
                         executionId: executionId,
                         item: item,
                       ),
@@ -62,11 +69,13 @@ class FormScreen extends ConsumerWidget {
 /// flag through `setAnswer` (Task 11 guarantee).
 class _QuestionField extends ConsumerWidget {
   const _QuestionField({
+    required this.routeId,
     required this.executionId,
     required this.item,
     super.key,
   });
 
+  final String routeId;
   final String executionId;
   final FormDraftItem item;
 
@@ -154,6 +163,13 @@ class _QuestionField extends ConsumerWidget {
             ),
         ],
       ),
+      QuestionType.media => MediaQuestionField(
+        routeId: routeId,
+        executionId: executionId,
+        label: _promptLabel,
+        photoKeys: item.value as List<String>? ?? const [],
+        onChanged: (keys) => unawaited(_answer(ref, keys)),
+      ),
     };
 
     return Container(
@@ -207,7 +223,7 @@ class _Footer extends ConsumerWidget {
     final itemsAsync = ref.watch(formDraftProvider(executionId));
     final pending = itemsAsync.maybeWhen(
       data: (items) => items
-          .where((i) => i.needsReanswer || (i.required && i.value == null))
+          .where((i) => i.needsReanswer || (i.required && !isAnswered(i)))
           .length,
       orElse: () => null,
     );

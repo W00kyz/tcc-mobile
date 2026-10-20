@@ -103,7 +103,13 @@ void main() {
     tester,
   ) async {
     final storage = InMemorySessionStorage();
-    await storage.saveAccessToken('a-token');
+    await storage.saveSession(
+      const Session(
+        accessToken: 'a-token',
+        refreshToken: 'r',
+        role: 'FIELD_WORKER',
+      ),
+    );
     await _pump(
       tester,
       repository: _FakeConsentRepository(),
@@ -113,7 +119,7 @@ void main() {
     await tester.tap(find.text(AppStrings.consentExitButton));
     await tester.pumpAndSettle();
 
-    expect(await storage.readAccessToken(), isNull);
+    expect(await storage.readSession(), isNull);
     expect(find.text('entrar-screen'), findsOneWidget);
   });
 }

@@ -126,6 +126,25 @@ void main() {
   });
 
   group('isComplete', () {
+    test('a required MEDIA question with no photo is not answered', () async {
+      final schema = FormSchema(
+        formVersionId: 'v1',
+        questions: [
+          _question(stableKey: 'q1', type: QuestionType.media, required: true),
+        ],
+      );
+      await store.snapshotFrom('exec1', 'stop1', schema);
+      // Every photo removed again: an empty list, not a null answer.
+      await store.setAnswer('exec1', 'q1', <String>[]);
+
+      expect(await store.isComplete('exec1'), isFalse);
+      expect(isAnswered((await store.itemsFor('exec1')).single), isFalse);
+
+      await store.setAnswer('exec1', 'q1', ['photo-key-1']);
+
+      expect(await store.isComplete('exec1'), isTrue);
+    });
+
     test('false with a required unanswered item', () async {
       final schema = FormSchema(
         formVersionId: 'v1',
@@ -291,5 +310,24 @@ void main() {
         expect(item.orderIndex, 5);
       },
     );
+  });
+
+  test('a MEDIA answer round-trips as its list of photo keys and is flagged '
+      'when the question changes', () async {
+    FormSchema schema(String version, String hash) => FormSchema(
+      formVersionId: version,
+      questions: [
+        _question(stableKey: 'q1', type: QuestionType.media, contentHash: hash),
+      ],
+    );
+    await store.snapshotFrom('exec1', 'stop1', schema('v1', 'A'));
+    await store.setAnswer('exec1', 'q1', ['k1', 'k2']);
+
+    await store.reconcile('exec1', 'stop1', schema('v2', 'A2'));
+    final item = (await store.itemsFor('exec1')).single;
+
+    expect(item.value, ['k1', 'k2']);
+    expect(item.value, isA<List<String>>());
+    expect(item.needsReanswer, isTrue);
   });
 }

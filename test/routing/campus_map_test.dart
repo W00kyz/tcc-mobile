@@ -10,7 +10,6 @@ RouteStopSummary _stop({
   required String status,
   required double lat,
   required double lng,
-  String pointType = 'REGULAR',
   List<List<double>>? legGeometry,
 }) => RouteStopSummary(
   id: id,
@@ -19,7 +18,6 @@ RouteStopSummary _stop({
   servicePointName: 'Ponto $id',
   latitude: lat,
   longitude: lng,
-  pointType: pointType,
   legGeometry: legGeometry,
 );
 
@@ -55,7 +53,6 @@ void main() {
       status: 'PENDING',
       lat: -7.230,
       lng: -35.930,
-      pointType: 'OCCASIONAL',
     ),
   ]);
 
@@ -97,13 +94,11 @@ void main() {
     expect(data.stops[0].position, const LatLng(-7.210, -35.910));
   });
 
-  test('pending is derived from status, occasional from pointType', () {
+  test('pending is derived from status', () {
     final data = buildRouteMapData(route);
 
     expect(data.stops[0].pending, isFalse); // DONE
     expect(data.stops[1].pending, isTrue); // PENDING
-    expect(data.stops[0].occasional, isFalse); // REGULAR
-    expect(data.stops[2].occasional, isTrue); // OCCASIONAL
   });
 
   test('a single-stop route has no legs', () {

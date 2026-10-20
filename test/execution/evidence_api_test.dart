@@ -88,6 +88,7 @@ void main() {
           'byte_size': 51200,
           'created_at': '2026-08-25T08:20:01.000Z',
           'content_url': '/evidence/e1/content',
+          'idempotency_key': 'key-e1',
         },
         {
           'id': 'e2',
@@ -98,6 +99,7 @@ void main() {
           'byte_size': null,
           'created_at': '2026-08-25T08:21:01.000Z',
           'content_url': null,
+          'idempotency_key': null,
         },
       ]);
     final api = DioEvidenceApi(dio);
@@ -110,6 +112,9 @@ void main() {
     expect(items[0].contentType, 'image/jpeg');
     expect(items[0].byteSize, 51200);
     expect(items[0].contentUrl, '/evidence/e1/content');
+    // How a MEDIA answer points at this photo.
+    expect(items[0].idempotencyKey, 'key-e1');
+    expect(items[1].idempotencyKey, isNull);
     expect(items[1].kind, 'NOTE');
     expect(items[1].textBody, 'Vazamento no teto.');
     expect(items[1].contentUrl, isNull);

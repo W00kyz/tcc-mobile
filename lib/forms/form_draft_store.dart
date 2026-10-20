@@ -47,6 +47,19 @@ class FormDraftItem {
   final bool needsReanswer;
 }
 
+/// Whether [item] holds an answer that counts toward completion. A MEDIA
+/// question whose photos were all removed keeps an empty list, which is no
+/// answer: a required photo question needs at least one photo (RF40).
+///
+/// ```dart
+/// final pending = items.where((i) => i.required && !isAnswered(i));
+/// ```
+bool isAnswered(FormDraftItem item) {
+  final value = item.value;
+  if (value == null) return false;
+  return item.type != QuestionType.media || (value is List && value.isNotEmpty);
+}
+
 /// On-device draft of a stop's form answers, keyed by `(executionId,
 /// stableKey)` (spec §6.1/§6.3). Written on check-in success
 /// (`snapshotFrom`), read/edited while the stop is `IN_PROGRESS`
@@ -159,7 +172,7 @@ class DriftFormDraftStore implements FormDraftStore {
   Future<bool> isComplete(String executionId) async {
     final items = await itemsFor(executionId);
     return items.every((i) => !i.needsReanswer) &&
-        items.where((i) => i.required).every((i) => i.value != null);
+        items.where((i) => i.required).every(isAnswered);
   }
 
   @override
