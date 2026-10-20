@@ -44,6 +44,28 @@ void main() {
     expect(status.noticeBody, isNull);
   });
 
+  test('currentNotice reads the public notice for the sign-up', () async {
+    late RequestOptions capturedRequest;
+    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _FakeAdapter(
+        statusCode: 200,
+        body: {
+          'version': 4,
+          'title': 'Aviso de Privacidade',
+          'body_markdown': 'Coletamos sua localização durante a rota.',
+        },
+        onRequest: (options) => capturedRequest = options,
+      );
+
+    final notice = await DioConsentRepository(dio).currentNotice();
+
+    expect(capturedRequest.path, '/public/privacy-notice');
+    expect(
+      (notice.version, notice.title, notice.body),
+      (4, 'Aviso de Privacidade', 'Coletamos sua localização durante a rota.'),
+    );
+  });
+
   test('accept issues a POST to /auth/consent', () async {
     late RequestOptions capturedRequest;
     final dio = Dio(BaseOptions(baseUrl: 'http://test'))

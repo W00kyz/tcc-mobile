@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:route_monitor/auth/approval_screen.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/auth/login_screen.dart';
+import 'package:route_monitor/auth/registration_screen.dart';
 import 'package:route_monitor/forms/form_reconciliation.dart';
 import 'package:route_monitor/monitoring/position_reporting_trigger.dart';
 import 'package:route_monitor/privacy/consent_screen.dart';
@@ -16,10 +18,37 @@ void main() {
   runApp(const ProviderScope(child: RouteMonitorApp()));
 }
 
+const Set<String> _signedOutLocations = {'/entrar', '/cadastro'};
+const Set<String> _gateLocations = {
+  ..._signedOutLocations,
+  '/consentimento',
+  '/aguardando-aprovacao',
+};
+
+/// Where the router sends [session] asking for [location], or null to let it
+/// through. Signed out: only login and sign-up. A worker who may not work
+/// (pending, rejected, deactivated) waits on `/aguardando-aprovacao` — before
+/// the consent gate, since they collect no data anyway. Past every gate, the
+/// gate screens send on to the route.
+///
+///     redirect: (_, state) => appRedirect(session, state.matchedLocation),
+String? appRedirect(Session? session, String location) {
+  if (session == null) {
+    return _signedOutLocations.contains(location) ? null : '/entrar';
+  }
+  if (session.workerStanding.blocksWork) {
+    return location == '/aguardando-aprovacao' ? null : '/aguardando-aprovacao';
+  }
+  if (session.consentRequired) {
+    return location == '/consentimento' ? null : '/consentimento';
+  }
+  return _gateLocations.contains(location) ? '/rota' : null;
+}
+
 /// The app router, built through Riverpod so `redirect` can read the session
-/// (LGPD consent gate, RNF10). A [ValueNotifier] bridged from [sessionProvider]
-/// is the `refreshListenable`, so login, logout and consent acceptance all
-/// re-run the guard.
+/// (LGPD consent gate, RNF10; approval gate). A [ValueNotifier] bridged from
+/// [sessionProvider] is the `refreshListenable`, so login, logout, consent
+/// acceptance and a refreshed worker standing all re-run the guard.
 final routerProvider = Provider<GoRouter>((ref) {
   final sessionChanges = ValueNotifier<Session?>(ref.read(sessionProvider));
   ref
@@ -32,25 +61,20 @@ final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/entrar',
     refreshListenable: sessionChanges,
-    redirect: (context, state) {
-      final session = ref.read(sessionProvider);
-      final location = state.matchedLocation;
-
-      if (session == null) {
-        return location == '/entrar' ? null : '/entrar';
-      }
-      if (session.consentRequired) {
-        return location == '/consentimento' ? null : '/consentimento';
-      }
-      if (location == '/entrar' || location == '/consentimento') {
-        return '/rota';
-      }
-      return null;
-    },
+    redirect: (context, state) =>
+        appRedirect(ref.read(sessionProvider), state.matchedLocation),
     routes: [
       GoRoute(
         path: '/entrar',
         builder: (context, state) => const LoginScreen(),
+      ),
+      GoRoute(
+        path: '/cadastro',
+        builder: (context, state) => const RegistrationScreen(),
+      ),
+      GoRoute(
+        path: '/aguardando-aprovacao',
+        builder: (context, state) => const ApprovalScreen(),
       ),
       GoRoute(
         path: '/consentimento',

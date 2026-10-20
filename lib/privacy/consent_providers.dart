@@ -13,3 +13,10 @@ final consentRepositoryProvider = Provider<ConsentRepository>((ref) {
 final consentStatusProvider = FutureProvider<ConsentStatus>((ref) {
   return ref.watch(consentRepositoryProvider).status();
 });
+
+/// The notice shown on the sign-up screen; invalidated when the server says
+/// the one accepted is outdated.
+final FutureProvider<PrivacyNotice> currentNoticeProvider =
+    FutureProvider.autoDispose<PrivacyNotice>((ref) {
+      return ref.watch(consentRepositoryProvider).currentNotice();
+    });

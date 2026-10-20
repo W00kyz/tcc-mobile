@@ -19,6 +19,9 @@ class _FakeConsentRepository implements ConsentRepository {
 
   @override
   Future<void> accept() async => accepted = true;
+
+  @override
+  Future<PrivacyNotice> currentNotice() => throw UnimplementedError();
 }
 
 GoRouter _router() => GoRouter(

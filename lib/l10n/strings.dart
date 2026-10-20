@@ -42,6 +42,54 @@ abstract final class AppStrings {
       'Se o e-mail estiver cadastrado, você receberá um link em instantes.';
   static const String forgotPasswordError =
       'Não foi possível enviar o link. Verifique a conexão e tente novamente.';
+  static const String loginCreateAccount = 'Criar conta';
+
+  // --- self-registration (alocação automática §9) ---
+  static const String registrationTitle = 'Criar conta';
+  static const String registrationNameLabel = 'Nome';
+  static const String registrationEmailLabel = 'E-mail';
+  static const String registrationPasswordLabel = 'Senha';
+  static const String registrationCompanyLabel = 'Empresa';
+  static const String registrationNameRequired = 'Informe seu nome.';
+  static const String registrationEmailInvalid = 'Informe um e-mail válido.';
+  static const String registrationPasswordTooShort =
+      'A senha precisa ter pelo menos 8 caracteres.';
+  static const String registrationCompanyRequired = 'Escolha sua empresa.';
+  static const String registrationAcceptNotice = 'Li e aceito';
+  static const String registrationSubmit = 'Enviar cadastro';
+  static const String registrationSubmitting = 'Enviando…';
+  static const String registrationSent =
+      'Cadastro enviado. Aguarde a aprovação do gestor.';
+  static const String registrationEmailTaken =
+      'Este e-mail já está cadastrado.';
+  static const String registrationNoticeOutdated =
+      'O aviso de privacidade foi atualizado. Leia e aceite a nova versão.';
+  static const String registrationError =
+      'Não foi possível enviar o cadastro. Verifique a conexão e tente '
+      'novamente.';
+  static const String registrationLoadError =
+      'Não foi possível carregar as empresas e o aviso de privacidade.';
+  static const String registrationRetry = 'Tentar novamente';
+
+  /// The `Versão <n>` label under the privacy notice title.
+  static String registrationNoticeVersion(int version) => 'Versão $version';
+
+  // --- approval gate (alocação automática §9) ---
+  static const String approvalPendingMessage =
+      'Seu cadastro está aguardando aprovação do gestor.';
+  static const String approvalRejectedMessage =
+      'Seu cadastro não foi aprovado.';
+  static const String approvalDeactivatedMessage =
+      'Seu cadastro foi desativado pelo gestor.';
+  static const String approvalRefreshButton = 'Atualizar';
+  static const String approvalExitButton = 'Sair';
+  static const String approvalStillPending =
+      'Seu cadastro ainda aguarda aprovação.';
+  static const String approvalNetworkError =
+      'Sem conexão com o servidor. Tente novamente quando houver sinal.';
+
+  /// The manager's reason under a rejection.
+  static String approvalRejectionReason(String reason) => 'Motivo: $reason';
 
   // --- route screen ---
   static const String routeAppBarTitle = 'Rota de hoje';

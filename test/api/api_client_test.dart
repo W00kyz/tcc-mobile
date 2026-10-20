@@ -6,6 +6,7 @@ import 'package:route_monitor/api/api_client.dart';
 
 void main() {
   group('refresh on 401', refreshInterceptorTests);
+  group('worker not approved', workerNotApprovedTests);
 
   test('buildDio sets the base URL', () {
     final dio = buildDio(baseUrl: 'http://localhost:8000');
@@ -116,5 +117,77 @@ void refreshInterceptorTests() {
       throwsA(isA<DioException>()),
     );
     expect(refreshCalls, 1);
+  });
+}
+
+/// Answers every request with [statusCode] and [body].
+class _FixedAdapter implements HttpClientAdapter {
+  _FixedAdapter(this.statusCode, this.body);
+
+  final int statusCode;
+  final String body;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => ResponseBody.fromString(
+    body,
+    statusCode,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
+
+  @override
+  void close({bool force = false}) {}
+}
+
+void workerNotApprovedTests() {
+  test('a 403 WORKER_NOT_APPROVED is reported, then surfaced', () async {
+    var reports = 0;
+    final dio =
+        buildDio(
+            baseUrl: 'http://localhost:8000',
+            accessToken: 'token',
+            onWorkerNotApproved: () async => reports++,
+          )
+          ..httpClientAdapter = _FixedAdapter(
+            403,
+            '{"detail":{"code":"WORKER_NOT_APPROVED","detail":"not approved"}}',
+          );
+
+    await expectLater(
+      dio.get<void>('/routes/me'),
+      throwsA(
+        isA<DioException>().having(
+          (error) => error.response?.statusCode,
+          'status',
+          403,
+        ),
+      ),
+    );
+    expect(reports, 1);
+  });
+
+  test('any other 403 is not reported', () async {
+    var reports = 0;
+    final dio =
+        buildDio(
+            baseUrl: 'http://localhost:8000',
+            accessToken: 'token',
+            onWorkerNotApproved: () async => reports++,
+          )
+          ..httpClientAdapter = _FixedAdapter(
+            403,
+            '{"detail":"Consent to the current privacy notice is required."}',
+          );
+
+    await expectLater(
+      dio.get<void>('/routes/me'),
+      throwsA(isA<DioException>()),
+    );
+    expect(reports, 0);
   });
 }
