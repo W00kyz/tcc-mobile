@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
@@ -43,6 +46,20 @@ class _DrainingSyncWorker implements SyncWorker {
   /// False = the server is down: every row stays unsynced.
   bool delivers = true;
 
+  final StreamController<RouteSyncStatus> _status =
+      StreamController<RouteSyncStatus>.broadcast();
+
+  /// Reports a finished pass with [pending] rows still owed, the way the
+  /// real worker's status feed does.
+  void reportPending(int pending) => _status.add(
+    RouteSyncStatus(
+      routeId: 'r1',
+      state: RouteSyncState.idle,
+      pending: pending,
+      blocked: 0,
+    ),
+  );
+
   @override
   Future<void> syncRoute(String routeId) async {
     events.add('sync:$routeId');
@@ -56,13 +73,13 @@ class _DrainingSyncWorker implements SyncWorker {
   Future<void> syncAll() async {}
 
   @override
-  Stream<RouteSyncStatus> statusFor(String routeId) => const Stream.empty();
+  Stream<RouteSyncStatus> statusFor(String routeId) => _status.stream;
 
   @override
   Future<void> unblock(String operationId) async {}
 
   @override
-  Future<void> dispose() async {}
+  Future<void> dispose() => _status.close();
 }
 
 class _Harness {
@@ -296,8 +313,8 @@ void main() {
     );
 
     test(
-      'a blocked write leaves it to the blocked-sync banner: no pull and no '
-      '"connect" banner while online',
+      'a blocked write (a late STOP_RELEASED, parked for the appeal) and the '
+      'rows held behind it do not stall the pull',
       () async {
         final h = _Harness(myDayWith(_batchOne()));
         await h.markDoneLocally('s2');
@@ -307,11 +324,92 @@ void main() {
           payload: const {'route_stop_id': 's2'},
           routeId: 'r1',
         );
-        await h.store.markBlocked('checkout-s2', 'HTTP 403');
+        await h.store.markBlocked('checkout-s2', 'HTTP 409 STOP_RELEASED');
+        // An impediment on the same stop, held behind it for good.
+        await h.store.enqueue(
+          id: 'impediment-s2',
+          kind: PendingOpKind.impediment,
+          payload: const {'route_stop_id': 's2'},
+          routeId: 'r1',
+        );
+        h.worker.delivers = false;
+        h.repository.allocate = _handsOutBatchTwo(h);
 
         await h.mount();
 
+        expect(h.repository.allocationCalls, ['nextBatch:r1']);
+        expect(h.state, NextBatchState.idle);
+      },
+    );
+
+    test(
+      'waiting on an undelivered write, it pulls as soon as the route '
+      'becomes fully synced — no connectivity event needed',
+      () async {
+        final h = _Harness(myDayWith(_batchOne()));
+        await h.markDoneLocally('s2');
+        await h.store.enqueue(
+          id: 'checkout-s2',
+          kind: PendingOpKind.checkOut,
+          payload: const {'route_stop_id': 's2'},
+          routeId: 'r1',
+        );
+        h.worker.delivers = false;
+        h.repository.allocate = _handsOutBatchTwo(h);
+        await h.mount();
+        expect(h.state, NextBatchState.waitingForNetwork);
+
+        // Data came back: a later pass delivers the check-out.
+        h.worker.reportPending(1);
+        await pumpEventQueue();
         expect(h.repository.allocationCalls, isEmpty);
+        await h.store.markSynced('checkout-s2');
+        h.worker.reportPending(0);
+        await pumpEventQueue();
+
+        expect(h.repository.allocationCalls, ['nextBatch:r1']);
+        expect(h.state, NextBatchState.idle);
+      },
+    );
+
+    test(
+      'waiting with the interface up but no data, it retries every 30 s',
+      () {
+        fakeAsync((async) {
+          final h = _Harness(myDayWith(_batchOne()));
+          unawaited(h.markDoneLocally('s2'));
+          // The server answers nothing useful: the request never connects.
+          h.repository.allocate = () =>
+              throw const OfflineException('/routes/r1/next-batch');
+          async.flushMicrotasks();
+          h.container.listen(batchAllocationProvider, (_, _) {});
+          async.flushMicrotasks();
+          expect(h.state, NextBatchState.waitingForNetwork);
+          expect(h.repository.allocationCalls, ['nextBatch:r1']);
+
+          h.repository.allocate = _handsOutBatchTwo(h);
+          async.elapse(const Duration(seconds: 29));
+          expect(h.repository.allocationCalls, hasLength(1));
+          async.elapse(const Duration(seconds: 1));
+
+          expect(h.repository.allocationCalls, hasLength(2));
+          expect(h.state, NextBatchState.idle);
+          async.elapse(nextBatchRetryInterval * 3);
+          expect(h.repository.allocationCalls, hasLength(2));
+        });
+      },
+    );
+
+    test(
+      'a pull that fails unexpectedly does not stay "pulling" and reaches no '
+      'zone',
+      () async {
+        final h = _Harness(myDayWith(_batchOne()));
+        await h.markDoneLocally('s2');
+        h.repository.allocate = () => throw StateError('store is gone');
+
+        await h.mount();
+
         expect(h.state, NextBatchState.idle);
       },
     );

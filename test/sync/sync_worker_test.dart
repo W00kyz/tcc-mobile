@@ -418,6 +418,13 @@ class _ZeroRandom implements math.Random {
   bool nextBool() => false;
 }
 
+/// A row's payload on [stop], its execution named after the stop.
+Map<String, dynamic> _stopPayload(String id, String stop) => {
+  ..._FakeLocalWriteStore._defaultPayload(id),
+  'route_stop_id': stop,
+  'execution_id': 'exec-$stop',
+};
+
 void main() {
   test(
     'drains a route FIFO: check-in, photo, check-out in createdAt order',
@@ -626,7 +633,15 @@ void main() {
           'detail': {'code': 'WORKER_NOT_APPROVED', 'detail': 'deactivated'},
         },
       );
-      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+      h.executionApi.consumeError = false;
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed(
+          'b',
+          kind: PendingOpKind.checkIn,
+          createdAt: 2,
+          payload: _stopPayload('b', 'stop-2'),
+        );
 
       await h.worker.syncRoute('route-R');
       await h.worker.syncRoute('route-R');
@@ -635,7 +650,10 @@ void main() {
       expect(row.state, PendingOpState.blocked);
       expect(row.attempts, 0);
       expect(row.nextAttemptAt, isNull);
-      expect(h.log, ['checkIn:a']);
+      // Each stop is tried once and blocked — never retried, never jammed
+      // behind another stop.
+      expect(h.log, ['checkIn:a', 'checkIn:b']);
+      expect(h.store.rows['b']!.state, PendingOpState.blocked);
     },
   );
 
@@ -735,8 +753,8 @@ void main() {
   });
 
   test(
-    'a blocked row keeps its route halted on later passes too, until it is '
-    'retried by hand (Etapa 6 Ruling 6: "a rota inteira para")',
+    'a check-out stays behind its own blocked check-in on later passes, '
+    'until the check-in is retried by hand',
     () async {
       final h = _Harness();
       h.store
@@ -757,6 +775,100 @@ void main() {
       await h.worker.syncRoute('route-R');
 
       expect(h.log, ['checkIn:a', 'checkOut:c']);
+    },
+  );
+
+  test(
+    'a blocked row on stop A (a late STOP_RELEASED) never holds back stop B',
+    () async {
+      final h = _Harness();
+      h.store
+        ..seed(
+          'outA',
+          kind: PendingOpKind.checkOut,
+          createdAt: 1,
+          state: PendingOpState.blocked,
+          payload: _stopPayload('outA', 'stop-A'),
+        )
+        ..seed(
+          'inB',
+          kind: PendingOpKind.checkIn,
+          createdAt: 2,
+          payload: _stopPayload('inB', 'stop-B'),
+        );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['checkIn:inB']);
+      expect(h.store.rows['inB']!.state, PendingOpState.synced);
+    },
+  );
+
+  test(
+    "evidence of a blocked check-in's execution is held, other stops' "
+    'evidence is not',
+    () async {
+      final h = _Harness();
+      h.store
+        ..seed(
+          'inA',
+          kind: PendingOpKind.checkIn,
+          createdAt: 1,
+          state: PendingOpState.blocked,
+          payload: _stopPayload('inA', 'stop-A'),
+        )
+        ..seed(
+          'photoA',
+          kind: PendingOpKind.evidencePhoto,
+          createdAt: 2,
+          payload: _stopPayload('photoA', 'stop-A'),
+        )
+        ..seed(
+          'photoB',
+          kind: PendingOpKind.evidencePhoto,
+          createdAt: 3,
+          payload: _stopPayload('photoB', 'stop-B'),
+        );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['photo:photoB']);
+      expect(h.store.rows['photoA']!.state, PendingOpState.pending);
+    },
+  );
+
+  test(
+    'a hard failure mid-pass holds back its own stop and the pass goes on '
+    'with the next stop',
+    () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(status: 422);
+      h.store
+        ..seed(
+          'inA',
+          kind: PendingOpKind.checkIn,
+          createdAt: 1,
+          payload: _stopPayload('inA', 'stop-A'),
+        )
+        ..seed(
+          'outA',
+          kind: PendingOpKind.checkOut,
+          createdAt: 2,
+          payload: _stopPayload('outA', 'stop-A'),
+        )
+        ..seed(
+          'inB',
+          kind: PendingOpKind.checkIn,
+          createdAt: 3,
+          payload: _stopPayload('inB', 'stop-B'),
+        );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['checkIn:inA', 'checkIn:inB']);
+      expect(h.store.rows['inA']!.state, PendingOpState.blocked);
+      expect(h.store.rows['outA']!.state, PendingOpState.pending);
+      expect(h.store.rows['inB']!.state, PendingOpState.synced);
     },
   );
 

@@ -185,8 +185,8 @@ void main() {
   );
 
   testWidgets(
-    'a hard 422 on the stop-2 check-in blocks that row and halts the route '
-    'queue behind it',
+    'a hard 422 on the stop-2 check-in blocks that row and holds back its own '
+    'check-out; the next-batch ask gets the same batch back',
     (tester) async {
       final fixture = await _Fixture.create();
       addTearDown(fixture.dispose);
@@ -220,13 +220,16 @@ void main() {
       expect(stillPending, hasLength(1));
       expect(stillPending.single.kind, PendingOpKind.checkOut);
       expect(stillPending.single.payload['route_stop_id'], _stop2);
-      // No next batch either: the server never got the stop-2 check-out.
+      // The held check-out is no network's to deliver, so the pull still
+      // asks — and the server, which never got stop 2, hands back batch 1.
       expect(fixture.callLog, [
         'checkIn:$_stop1',
         'uploadPhoto',
         'checkOut:$_stop1',
         'checkIn:$_stop2', // attempted, threw 422
+        'nextBatch',
       ]);
+      expect(fixture.routeApi.batchesHandedOut, 0);
 
       // Banner shows the blocked state.
       expect(
@@ -556,13 +559,15 @@ class _RecordingEvidenceApi implements EvidenceApi {
   List<String> get calls => _log.where((c) => c.contains('pload')).toList();
 }
 
-/// The server side of the day: batch 1 (stops 1 and 2) until the next batch
-/// is asked for, batch 2 (one new stop) from then on.
+/// The server side of the day: batch 1 (stops 1 and 2) until it has both
+/// check-outs and the next batch is asked for, batch 2 (one new stop) from
+/// then on. Asked earlier, it hands batch 1 back unchanged, like B3.
 class _RecordingRouteRepository implements RouteRepository {
   _RecordingRouteRepository(this._log);
 
   final List<String> _log;
   int nextBatchCalls = 0;
+  int batchesHandedOut = 0;
 
   RouteSummary _route() => RouteSummary(
     id: _routeId,
@@ -570,13 +575,13 @@ class _RecordingRouteRepository implements RouteRepository {
     routeDate: DateTime(2026, 9, 3),
     status: 'IN_PROGRESS',
     startedAt: DateTime.utc(2026, 9, 3, 8),
-    currentBatch: nextBatchCalls == 0 ? 1 : 2,
+    currentBatch: batchesHandedOut == 0 ? 1 : 2,
     stops: [
       RouteStopSummary(
         id: _stop1,
         orderIndex: 1,
         batchNumber: 1,
-        status: nextBatchCalls == 0 ? 'PENDING' : 'DONE',
+        status: batchesHandedOut == 0 ? 'PENDING' : 'DONE',
         servicePointName: 'Sala 101',
         latitude: -7.23,
         longitude: -35.88,
@@ -585,12 +590,12 @@ class _RecordingRouteRepository implements RouteRepository {
         id: _stop2,
         orderIndex: 2,
         batchNumber: 1,
-        status: nextBatchCalls == 0 ? 'PENDING' : 'DONE',
+        status: batchesHandedOut == 0 ? 'PENDING' : 'DONE',
         servicePointName: 'Sala 102',
         latitude: -7.24,
         longitude: -35.89,
       ),
-      if (nextBatchCalls > 0)
+      if (batchesHandedOut > 0)
         const RouteStopSummary(
           id: 's3',
           orderIndex: 3,
@@ -628,6 +633,9 @@ class _RecordingRouteRepository implements RouteRepository {
   }) async {
     _log.add('nextBatch');
     nextBatchCalls++;
+    final batchDone =
+        _log.contains('checkOut:$_stop1') && _log.contains('checkOut:$_stop2');
+    if (batchDone) batchesHandedOut++;
     return AllocationResult(route: _route(), poolEmpty: false);
   }
 }

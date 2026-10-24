@@ -8,6 +8,7 @@ import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 
@@ -30,11 +31,16 @@ enum SyncErrorClass {
   awaitingAuth,
 }
 
-/// Drains the local outbox ([LocalWriteStore]) to the backend, strictly FIFO
-/// per route (spec Ruling 6): rows for a route replay oldest-first, a soft
-/// failure defers the rest, a hard failure blocks the whole route's queue,
-/// and other routes are unaffected. On every successful dispatch it also
-/// records the server-vs-device clock offset (spec Ruling 7).
+/// Where one dispatch left its row.
+enum _Dispatched { synced, blocked, deferred }
+
+/// Drains the local outbox ([LocalWriteStore]) to the backend, FIFO per
+/// route (spec Ruling 6): rows for a route replay oldest-first, a soft
+/// failure defers the rest, a hard failure blocks that row and holds back
+/// only the rows that depend on it ([BlockedScope]: same stop, evidence of
+/// the same execution), and other routes are unaffected. On every
+/// successful dispatch it also records the server-vs-device clock offset
+/// (spec Ruling 7).
 class SyncWorker {
   SyncWorker(
     this._store,
@@ -115,20 +121,25 @@ class SyncWorker {
     if (!await _connectivity.isOnline) return;
     await _refresh(routeId, syncing: true);
     try {
-      // Ruling 6: a blocked row halts its route on every later pass too —
-      // nothing queued behind it may overtake it (a check-out never reaches
-      // the server without its check-in). "Tentar de novo" (`unblock`)
-      // resets it and the queue moves again.
-      if ((await _store.blockedForRoute(routeId)).isNotEmpty) return;
+      // Ruling 6, scoped: a blocked row holds back what depends on it, on
+      // this pass and every later one — a check-out never reaches the server
+      // without its check-in — but never another stop of the route. "Tentar
+      // de novo" (`unblock`) resets it and its dependents move again.
+      final scope = BlockedScope(await _store.blockedForRoute(routeId));
       final rows = await _store.dueForRoute(
         routeId,
         now: _now().millisecondsSinceEpoch,
       );
       for (final row in rows) {
-        final advanced = await _dispatch(row);
-        // Stop on the first row that did not reach `synced`: the rest stay
-        // `pending` so a check-out never precedes its check-in.
-        if (!advanced) break;
+        if (scope.holds(row)) continue;
+        final outcome = await _dispatch(row);
+        if (outcome == _Dispatched.blocked) {
+          scope.add(row);
+          continue;
+        }
+        // A deferred row (soft failure, awaiting login) stops the pass: the
+        // network or the session is the problem, not this row.
+        if (outcome == _Dispatched.deferred) break;
       }
     } finally {
       await _refresh(routeId);
@@ -168,14 +179,13 @@ class SyncWorker {
     _statusControllers.clear();
   }
 
-  /// Dispatches one row. Returns true when the row reached `synced` (the
-  /// queue may advance), false when it ended `failed`/`blocked`.
-  Future<bool> _dispatch(PendingOperationRow row) async {
+  /// Dispatches one row and says where it ended.
+  Future<_Dispatched> _dispatch(PendingOperationRow row) async {
     try {
       final serverDate = await _perform(row);
       await _store.markSynced(row.id);
       await _recordOffset(serverDate);
-      return true;
+      return _Dispatched.synced;
       // Deliberately broad: _classify sorts every failure (DioException,
       // AmbiguousRoomException, or anything else) into soft/alreadyApplied/
       // hard — nothing may escape a drain pass unhandled.
@@ -184,16 +194,21 @@ class SyncWorker {
       final classification = _classify(error);
       if (classification == SyncErrorClass.alreadyApplied) {
         await _store.markSynced(row.id);
-        return true;
+        return _Dispatched.synced;
       }
-      if (classification == SyncErrorClass.awaitingAuth) return false;
+      if (classification == SyncErrorClass.awaitingAuth) {
+        return _Dispatched.deferred;
+      }
       final message = error.toString();
       if (classification == SyncErrorClass.hard) {
+        // Also a 409 STOP_RELEASED check-out (parked for the appeal flow)
+        // and a 403 WORKER_NOT_APPROVED (permanent; the approval gate owns
+        // the UI) — each holds back only its own stop.
         await _store.markBlocked(row.id, message);
-        return false;
+        return _Dispatched.blocked;
       }
       await _scheduleSoftRetry(row, message);
-      return false;
+      return _Dispatched.deferred;
     }
   }
 

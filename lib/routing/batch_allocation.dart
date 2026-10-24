@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:developer' as developer;
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +11,9 @@ import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
+import 'package:route_monitor/sync/sync_status.dart';
 
 /// How a request for a batch ended, for the screen to word.
 enum AllocationOutcome {
@@ -35,7 +39,8 @@ enum NextBatchState {
   pulling,
 
   /// The batch is finished here but the server could not be reached (or does
-  /// not have the last check-out yet); retried when the network comes back.
+  /// not have the last check-out yet); retried when the network comes back,
+  /// when the outbox drains and every [nextBatchRetryInterval].
   waitingForNetwork,
 }
 
@@ -49,20 +54,19 @@ enum NextBatchState {
 final batchAllocationProvider =
     NotifierProvider<BatchAllocation, NextBatchState>(BatchAllocation.new);
 
-/// What still keeps a route's writes from the server.
-enum _OutboxHold {
-  none,
-
-  /// A row needs the worker's "Tentar de novo" (it halts the route queue).
-  blocked,
-
-  /// Rows not delivered yet: offline, or the server is failing.
-  unsent,
-}
+/// How often a finished batch that is waiting for the server is retried
+/// when nothing announces the network is back (the interface stayed up while
+/// data was down, or the server answered 5xx).
+const nextBatchRetryInterval = Duration(seconds: 30);
 
 class BatchAllocation extends Notifier<NextBatchState> {
   /// The route whose finished batch is waiting for the network.
   RouteSummary? _waiting;
+
+  /// While waiting: the periodic retry and the route's sync-status feed.
+  Timer? _retryTimer;
+  StreamSubscription<RouteSyncStatus>? _syncStatus;
+  int? _lastPending;
 
   @override
   NextBatchState build() {
@@ -72,14 +76,17 @@ class BatchAllocation extends Notifier<NextBatchState> {
       if (next.isLoading) return;
       if (next case AsyncData(value: MyDay(:final route?))) {
         // Deferred — this can fire while the notifier is still building.
-        scheduleMicrotask(() => _pullIfBatchClosed(route));
+        scheduleMicrotask(() => _guarded(_pullIfBatchClosed(route)));
       }
     }, fireImmediately: true);
     final regained = ref
         .watch(connectivityProvider)
         .onOnlineChanged
-        .listen((_) => _retryAfterReconnect());
-    ref.onDispose(regained.cancel);
+        .listen((_) => _retryWhileWaiting());
+    ref.onDispose(() {
+      unawaited(regained.cancel());
+      _stopRetrying();
+    });
     return NextBatchState.idle;
   }
 
@@ -97,6 +104,15 @@ class BatchAllocation extends Notifier<NextBatchState> {
     );
     if (_serverAnswered(outcome) && ref.mounted) ref.invalidate(myDayProvider);
     return outcome;
+  }
+
+  /// Re-checks today's batch and pulls the next one if it is finished — what
+  /// "Sincronizar agora" does once the outbox drained.
+  Future<void> retry() async {
+    if (!ref.mounted) return;
+    final route = ref.read(myDayProvider).value?.route ?? _waiting;
+    if (route == null) return;
+    await _pullIfBatchClosed(route);
   }
 
   Future<void> _pullIfBatchClosed(RouteSummary route) async {
@@ -117,23 +133,32 @@ class BatchAllocation extends Notifier<NextBatchState> {
     await _pull(route);
   }
 
-  void _retryAfterReconnect() {
-    final route = _waiting;
-    if (route == null || state != NextBatchState.waitingForNetwork) return;
-    unawaited(_pull(route));
+  void _retryWhileWaiting() {
+    if (state != NextBatchState.waitingForNetwork) return;
+    _guarded(retry());
   }
 
   Future<void> _pull(RouteSummary route) async {
+    _stopRetrying();
     state = NextBatchState.pulling;
-    _waiting = null;
-    final hold = await _outboxHold(route.id);
-    if (!ref.mounted) return;
-    if (hold == _OutboxHold.blocked) {
-      // The blocked-sync banner already asks for action; "connect" would lie.
-      state = NextBatchState.idle;
-      return;
+    var next = NextBatchState.idle;
+    try {
+      next = await _pullOnce(route);
+    } finally {
+      // Whatever happens, never stay "pulling": that would block every
+      // later trigger.
+      if (ref.mounted) {
+        state = next;
+        if (next == NextBatchState.waitingForNetwork) _retryLater(route);
+      }
     }
-    if (hold == _OutboxHold.unsent) return _waitForNetwork(route);
+  }
+
+  /// One attempt; returns the state it leaves the pull in.
+  Future<NextBatchState> _pullOnce(RouteSummary route) async {
+    if (await _hasUndeliveredWrites(route.id)) {
+      return NextBatchState.waitingForNetwork;
+    }
     final repository = ref.read(routeRepositoryProvider);
     final (:outcome, :result) = await _allocate(
       (position, now) => repository.nextBatch(
@@ -143,38 +168,83 @@ class BatchAllocation extends Notifier<NextBatchState> {
         capturedAt: now,
       ),
     );
-    if (!ref.mounted) return;
-    if (outcome == AllocationOutcome.offline) return _waitForNetwork(route);
-    state = NextBatchState.idle;
-    if (_changesTheDay(route, outcome, result)) ref.invalidate(myDayProvider);
+    if (outcome == AllocationOutcome.offline) {
+      return NextBatchState.waitingForNetwork;
+    }
+    if (ref.mounted && _changesTheDay(route, outcome, result)) {
+      ref.invalidate(myDayProvider);
+    }
+    return NextBatchState.idle;
   }
 
   /// Drains the route's outbox first: the server only hands out the next
   /// batch once it has the last check-out, and asked earlier it would answer
-  /// with the current batch, unchanged.
-  Future<_OutboxHold> _outboxHold(String routeId) async {
+  /// with the current batch, unchanged. Rows held behind a blocked one (a
+  /// late STOP_RELEASED parked for the appeal flow, say) do not count: no
+  /// network will deliver them, and they must not stall the day.
+  Future<bool> _hasUndeliveredWrites(String routeId) async {
     await ref.read(syncWorkerProvider).syncRoute(routeId);
-    if (!ref.mounted) return _OutboxHold.unsent;
+    if (!ref.mounted) return true;
     final store = ref.read(localWriteStoreProvider);
-    if ((await store.blockedForRoute(routeId)).isNotEmpty) {
-      return _OutboxHold.blocked;
-    }
+    final scope = BlockedScope(await store.blockedForRoute(routeId));
     final unsynced = await store.unsyncedForRoute(routeId);
-    return unsynced.isEmpty ? _OutboxHold.none : _OutboxHold.unsent;
+    return scope.deliverable(unsynced).isNotEmpty;
+  }
+
+  /// Waiting: retry when the route's outbox drains, every
+  /// [nextBatchRetryInterval], and when the network comes back (see build).
+  void _retryLater(RouteSummary route) {
+    _waiting = route;
+    _retryTimer = Timer.periodic(
+      nextBatchRetryInterval,
+      (_) => _retryWhileWaiting(),
+    );
+    _lastPending = null;
+    _syncStatus = ref
+        .read(syncWorkerProvider)
+        .statusFor(route.id)
+        .listen(_onSyncStatus);
+  }
+
+  /// Retries once the route becomes fully synced — only on that transition,
+  /// so a pass that changes nothing never re-triggers a pull.
+  void _onSyncStatus(RouteSyncStatus status) {
+    final before = _lastPending;
+    _lastPending = status.pending;
+    if (status.pending == 0 && before != null && before > 0) {
+      _retryWhileWaiting();
+    }
+  }
+
+  void _stopRetrying() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    unawaited(_syncStatus?.cancel());
+    _syncStatus = null;
+    _waiting = null;
   }
 
   /// The day moved on (a new batch, the route paused or done): nothing is
   /// waiting for the network any more.
   void _stopWaiting() {
     if (!ref.mounted || state != NextBatchState.waitingForNetwork) return;
-    _waiting = null;
+    _stopRetrying();
     state = NextBatchState.idle;
   }
 
-  void _waitForNetwork(RouteSummary route) {
-    if (!ref.mounted) return;
-    _waiting = route;
-    state = NextBatchState.waitingForNetwork;
+  /// A background pull has no caller to report to: a failure (a store
+  /// error, say) is logged and the next trigger tries again — it must never
+  /// surface as an unhandled zone error.
+  void _guarded(Future<void> pull) {
+    unawaited(
+      pull.catchError((Object error, StackTrace stack) {
+        developer.log(
+          jsonEncode({'event': 'next_batch_pull_failed', 'error': '$error'}),
+          name: 'batch_allocation',
+          stackTrace: stack,
+        );
+      }),
+    );
   }
 
   /// Reload the day only on an answer that moves it on. An unchanged batch

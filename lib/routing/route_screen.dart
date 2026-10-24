@@ -267,11 +267,16 @@ class RouteScreen extends ConsumerWidget {
           reason: choice.reason,
           note: choice.note,
         );
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(AppStrings.routeImpedimentReported)),
-      );
-    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(AppStrings.routeImpedimentReported)),
+    );
+    // Once the impediment reached the server its stop comes back RELEASED;
+    // reloading the day then is what lets an impediment on the last open
+    // stop of the batch pull the next one. Offline, the pass is a no-op and
+    // the reload serves the device snapshot.
+    await ref.read(syncWorkerProvider).syncRoute(route.id);
+    if (context.mounted) ref.invalidate(myDayProvider);
   }
 
   /// One route-level "Fazer check-in" action, not a per-stop button: the QR
@@ -530,7 +535,7 @@ class _SyncBanner extends ConsumerWidget {
           ),
           const SizedBox(width: 8),
           FilledButton.tonal(
-            onPressed: () => ref.read(syncWorkerProvider).syncAll(),
+            onPressed: () => _syncNow(ref),
             child: const Text(AppStrings.routeSyncNowButton),
           ),
         ],
@@ -544,6 +549,14 @@ class _SyncBanner extends ConsumerWidget {
         Text(AppStrings.routeAllSynced),
       ],
     );
+  }
+
+  /// Drains every route, then re-runs the next-batch pull: the outbox was
+  /// what the pull was waiting for.
+  Future<void> _syncNow(WidgetRef ref) async {
+    final allocation = ref.read(batchAllocationProvider.notifier);
+    await ref.read(syncWorkerProvider).syncAll();
+    await allocation.retry();
   }
 }
 

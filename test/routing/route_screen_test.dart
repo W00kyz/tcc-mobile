@@ -50,9 +50,10 @@ class _RecordingSyncWorker implements SyncWorker {
 
   final Stream<RouteSyncStatus>? statusStream;
 
-  /// When set, each `syncRoute` also delivers every unsynced row of that
-  /// store — the server accepted them all.
-  final LocalWriteStore? drains;
+  /// When set, each `syncRoute` (and `syncAll`, for route `r1`) also
+  /// delivers every unsynced row of that store — the server accepted them
+  /// all. Null = the server never gets them.
+  LocalWriteStore? drains;
   final List<String> syncedRoutes = [];
   final List<String> unblocked = [];
   int syncAllCount = 0;
@@ -60,15 +61,22 @@ class _RecordingSyncWorker implements SyncWorker {
   @override
   Future<void> syncRoute(String routeId) async {
     syncedRoutes.add(routeId);
+    await _deliver(routeId);
+  }
+
+  @override
+  Future<void> syncAll() async {
+    syncAllCount++;
+    await _deliver('r1');
+  }
+
+  Future<void> _deliver(String routeId) async {
     final store = drains;
     if (store == null) return;
     for (final row in await store.unsyncedForRoute(routeId)) {
       await store.markSynced(row.id);
     }
   }
-
-  @override
-  Future<void> syncAll() async => syncAllCount++;
 
   @override
   Stream<RouteSyncStatus> statusFor(String routeId) =>
@@ -2667,6 +2675,141 @@ void main() {
 
         expect(repository.allocationCalls, ['nextBatch:r1']);
         expect(find.text(AppStrings.routeNextBatchOffline), findsNothing);
+        expect(find.text('Sala 202'), findsOneWidget);
+      },
+    );
+  });
+
+  group('next batch, other triggers', () {
+    RouteSummary secondBatch() => routeWith(
+      currentBatch: 2,
+      stops: [
+        stopWith(id: 's1', status: 'DONE', servicePointName: 'Sala 101'),
+        stopWith(
+          id: 's2',
+          orderIndex: 2,
+          batchNumber: 2,
+          servicePointName: 'Sala 202',
+        ),
+      ],
+    );
+
+    void handOutSecondBatch(FakeRouteRepository repository) {
+      repository.allocate = () {
+        repository.day = myDayWith(secondBatch());
+        return AllocationResult(route: secondBatch(), poolEmpty: false);
+      };
+    }
+
+    testWidgets(
+      'an impediment on the last open stop reloads the day once it synced, '
+      'and the released stop lets the next batch in',
+      (tester) async {
+        final store = _InMemoryLocalWriteStore();
+        final repository = _repositoryWith(
+          routeWith(
+            stops: [stopWith(id: 's1', servicePointName: 'Sala 101')],
+          ),
+        );
+        handOutSecondBatch(repository);
+        await tester.pumpWidget(
+          _screenWith(
+            repository,
+            executionApi: _FakeExecutionApi(),
+            localWriteStore: store,
+            syncWorker: _RecordingSyncWorker(drains: store),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.widgetWithText(
+            TextButton,
+            AppStrings.routeSignalImpossibilityButton,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(AppStrings.impedimentReasonAccessBlocked));
+        await tester.pumpAndSettle();
+        // What the server reports once it has the impediment.
+        repository.day = myDayWith(
+          routeWith(
+            stops: [
+              stopWith(
+                id: 's1',
+                status: 'RELEASED',
+                releaseReason: 'IMPEDIMENT',
+                servicePointName: 'Sala 101',
+              ),
+            ],
+          ),
+        );
+        await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
+        await tester.pumpAndSettle();
+
+        expect(repository.allocationCalls, ['nextBatch:r1']);
+        expect(find.text('Sala 202'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      '"Sincronizar agora" drains the outbox and then re-runs the pull that '
+      'was waiting on it',
+      (tester) async {
+        final store = _InMemoryLocalWriteStore();
+        await store.enqueue(
+          id: 'checkout-s1',
+          kind: PendingOpKind.checkOut,
+          payload: const {'route_stop_id': 's1'},
+          routeId: 'r1',
+        );
+        final progress = _FakeStopProgressStore({'s1': 'exec-1'});
+        await progress.markDone('s1');
+        final status = StreamController<RouteSyncStatus>.broadcast();
+        addTearDown(status.close);
+        final worker = _RecordingSyncWorker(statusStream: status.stream);
+        final repository = _repositoryWith(
+          routeWith(
+            stops: [
+              stopWith(
+                id: 's1',
+                status: 'IN_PROGRESS',
+                servicePointName: 'Sala 101',
+              ),
+            ],
+          ),
+        );
+        handOutSecondBatch(repository);
+        await tester.pumpWidget(
+          _screenWith(
+            repository,
+            localWriteStore: store,
+            stopProgressStore: progress,
+            syncWorker: worker,
+          ),
+        );
+        await tester.pumpAndSettle();
+        status.add(
+          const RouteSyncStatus(
+            routeId: 'r1',
+            state: RouteSyncState.idle,
+            pending: 1,
+            blocked: 0,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(AppStrings.routeNextBatchOffline), findsOneWidget);
+        expect(repository.allocationCalls, isEmpty);
+
+        // The server is reachable again; the worker taps "Sincronizar agora".
+        worker.drains = store;
+        await tester.tap(
+          find.widgetWithText(FilledButton, AppStrings.routeSyncNowButton),
+        );
+        await tester.pumpAndSettle();
+
+        expect(worker.syncAllCount, 1);
+        expect(repository.allocationCalls, ['nextBatch:r1']);
         expect(find.text('Sala 202'), findsOneWidget);
       },
     );

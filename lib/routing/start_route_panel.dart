@@ -65,8 +65,12 @@ class _StartRoutePanelState extends ConsumerState<StartRoutePanel> {
     // panel may be gone by the time the answer arrives.
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _starting = true);
-    final outcome = await ref.read(batchAllocationProvider.notifier).start();
-    if (mounted) setState(() => _starting = false);
+    final AllocationOutcome outcome;
+    try {
+      outcome = await ref.read(batchAllocationProvider.notifier).start();
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
     final message = _startOutcomeMessage(outcome);
     if (message == null) return;
     messenger.showSnackBar(SnackBar(content: Text(message)));
