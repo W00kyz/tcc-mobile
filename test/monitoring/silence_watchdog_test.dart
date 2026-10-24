@@ -70,6 +70,18 @@ void main() {
     );
   });
 
+  test('an older activity never moves the clock back', () {
+    // A check-in scanned offline at t0+5 reaches the server after a fix sent
+    // at t0+20: the server counts the latest of the two, so does the app.
+    final watchdog = build()
+      ..startWatching()
+      ..onActivity(t0.add(const Duration(minutes: 20)))
+      ..onActivity(t0.add(const Duration(minutes: 5)));
+    now = t0.add(const Duration(minutes: 40));
+
+    expect(watchdog.currentWarning(), isNull);
+  });
+
   test('activity without a time is stamped by the clock', () {
     final watchdog = build()..startWatching();
     now = t0.add(const Duration(minutes: 40));
@@ -128,6 +140,28 @@ void main() {
     final scheduled = scheduler.scheduled.single;
     expect(scheduled.at, now.add(const Duration(minutes: 1)));
     expect(scheduled.body, AppStrings.silenceWarning(34, 11));
+  });
+
+  test('a deadline only seconds away is pushed past the margin', () {
+    final watchdog = build()..startWatching();
+    now = t0.add(const Duration(minutes: 29, seconds: 55));
+
+    watchdog.onAppPaused();
+
+    expect(scheduler.scheduled.single.at, now.add(const Duration(minutes: 1)));
+  });
+
+  test('past the release window the copy says the points may be gone', () {
+    final watchdog = build()..startWatching();
+    now = t0.add(const Duration(minutes: 50));
+
+    watchdog.onAppPaused();
+
+    expect(scheduler.scheduled.single.body, AppStrings.silenceWarning(51, 0));
+    expect(
+      AppStrings.silenceWarning(51, 0),
+      AppStrings.silenceWarningPastRelease(51),
+    );
   });
 
   test('nothing is scheduled when no route is being watched', () {

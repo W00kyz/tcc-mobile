@@ -339,9 +339,6 @@ class RouteScreen extends ConsumerWidget {
           latitude: scan.coordinates?.latitude,
           longitude: scan.coordinates?.longitude,
         );
-    // A scan is a sign of life for the server's silence clock too (spec
-    // §7.3): the worker with the app open is never taken for silent.
-    ref.read(silenceWatchdogProvider)?.onActivity();
     // The FormSchema lives on the route's stop list, not on the execution
     // repository — snapshot the draft here, right after check-in succeeds
     // and before the stale `route.stops` view gets invalidated below.
@@ -386,7 +383,6 @@ class RouteScreen extends ConsumerWidget {
           longitude: scan.coordinates?.longitude,
           checkoutIdempotencyKey: _uuid.v4(),
         );
-    ref.read(silenceWatchdogProvider)?.onActivity();
     // A local check-out flips the stop to DONE now (spec Ruling 5); this
     // invalidate re-reads myDayProvider so the server view catches up too
     // — the "Concluir" button's visibility is status == 'IN_PROGRESS', and

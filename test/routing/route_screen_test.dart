@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
@@ -830,6 +831,21 @@ void main() {
       expect(repository.allocationCalls, ['start']);
     });
 
+    testWidgets('a permission plugin failure never swallows the start', (
+      tester,
+    ) async {
+      final repository = startableRepository();
+      await tester.pumpWidget(
+        _screenWith(repository, permissions: _ThrowingPermissions()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(startButton());
+      await tester.pumpAndSettle();
+
+      expect(repository.allocationCalls, ['start']);
+    });
+
     testWidgets('offline, "Iniciar rota" asks for a connection', (
       tester,
     ) async {
@@ -1601,7 +1617,12 @@ void main() {
       )..startWatching();
     });
 
-    testWidgets('a check-in counts as activity', (tester) async {
+    // The server counts a scan only once it arrives (by its `scanned_at`):
+    // a check-in written offline, e.g. underground, must not quiet the
+    // app's warning. The sync delivery reports it (sync_worker_test.dart).
+    testWidgets('a check-in written locally does not reset the clock', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _screenWith(
           _repositoryWith(inProgressRoute()),
@@ -1616,10 +1637,12 @@ void main() {
       await tester.pumpAndSettle();
 
       now = t0.add(const Duration(minutes: 31));
-      expect(watchdog.currentWarning(), isNull);
+      expect(watchdog.currentWarning(), isNotNull);
     });
 
-    testWidgets('a check-out counts as activity', (tester) async {
+    testWidgets('a check-out written locally does not reset the clock', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _screenWith(
           _repositoryWith(inProgressStopRoute()),
@@ -1634,7 +1657,7 @@ void main() {
       await tester.pumpAndSettle();
 
       now = t0.add(const Duration(minutes: 31));
-      expect(watchdog.currentWarning(), isNull);
+      expect(watchdog.currentWarning(), isNotNull);
     });
 
     testWidgets('a silent worker sees the warning banner', (tester) async {
@@ -3008,6 +3031,9 @@ void main() {
 class _FakePermissions implements PermissionPort {
   _FakePermissions({this.grantsAlways = false});
 
+  @override
+  bool get supportsBackground => true;
+
   final bool grantsAlways;
   bool _always = false;
   int alwaysRequests = 0;
@@ -3023,6 +3049,26 @@ class _FakePermissions implements PermissionPort {
     alwaysRequests++;
     return _always = grantsAlways;
   }
+
+  @override
+  Future<void> requestNotifications() async {}
+}
+
+/// permission_handler failing on the platform side (e.g. a request already
+/// running).
+class _ThrowingPermissions implements PermissionPort {
+  @override
+  bool get supportsBackground => true;
+
+  @override
+  Future<bool> requestWhileInUse() =>
+      throw PlatformException(code: 'ERROR_ALREADY_REQUESTING_PERMISSIONS');
+
+  @override
+  Future<bool> isAlwaysGranted() async => false;
+
+  @override
+  Future<bool> requestAlways() async => false;
 
   @override
   Future<void> requestNotifications() async {}

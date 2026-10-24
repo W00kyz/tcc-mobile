@@ -51,11 +51,15 @@ class SyncWorker {
     this._evidenceApi, {
     DateTime Function() now = DateTime.now,
     math.Random? random,
+    void Function(DateTime scannedAt)? onScanDelivered,
     // A private field can't be an initializing formal with a public param
     // name, and `now` must stay public for callers to inject a fake clock.
     // ignore: prefer_initializing_formals
   }) : _now = now,
-       _random = random ?? math.Random();
+       _random = random ?? math.Random(),
+       // Same reason as `now` above: the param name stays public.
+       // ignore: prefer_initializing_formals
+       _onScanDelivered = onScanDelivered;
 
   final LocalWriteStore _store;
   final StopProgressStore _stopProgress;
@@ -65,6 +69,12 @@ class SyncWorker {
   final EvidenceApi _evidenceApi;
   final DateTime Function() _now;
   final math.Random _random;
+
+  /// A check-in or check-out the server now has, at its device scan time —
+  /// the moment the server's silence clock counts (spec
+  /// 2026-10-20-alocacao-automatica §7.3). Reported on delivery, never on
+  /// the local write: a scan queued offline has not reached that clock yet.
+  final void Function(DateTime scannedAt)? _onScanDelivered;
 
   /// The drain pass in flight per route — the re-entrancy guard that keeps
   /// two triggers (foreground + regained connectivity) from interleaving.
@@ -185,6 +195,7 @@ class SyncWorker {
       final serverDate = await _perform(row);
       await _store.markSynced(row.id);
       await _recordOffset(serverDate);
+      _reportScanDelivered(row);
       return _Dispatched.synced;
       // Deliberately broad: _classify sorts every failure (DioException,
       // AmbiguousRoomException, or anything else) into soft/alreadyApplied/
@@ -194,6 +205,8 @@ class SyncWorker {
       final classification = _classify(error);
       if (classification == SyncErrorClass.alreadyApplied) {
         await _store.markSynced(row.id);
+        // The server had it already — and counted its scan then.
+        _reportScanDelivered(row);
         return _Dispatched.synced;
       }
       if (classification == SyncErrorClass.awaitingAuth) {
@@ -210,6 +223,13 @@ class SyncWorker {
       await _scheduleSoftRetry(row, message);
       return _Dispatched.deferred;
     }
+  }
+
+  void _reportScanDelivered(PendingOperationRow row) {
+    final isScan =
+        row.kind == PendingOpKind.checkIn || row.kind == PendingOpKind.checkOut;
+    if (!isScan) return;
+    _onScanDelivered?.call(DateTime.parse(row.payload['scanned_at'] as String));
   }
 
   /// Ruling 5 review carry: `markRetryScheduled` does not set `state=failed`,

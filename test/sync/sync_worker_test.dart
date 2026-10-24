@@ -392,10 +392,12 @@ class _Harness {
       evidenceApi,
       now: () => now,
       random: _ZeroRandom(),
+      onScanDelivered: deliveredScans.add,
     );
   }
 
   final log = <String>[];
+  final deliveredScans = <DateTime>[];
   late final store = _FakeLocalWriteStore();
   final stopProgress = _FakeStopProgressStore();
   final syncMeta = _FakeSyncMetaStore();
@@ -703,6 +705,63 @@ void main() {
       expect(h.log, ['checkIn:a', 'photo:b']);
     },
   );
+
+  group('the silence clock (spec 2026-10-20-alocacao-automatica §7.3)', () {
+    Map<String, dynamic> scannedAt(String id, DateTime at) => {
+      ..._FakeLocalWriteStore._defaultPayload(id),
+      'scanned_at': at.toIso8601String(),
+    };
+
+    test('a delivered check-in or check-out reports its scan time', () async {
+      final h = _Harness();
+      h.store
+        ..seed(
+          'a',
+          kind: PendingOpKind.checkIn,
+          createdAt: 1,
+          payload: scannedAt('a', DateTime.utc(2026, 6, 1, 8, 20)),
+        )
+        ..seed('b', kind: PendingOpKind.evidencePhoto, createdAt: 2)
+        ..seed(
+          'c',
+          kind: PendingOpKind.checkOut,
+          createdAt: 3,
+          payload: scannedAt('c', DateTime.utc(2026, 6, 1, 8, 40)),
+        );
+
+      await h.worker.syncRoute('route-R');
+
+      // The device time of the scan, the one the server counts — not the
+      // time it was delivered, and nothing for the photo.
+      expect(h.deliveredScans, [
+        DateTime.utc(2026, 6, 1, 8, 20),
+        DateTime.utc(2026, 6, 1, 8, 40),
+      ]);
+    });
+
+    test('a scan the server did not take reports nothing', () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(status: 503, body: {'detail': 'x'});
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.deliveredScans, isEmpty);
+    });
+
+    test('a scan the server already had still counts', () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(
+        status: 409,
+        body: {'detail': 'Route already started'},
+      );
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.deliveredScans, [DateTime.utc(2026)]);
+    });
+  });
 
   test('re-running a fully drained route makes zero API calls', () async {
     final h = _Harness();

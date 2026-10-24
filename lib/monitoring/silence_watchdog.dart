@@ -64,6 +64,10 @@ class SilenceWatchdog {
   /// still waits this long (a schedule in the past is refused).
   static const Duration _overdueDelay = Duration(minutes: 1);
 
+  /// A deadline closer than this is treated as passed: by the time the
+  /// plugin checks it, it could already be in the past.
+  static const Duration _scheduleMargin = Duration(seconds: 30);
+
   final Clock _clock;
   final LocalScheduler _scheduler;
   final Duration _warning;
@@ -86,12 +90,17 @@ class SilenceWatchdog {
     _cancelScheduled();
   }
 
-  /// A sign of life at [at] (defaults to now). While paused — the background
-  /// service sending with the screen locked — the pending notification moves
-  /// to the new deadline instead of firing at the old one.
+  /// A sign of life at [at] (defaults to now). An older one (a scan queued
+  /// offline, delivered late) never moves the clock back — the server too
+  /// counts the latest. While paused — the background service sending with
+  /// the screen locked — the pending notification moves to the new deadline
+  /// instead of firing at the old one.
   void onActivity([DateTime? at]) {
-    if (_lastActivity == null) return;
-    _lastActivity = at ?? _clock();
+    final last = _lastActivity;
+    if (last == null) return;
+    final activity = at ?? _clock();
+    if (!activity.isAfter(last)) return;
+    _lastActivity = activity;
     if (_paused) _schedule();
   }
 
@@ -126,7 +135,9 @@ class SilenceWatchdog {
     final last = _lastActivity!;
     final now = _clock();
     final due = last.add(_warning);
-    final at = due.isAfter(now) ? due : now.add(_overdueDelay);
+    final at = due.isAfter(now.add(_scheduleMargin))
+        ? due
+        : now.add(_overdueDelay);
     final warning = _warningAfter(at.difference(last));
     _scheduled = true;
     unawaited(

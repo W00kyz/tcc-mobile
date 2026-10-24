@@ -23,6 +23,41 @@ void main() {
     expect(dio.options.headers['Authorization'], 'Bearer a-test-token');
   });
 
+  test(
+    'readAccessToken: each request carries the token current then',
+    () async {
+      var token = 'first';
+      final adapter = _TokenCheckingAdapter('second');
+      final dio = buildDio(
+        baseUrl: 'http://localhost:8000',
+        readAccessToken: () => token,
+      )..httpClientAdapter = adapter;
+
+      await expectLater(
+        dio.get<void>('/routes/me'),
+        throwsA(isA<DioException>()),
+      );
+      token = 'second';
+      await dio.get<void>('/routes/me');
+
+      expect(adapter.seenAuthorization, ['Bearer first', 'Bearer second']);
+    },
+  );
+
+  test('readAccessToken: the 401 retry keeps the refreshed token', () async {
+    final adapter = _TokenCheckingAdapter('fresh');
+    final dio = buildDio(
+      baseUrl: 'http://localhost:8000',
+      // A session that has not caught up yet still answers the old token.
+      readAccessToken: () => 'expired',
+      onUnauthorized: () async => 'fresh',
+    )..httpClientAdapter = adapter;
+
+    await dio.get<void>('/routes/me');
+
+    expect(adapter.seenAuthorization, ['Bearer expired', 'Bearer fresh']);
+  });
+
   test('buildDio omits the Authorization header without a token', () {
     final dio = buildDio(baseUrl: 'http://localhost:8000');
 

@@ -79,6 +79,17 @@ void main() {
     },
   );
 
+  test('a platform without background mode never explains or asks', () async {
+    permissions.supportsBackground = false;
+
+    final mode = await resolve();
+
+    expect(mode, LocationMode.foregroundOnly);
+    expect(prompts.calls, isEmpty);
+    expect(permissions.calls, ['requestWhileInUse']);
+    expect(asked.value, isFalse);
+  });
+
   test('currentLocationMode reads the permission without asking', () async {
     expect(await currentLocationMode(permissions), LocationMode.foregroundOnly);
     permissions.alwaysGranted = true;
@@ -88,6 +99,8 @@ void main() {
 }
 
 class _FakePermissions implements PermissionPort {
+  @override
+  bool supportsBackground = true;
   bool grantsWhileInUse = true;
   bool alwaysGranted = false;
 

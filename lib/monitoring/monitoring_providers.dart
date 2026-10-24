@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/execution/execution_providers.dart'
-    show appDatabaseProvider;
+    show apiBaseUrlProvider, appDatabaseProvider;
 import 'package:route_monitor/local/background_ask_store.dart';
 import 'package:route_monitor/monitoring/local_notification_scheduler.dart';
 import 'package:route_monitor/monitoring/location_mode.dart';
@@ -15,10 +15,14 @@ import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/routing/route_providers.dart'
     show locationServiceProvider, myDayProvider;
 
-/// Mirrors `executionApiProvider` — a fresh Dio bound to the current session's
-/// bearer token, rebuilt whenever the session changes.
+/// Scoped to the signed-in user, not to the session: the position reporter
+/// holds this client for the whole route, and a token refresh must not
+/// rebuild — and so stop — it (`buildUserScopedSessionDio`).
 final monitoringApiProvider = Provider<MonitoringApi>((ref) {
-  final dio = buildSessionDio(ref);
+  final dio = buildUserScopedSessionDio(
+    ref,
+    baseUrl: ref.watch(apiBaseUrlProvider),
+  );
   return DioMonitoringApi(dio);
 });
 
@@ -84,11 +88,15 @@ final localSchedulerProvider = Provider<LocalScheduler>(
 );
 
 /// The silence watchdog, with the limits `GET /routes/me` sent; null until
-/// the first day is loaded. Rebuilt only when those limits change.
+/// the first day is loaded. Rebuilt only when those limits or the signed-in
+/// user change — never on a token refresh or a day reload, which would
+/// cancel a warning scheduled with the screen locked.
 final silenceWatchdogProvider = Provider<SilenceWatchdog?>((ref) {
+  ref.watch(sessionProvider.select((session) => session?.userId));
+  // `.value` keeps the last known day across a reload or a failed one.
   final limits = ref.watch(
     myDayProvider.select((day) {
-      final value = day.asData?.value;
+      final value = day.value;
       if (value == null) return null;
       return (
         warning: value.silenceWarningMinutes,

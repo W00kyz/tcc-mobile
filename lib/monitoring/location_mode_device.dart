@@ -9,20 +9,23 @@ import 'package:route_monitor/monitoring/location_mode.dart';
 /// (no platform channel under `flutter test`); the decisions it feeds are
 /// covered by `test/monitoring/location_mode_test.dart`.
 class PermissionHandlerPort implements PermissionPort {
+  // The background foreground service is Android-only (spec §7.3): any other
+  // platform stays in foregroundOnly.
+  @override
+  bool get supportsBackground =>
+      defaultTargetPlatform == TargetPlatform.android;
+
   @override
   Future<bool> requestWhileInUse() async =>
       (await Permission.locationWhenInUse.request()).isGranted;
 
-  // The background foreground service is Android-only (spec §7.3): any other
-  // platform stays in foregroundOnly.
   @override
   Future<bool> isAlwaysGranted() async =>
-      defaultTargetPlatform == TargetPlatform.android &&
-      (await Permission.locationAlways.status).isGranted;
+      supportsBackground && (await Permission.locationAlways.status).isGranted;
 
   @override
   Future<bool> requestAlways() async =>
-      defaultTargetPlatform == TargetPlatform.android &&
+      supportsBackground &&
       (await Permission.locationAlways.request()).isGranted;
 
   @override

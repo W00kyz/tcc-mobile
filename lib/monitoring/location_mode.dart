@@ -13,6 +13,10 @@ enum LocationMode {
 /// The OS location/notification permissions, behind this project's interface
 /// so `resolveLocationMode` is testable without `permission_handler`.
 abstract class PermissionPort {
+  /// Whether this platform can report in the background at all (the
+  /// foreground service is Android-only).
+  bool get supportsBackground;
+
   /// Asks for "while in use" location; true when granted. Answers without a
   /// prompt when it already was.
   Future<bool> requestWhileInUse();
@@ -71,6 +75,8 @@ Future<LocationMode> resolveLocationMode(
 }) async {
   final whileInUse = await permissions.requestWhileInUse();
   if (!whileInUse) return LocationMode.foregroundOnly;
+  // Nothing to explain or ask where background mode cannot run.
+  if (!permissions.supportsBackground) return LocationMode.foregroundOnly;
   if (await permissions.isAlwaysGranted()) return LocationMode.background;
   if (await asked.wasAsked()) return LocationMode.foregroundOnly;
   // Marked before the prompts: an app killed mid-dialog must not ask again.

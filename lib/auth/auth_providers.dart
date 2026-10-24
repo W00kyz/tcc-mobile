@@ -152,6 +152,25 @@ Dio buildSessionDio(Ref ref) {
   );
 }
 
+/// [buildSessionDio] for a client held by a long-lived loop (the position
+/// reporter, spec 2026-10-20-alocacao-automatica §7.3): rebuilt only when the
+/// signed-in user changes, and the bearer token is read from the session at
+/// each request. With [buildSessionDio], every token refresh (15 minutes)
+/// rebuilt the client and everything holding it — stopping the background
+/// stream with the screen locked, where no widget build starts it again.
+///
+///     final dio = buildUserScopedSessionDio(ref, baseUrl: url);
+Dio buildUserScopedSessionDio(Ref ref, {required String baseUrl}) {
+  ref.watch(sessionProvider.select((session) => session?.userId));
+  final notifier = ref.read(sessionProvider.notifier);
+  return buildDio(
+    baseUrl: baseUrl,
+    readAccessToken: () => ref.read(sessionProvider)?.accessToken,
+    onUnauthorized: notifier.refreshAccessToken,
+    onWorkerNotApproved: notifier.refreshWorkerStanding,
+  );
+}
+
 /// The companies offered on the sign-up screen.
 final FutureProvider<List<CompanyOption>> publicCompaniesProvider =
     FutureProvider.autoDispose<List<CompanyOption>>(

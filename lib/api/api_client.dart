@@ -3,6 +3,9 @@ import 'package:dio/dio.dart';
 /// Returns a fresh access token after a 401, or null when none can be had.
 typedef AccessTokenRefresher = Future<String?> Function();
 
+/// The access token to send right now, or null for none.
+typedef AccessTokenReader = String? Function();
+
 /// Learns why the backend refused a worker (pending, rejected, deactivated).
 typedef WorkerNotApprovedHandler = Future<void> Function();
 
@@ -23,6 +26,10 @@ String? apiErrorCode(DioException error) {
 /// the same request with the new token; a second 401 (or a refresh that
 /// yields nothing) surfaces to the caller unchanged.
 ///
+/// With [readAccessToken] instead of [accessToken], the token is read at
+/// each request, so a client held for hours (the position reporter) keeps
+/// working across token refreshes without being rebuilt.
+///
 /// With [onWorkerNotApproved], a 403 `WORKER_NOT_APPROVED` from any call is
 /// reported (and awaited) before the error reaches the caller, so the router
 /// can send the worker to the waiting screen.
@@ -32,6 +39,7 @@ String? apiErrorCode(DioException error) {
 Dio buildDio({
   required String baseUrl,
   String? accessToken,
+  AccessTokenReader? readAccessToken,
   AccessTokenRefresher? onUnauthorized,
   WorkerNotApprovedHandler? onWorkerNotApproved,
 }) {
@@ -43,6 +51,9 @@ Dio buildDio({
           : const {},
     ),
   );
+  if (readAccessToken != null) {
+    dio.interceptors.add(_BearerAtRequestTime(readAccessToken));
+  }
   if (onUnauthorized != null) {
     dio.interceptors.add(_RefreshOnUnauthorized(dio, onUnauthorized));
   }
@@ -50,6 +61,23 @@ Dio buildDio({
     dio.interceptors.add(_ReportWorkerNotApproved(onWorkerNotApproved));
   }
   return dio;
+}
+
+class _BearerAtRequestTime extends Interceptor {
+  _BearerAtRequestTime(this._read);
+
+  final AccessTokenReader _read;
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    // The 401 retry already carries the token the refresh handed back.
+    final retried = options.extra[_RefreshOnUnauthorized._retriedKey] == true;
+    final token = _read();
+    if (!retried && token != null) {
+      options.headers['Authorization'] = 'Bearer $token';
+    }
+    handler.next(options);
+  }
 }
 
 class _ReportWorkerNotApproved extends Interceptor {

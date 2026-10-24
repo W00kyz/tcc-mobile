@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/l10n/strings.dart';
@@ -84,11 +85,17 @@ class _StartRoutePanelState extends ConsumerState<StartRoutePanel> {
   /// explained "always" request (spec §7.3). The reporter picks the mode up
   /// from `locationModeProvider` when the route turns `IN_PROGRESS`.
   Future<void> _settleLocationMode() async {
-    await resolveLocationMode(
-      ref.read(permissionPortProvider),
-      prompts: DialogLocationModePrompts(context),
-      asked: ref.read(backgroundAskStoreProvider),
-    );
+    try {
+      await resolveLocationMode(
+        ref.read(permissionPortProvider),
+        prompts: DialogLocationModePrompts(context),
+        asked: ref.read(backgroundAskStoreProvider),
+      );
+    } on PlatformException {
+      // permission_handler refused to ask (e.g. a request already running):
+      // start anyway — the start's own GPS read decides, and the mode below
+      // reflects whatever is granted.
+    }
     ref.invalidate(locationModeProvider);
   }
 }

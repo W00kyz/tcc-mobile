@@ -319,6 +319,19 @@ void main() {
       expect(positions.cancelled, isTrue);
     });
 
+    test('a stream that ends lets the next start subscribe again', () async {
+      final reporter = startBackground();
+
+      await positions.close();
+      reporter.start(
+        'r1',
+        mode: LocationMode.background,
+        interval: const Duration(seconds: 30),
+      );
+
+      expect(positions.watchCount, 2);
+    });
+
     test('switching mode on the same route restarts the loop', () {
       startBackground().start('r1');
 
@@ -463,15 +476,26 @@ class _NoopTimer implements Timer {
 /// Hands the reporter a stream the test drives fix by fix, standing in for
 /// the Android foreground-service stream.
 class _FakePositionSource implements PositionSource {
-  final _fixes = StreamController<Coordinates>();
+  StreamController<Coordinates> _fixes = StreamController<Coordinates>();
   Duration? watchedInterval;
   bool cancelled = false;
+  int watchCount = 0;
 
   @override
   Stream<Coordinates> watch({required Duration interval}) {
     watchedInterval = interval;
+    watchCount++;
+    if (_fixes.hasListener || _fixes.isClosed) {
+      _fixes = StreamController<Coordinates>();
+    }
     _fixes.onCancel = () => cancelled = true;
     return _fixes.stream;
+  }
+
+  /// The platform stream ending by itself (e.g. after a permission error).
+  Future<void> close() async {
+    await _fixes.close();
+    await Future<void>.delayed(Duration.zero);
   }
 
   Future<void> emit(Coordinates fix) async {

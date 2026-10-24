@@ -336,8 +336,16 @@ abstract final class AppStrings {
       'rota.';
 
   /// The silence warning: [silent] minutes without a sent position, the
-  /// points released in [untilRelease] minutes.
+  /// points released in [untilRelease] minutes — or, with none left, the
+  /// [silenceWarningPastRelease] copy.
   static String silenceWarning(int silent, int untilRelease) =>
-      'Sem enviar sua localização há $silent min. Seus pontos serão '
-      'liberados em $untilRelease min. Abra o app ou procure sinal.';
+      untilRelease <= 0
+      ? silenceWarningPastRelease(silent)
+      : 'Sem enviar sua localização há $silent min. Seus pontos serão '
+            'liberados em $untilRelease min. Abra o app ou procure sinal.';
+
+  /// The warning once the release window has run out.
+  static String silenceWarningPastRelease(int silent) =>
+      'Sem enviar sua localização há $silent min. Seus pontos podem ter '
+      'sido liberados. Abra o app ou procure sinal.';
 }

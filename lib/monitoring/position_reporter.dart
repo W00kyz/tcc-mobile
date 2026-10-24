@@ -109,7 +109,13 @@ class PositionReporter {
       // replaces the in-app ongoing one (LGPD transparency either way).
       _stream = _positionSource
           .watch(interval: interval)
-          .listen((fix) => unawaited(_send(routeId, fix)), onError: _ignore);
+          .listen(
+            (fix) => unawaited(_send(routeId, fix)),
+            onError: _ignore,
+            // The platform ended the stream (e.g. permission revoked): not
+            // running any more, so the next start() subscribes again.
+            onDone: () => _stream = null,
+          );
       return;
     }
     _resetCadence();

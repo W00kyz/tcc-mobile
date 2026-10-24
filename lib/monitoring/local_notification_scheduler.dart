@@ -74,6 +74,12 @@ class LocalNotificationScheduler implements LocalScheduler {
     } on MissingPluginException {
       // No platform channel: the warning is best-effort, never a hard
       // dependency of the route.
+    } on PlatformException {
+      // The plugin failed natively (channel, alarm manager): same rationale.
+      // A best-effort warning must never crash the watchdog's unawaited call.
+      // ignore: avoid_catching_errors
+    } on ArgumentError {
+      // A date the plugin judged past despite the watchdog's margin.
     }
   }
 
@@ -82,6 +88,8 @@ class LocalNotificationScheduler implements LocalScheduler {
     try {
       await _plugin.cancel(id: id);
     } on MissingPluginException {
+      // Same rationale as schedule().
+    } on PlatformException {
       // Same rationale as schedule().
     }
   }

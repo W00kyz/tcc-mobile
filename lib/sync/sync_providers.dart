@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/misc.dart'
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/monitoring/monitoring_providers.dart'
+    show silenceWatchdogProvider;
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -32,6 +34,10 @@ final syncWorkerProvider = Provider<SyncWorker>((ref) {
     ref.watch(connectivityProvider),
     ref.watch(executionApiProvider),
     ref.watch(evidenceApiProvider),
+    // Read at each delivery, not watched: the watchdog's rebuilds must not
+    // rebuild the outbox worker.
+    onScanDelivered: (scannedAt) =>
+        ref.read(silenceWatchdogProvider)?.onActivity(scannedAt),
   );
   ref.onDispose(worker.dispose);
   return worker;
