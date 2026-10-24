@@ -3,6 +3,8 @@ import 'package:flutter_map/flutter_map.dart' show TileProvider;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:route_monitor/appeals/appeals_screen.dart';
+import 'package:route_monitor/appeals/released_stop_listener.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/execution/evidence_thumbnail.dart';
@@ -75,24 +77,29 @@ class RouteScreen extends ConsumerWidget {
             tooltip: AppStrings.myDataTitle,
             onPressed: () => context.push('/meus-dados'),
           ),
+          const AppealsEntryButton(),
           const _NotificationsBell(),
         ],
       ),
-      body: Column(
-        children: [
-          // Renders itself only while a route is IN_PROGRESS (RNF11).
-          const CollectionBanner(),
-          // Renders itself only while the worker is silent (spec §7.3).
-          const SilenceBanner(),
-          Expanded(
-            child: dayAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, _) =>
-                  const Center(child: Text(AppStrings.routeLoadError)),
-              data: (day) => _buildDay(context, ref, day, nextBatch),
+      // The "Recorrer" snackbar when a late write finds its stop released
+      // (spec §7.5).
+      body: ReleasedStopListener(
+        child: Column(
+          children: [
+            // Renders itself only while a route is IN_PROGRESS (RNF11).
+            const CollectionBanner(),
+            // Renders itself only while the worker is silent (spec §7.3).
+            const SilenceBanner(),
+            Expanded(
+              child: dayAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, _) =>
+                    const Center(child: Text(AppStrings.routeLoadError)),
+                data: (day) => _buildDay(context, ref, day, nextBatch),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -159,8 +166,14 @@ class RouteScreen extends ConsumerWidget {
           Expanded(
             child: ListView(
               children: [
-                for (final stop in batchStops)
-                  _buildStopRow(context, ref, route, stop),
+                // The whole batch, in order: a stop released since (an
+                // impediment that reached the server, say) shows as such,
+                // with no action left on it.
+                for (final stop in route.stops)
+                  if (stop.batchNumber == route.currentBatch)
+                    stop.status == 'RELEASED'
+                        ? _ReleasedStopTile(stop)
+                        : _buildStopRow(context, ref, route, stop),
               ],
             ),
           ),
@@ -241,23 +254,18 @@ class RouteScreen extends ConsumerWidget {
 
   /// Opens [ImpedimentDialog] for a `PENDING` or `IN_PROGRESS` stop and, on a
   /// non-null result, enqueues it via `ExecutionRepository.reportImpediment`
-  /// (spec RF16-RF17). The "resto da rota" switch is only offered when more
-  /// than one `PENDING` stop still remains — with one or zero left there is no
-  /// remainder worth signalling separately from this stop. Same shape as
-  /// [_checkOut]: read the repo, call it, then a confirmation snackbar; the
-  /// dialog stays ref-free (pure input collection).
+  /// (spec RF16-RF17, alocação automática §7.1). Same shape as [_checkOut]:
+  /// read the repo, call it, then a confirmation snackbar; the dialog stays
+  /// ref-free (pure input collection).
   Future<void> _signalImpossibility(
     BuildContext context,
     WidgetRef ref,
     RouteSummary route,
     RouteStopSummary stop,
   ) async {
-    final pendingCount = route.currentBatchStops
-        .where((s) => s.status == 'PENDING')
-        .length;
     final choice = await showDialog<ImpedimentChoice>(
       context: context,
-      builder: (_) => ImpedimentDialog(showRemainderSwitch: pendingCount > 1),
+      builder: (_) => const ImpedimentDialog(),
     );
     if (choice == null || !context.mounted) return;
 
@@ -707,6 +715,30 @@ class _StopTile extends StatelessWidget {
       ],
     );
   }
+}
+
+/// A stop of the current batch the server released (back in the pool, spec
+/// §7): its name and why, and no action — nothing on it is the worker's any
+/// more.
+class _ReleasedStopTile extends StatelessWidget {
+  const _ReleasedStopTile(this.stop);
+
+  final RouteStopSummary stop;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    enabled: false,
+    leading: CircleAvatar(
+      radius: 14,
+      child: Text('${stop.orderIndex}', style: const TextStyle(fontSize: 12)),
+    ),
+    title: Text(stop.servicePointName),
+    subtitle: Text(
+      AppStrings.routeStopReleased(
+        AppStrings.releaseReasonLabel(stop.releaseReason ?? ''),
+      ),
+    ),
+  );
 }
 
 /// Resolves [routeStopId]'s open `execution_id` (Ruling 17) and, only when

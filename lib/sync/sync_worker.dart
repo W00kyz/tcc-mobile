@@ -7,10 +7,12 @@ import 'package:dio/dio.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 
 /// How the worker reacts to a failed dispatch (spec Ruling 6).
@@ -41,7 +43,8 @@ enum _Dispatched { synced, blocked, deferred }
 /// only the rows that depend on it ([BlockedScope]: same stop, evidence of
 /// the same execution), and other routes are unaffected. On every
 /// successful dispatch it also records the server-vs-device clock offset
-/// (spec Ruling 7).
+/// (spec Ruling 7). A write that reaches the server after its stop was
+/// released is parked for the appeal flow ([ReleasedStopStore]).
 class SyncWorker {
   SyncWorker(
     this._store,
@@ -49,10 +52,12 @@ class SyncWorker {
     this._syncMeta,
     this._connectivity,
     this._executionApi,
-    this._evidenceApi, {
+    this._evidenceApi,
+    this._releasedStops, {
     DateTime Function() now = DateTime.now,
     math.Random? random,
     void Function(DateTime scannedAt)? onScanDelivered,
+    void Function(StopRelease release)? onStopReleased,
     // A private field can't be an initializing formal with a public param
     // name, and `now` must stay public for callers to inject a fake clock.
     // ignore: prefer_initializing_formals
@@ -60,7 +65,10 @@ class SyncWorker {
        _random = random ?? math.Random(),
        // Same reason as `now` above: the param name stays public.
        // ignore: prefer_initializing_formals
-       _onScanDelivered = onScanDelivered;
+       _onScanDelivered = onScanDelivered,
+       // Same reason as `now` above: the param name stays public.
+       // ignore: prefer_initializing_formals
+       _onStopReleased = onStopReleased;
 
   final LocalWriteStore _store;
   final StopProgressStore _stopProgress;
@@ -68,6 +76,7 @@ class SyncWorker {
   final Connectivity _connectivity;
   final ExecutionApi _executionApi;
   final EvidenceApi _evidenceApi;
+  final ReleasedStopStore _releasedStops;
   final DateTime Function() _now;
   final math.Random _random;
 
@@ -76,6 +85,11 @@ class SyncWorker {
   /// 2026-10-20-alocacao-automatica §7.3). Reported on delivery, never on
   /// the local write: a scan queued offline has not reached that clock yet.
   final void Function(DateTime scannedAt)? _onScanDelivered;
+
+  /// A stop seen released for the first time — the moment the app offers
+  /// the appeal (spec 2026-10-20-alocacao-automatica §7.5). Reported once per
+  /// stop, however many of its rows come back 409.
+  final void Function(StopRelease release)? _onStopReleased;
 
   /// The drain pass in flight per route — the re-entrancy guard that keeps
   /// two triggers (foreground + regained connectivity) from interleaving.
@@ -209,6 +223,8 @@ class SyncWorker {
       // hard — nothing may escape a drain pass unhandled.
       // ignore: avoid_catches_without_on_clauses
     } catch (error) {
+      final release = StopRelease.fromError(error);
+      if (release != null) return _park(row, release);
       final classification = _classify(error);
       if (classification == SyncErrorClass.alreadyApplied) {
         // The server had it already — and counted its scan then.
@@ -220,14 +236,55 @@ class SyncWorker {
       }
       final message = error.toString();
       if (classification == SyncErrorClass.hard) {
-        // Also a 409 STOP_RELEASED check-out (parked for the appeal flow)
-        // and a 403 WORKER_NOT_APPROVED (permanent; the approval gate owns
-        // the UI) — each holds back only its own stop.
+        // Also a 403 WORKER_NOT_APPROVED (permanent; the approval gate owns
+        // the UI) — it holds back only its own stop.
         await _store.markBlocked(row.id, message);
         return _Dispatched.blocked;
       }
       await _scheduleSoftRetry(row, message);
       return _Dispatched.deferred;
+    }
+  }
+
+  /// A `409 STOP_RELEASED`: the row is blocked on the released stop with its
+  /// payload kept — replaying it would only get the same 409 — and holds
+  /// back just that stop ([BlockedScope]); the rest of the day keeps
+  /// flowing. The stop is recorded first, so a crash in between leaves the
+  /// row pending and the next pass parks it again, without a second notice.
+  Future<_Dispatched> _park(
+    PendingOperationRow row,
+    StopRelease release,
+  ) async {
+    final firstTime = await _releasedStops.record(
+      routeStopId: release.routeStopId,
+      releaseReason: release.releaseReason,
+      appealable: release.appealable,
+    );
+    await _store.markStopReleased(
+      row.id,
+      routeStopId: release.routeStopId,
+      error: release.toString(),
+    );
+    if (firstTime) _reportStopReleased(release);
+    return _Dispatched.blocked;
+  }
+
+  /// Best-effort, like [_reportScanDelivered]: the row is parked already.
+  void _reportStopReleased(StopRelease release) {
+    try {
+      _onStopReleased?.call(release);
+      // Deliberately broad, for the reason in _reportScanDelivered.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (error, stack) {
+      developer.log(
+        jsonEncode({
+          'event': 'stop_release_report_failed',
+          'route_stop_id': release.routeStopId,
+          'error': '$error',
+        }),
+        name: 'sync_worker',
+        stackTrace: stack,
+      );
     }
   }
 

@@ -29,6 +29,11 @@ class PendingOperations extends Table {
   /// Null means "eligible now" (never attempted, or retry window elapsed).
   IntColumn get nextAttemptAt => integer().nullable()();
 
+  /// The released stop a `409 STOP_RELEASED` parked this `blocked` row on
+  /// (spec 2026-10-20-alocacao-automatica §7.5) — named by the server, since
+  /// an evidence row carries no stop of its own. Null for any other row.
+  TextColumn get releasedStopId => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -90,8 +95,37 @@ class FormDraftItems extends Table {
   Set<Column> get primaryKey => {executionId, stableKey};
 }
 
+/// One row per stop the server released while this device still had
+/// writes for it — the late check-in/check-out/evidence came back `409
+/// STOP_RELEASED` (spec 2026-10-20-alocacao-automatica §7.5). It holds what
+/// the appeal is pre-filled with, and lives until the appeal is sent or the
+/// worker discards the stop's local data.
+class ReleasedStops extends Table {
+  TextColumn get routeStopId => text()();
+
+  /// The server's `release_reason` (`LEFT_CAMPUS`, `LOCATION_SILENCE`, …).
+  TextColumn get releaseReason => text()();
+  BoolColumn get appealable => boolean()();
+
+  /// Epoch milliseconds of the device scans this stop's outbox rows held.
+  IntColumn get localCheckInAt => integer().nullable()();
+  IntColumn get localCheckOutAt => integer().nullable()();
+
+  /// Epoch milliseconds when the 409 was first seen.
+  IntColumn get createdAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {routeStopId};
+}
+
 @DriftDatabase(
-  tables: [PendingOperations, StopProgress, SyncMeta, FormDraftItems],
+  tables: [
+    PendingOperations,
+    StopProgress,
+    SyncMeta,
+    FormDraftItems,
+    ReleasedStops,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   /// [executor] defaults to the on-device SQLite file; tests inject
@@ -100,7 +134,7 @@ class AppDatabase extends _$AppDatabase {
     : super(executor ?? driftDatabase(name: 'route_monitor'));
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -146,6 +180,12 @@ class AppDatabase extends _$AppDatabase {
           "WHERE key LIKE 'route:%:started_at' "
           "OR key LIKE 'routes_me_snapshot:%'",
         );
+      }
+      if (from < 6) {
+        // A row M2 already parked on a STOP_RELEASED keeps a null stop: the
+        // old build never recorded which stop the server named.
+        await m.addColumn(pendingOperations, pendingOperations.releasedStopId);
+        await m.createTable(releasedStops);
       }
     },
   );

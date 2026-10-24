@@ -166,9 +166,10 @@ class ExecutionRepository {
   /// field worker actually raised it (spec RF16-RF17).
   ///
   /// Unlike [checkIn], this makes NO optimistic local state change: signalling
-  /// does not change the stop's status on device. The reassignment (done by
-  /// the manager) is what eventually removes or re-homes the stop, and the app
-  /// learns that via the next route sync.
+  /// does not change the stop's status on device. The server releases the
+  /// stop back to the pool once the row reaches it (spec
+  /// 2026-10-20-alocacao-automatica §7.1), and the app shows it released on
+  /// the day reload that follows the sync.
   ///
   /// [routeStopId] is null when [scope] is `ROUTE_REMAINDER` (the whole
   /// remainder of the route), populated when [scope] is `STOP`.

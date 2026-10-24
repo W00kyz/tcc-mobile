@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:route_monitor/appeals/appeal_providers.dart'
+    show appealEligibleProvider;
 import 'package:route_monitor/monitoring/monitoring_providers.dart'
     show notificationsProvider, unreadCountProvider;
 import 'package:route_monitor/routing/route_providers.dart' show myDayProvider;
@@ -74,13 +76,15 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
   /// screen is the home screen and mounts once, so a route assigned/modified
   /// mid-shift only reaches the bell badge on a resume/reconnect poll. Their
   /// widgets already tolerate an errored re-fetch (the badge just hides), so
-  /// they don't need the online gate.
+  /// they don't need the online gate. The appeals badge likewise: the server
+  /// may have released points while the app was away (spec §7.5).
   void _sync() {
     unawaited(ref.read(syncWorkerProvider).syncAll());
     unawaited(_invalidateRoutesIfOnline());
     ref
       ..invalidate(unreadCountProvider)
-      ..invalidate(notificationsProvider);
+      ..invalidate(notificationsProvider)
+      ..invalidate(appealEligibleProvider);
   }
 
   Future<void> _invalidateRoutesIfOnline() async {

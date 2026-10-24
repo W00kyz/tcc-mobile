@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/appeals/appeal_providers.dart';
+import 'package:route_monitor/appeals/appeals_screen.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/main.dart';
+
+import 'appeals/fake_appeal_api.dart';
 
 Session _worker(WorkerStanding standing, {bool consentRequired = false}) =>
     Session(
@@ -96,5 +100,35 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(AppStrings.approvalPendingMessage), findsOneWidget);
+  });
+
+  testWidgets('"/recursos" opens the appeals of an approved worker', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        sessionProvider.overrideWithBuild(
+          (ref, notifier) => _worker(_approved),
+        ),
+        appealApiProvider.overrideWithValue(RecordingAppealApi()),
+      ],
+    );
+    addTearDown(container.dispose);
+    // Straight there: the route screen on the way would reach the network.
+    final router = container.read(routerProvider)..go('/recursos');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppealsScreen), findsOneWidget);
+    expect(
+      appRedirect(_worker(_pending), '/recursos'),
+      '/aguardando-aprovacao',
+    );
   });
 }

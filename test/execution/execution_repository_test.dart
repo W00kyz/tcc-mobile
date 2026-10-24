@@ -59,6 +59,13 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       throw UnimplementedError();
 
   @override
+  Future<void> markStopReleased(
+    String id, {
+    required String routeStopId,
+    required String error,
+  }) => throw UnimplementedError();
+
+  @override
   Future<void> markBlocked(String id, String error) =>
       throw UnimplementedError();
 

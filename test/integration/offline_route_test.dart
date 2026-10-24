@@ -12,6 +12,9 @@ import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/appeals/appeal_form_screen.dart';
+import 'package:route_monitor/appeals/appeal_providers.dart';
+import 'package:route_monitor/appeals/day_time.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
@@ -20,6 +23,7 @@ import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -30,6 +34,7 @@ import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
+import '../appeals/fake_appeal_api.dart';
 import '../support/in_memory_database.dart';
 
 /// DELIVERABLE PROOF for Etapa 6 (RF35): a whole batch is executed with the
@@ -238,6 +243,130 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'REVIEW FOCUS 2: an offline check-out for a stop released while the '
+    'worker was underground comes back 409 STOP_RELEASED, and the appeal it '
+    'opens pre-filled clears the stop from the device',
+    (tester) async {
+      final fixture = await _Fixture.create();
+      addTearDown(fixture.dispose);
+
+      // ---- At the door, online: the stop-1 check-in reaches the server ----
+      fixture.connectivity.goOnline();
+      final execution1 = await fixture.repo.checkIn(
+        routeId: _routeId,
+        routeStopId: _stop1,
+        qrPayload: _qr,
+        latitude: -7.23,
+        longitude: -35.88,
+      );
+      await fixture.worker.syncRoute(_routeId);
+      expect(fixture.callLog, ['checkIn:$_stop1']);
+
+      // ---- Underground, offline: a photo and the check-out of stop 1, then
+      // the whole of stop 2 ------------------------------------------------
+      fixture.connectivity.goOffline();
+      await fixture.repo.addPhoto(
+        routeId: _routeId,
+        executionId: execution1,
+        photo: _photo,
+      );
+      await fixture.repo.checkOut(
+        routeId: _routeId,
+        routeStopId: _stop1,
+        qrPayload: _qr,
+        latitude: -7.23,
+        longitude: -35.88,
+      );
+      await fixture.runStop2Offline();
+
+      // ---- Meanwhile the server released stop 1 for location silence -----
+      fixture.releaseStop1(executionId: execution1);
+
+      await fixture.container.read(myDayProvider.future);
+      await tester.pumpWidget(fixture.app());
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // ---- Back above ground: the late writes sync ------------------------
+      fixture.connectivity.goOnline();
+      await fixture.worker.syncAll();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // The photo and the check-out of stop 1 got 409 STOP_RELEASED; stop 2
+      // went through and the next batch was asked for regardless.
+      expect(fixture.callLog, [
+        'checkIn:$_stop1',
+        'uploadPhoto',
+        'checkOut:$_stop1',
+        'checkIn:$_stop2',
+        'checkOut:$_stop2',
+        'nextBatch',
+      ]);
+      final parked = await fixture.store.blockedForRoute(_routeId);
+      expect(parked.map((row) => row.kind), [
+        PendingOpKind.evidencePhoto,
+        PendingOpKind.checkOut,
+      ]);
+      expect(parked.map((row) => row.releasedStopId), everyElement(_stop1));
+      // Nothing lost on the device: the parked rows keep their payloads.
+      expect(parked.last.payload['scanned_at'], isNotNull);
+
+      final checkInAt = fixture.executionApi.scannedAtArgs.first;
+      final notice = (await fixture.releasedStops.noticeFor(_stop1))!;
+      expect(notice.releaseReason, 'LOCATION_SILENCE');
+      expect(notice.appealable, isTrue);
+      expect(
+        notice.localCheckInAt!.millisecondsSinceEpoch,
+        checkInAt.millisecondsSinceEpoch,
+      );
+      expect(notice.localCheckOutAt, isNotNull);
+
+      // ---- The snackbar offers the appeal ---------------------------------
+      expect(find.text(AppStrings.releasedStopsSnackbar), findsOneWidget);
+      await tester.tap(find.text(AppStrings.releasedStopsSnackbarAction));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.byType(AppealFormScreen), findsOneWidget);
+      expect(find.text(formatDayTime(notice.localCheckInAt!)), findsOneWidget);
+
+      await tester.tap(find.text(AppStrings.appealReasonNoSignal));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(
+        find.widgetWithText(FilledButton, AppStrings.appealSubmit),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text(AppStrings.appealLocalDataWarning), findsOneWidget);
+      await tester.tap(
+        find.widgetWithText(FilledButton, AppStrings.appealWarningConfirm),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      final filing = fixture.appealApi.filed.single;
+      expect(filing.routeStopId, _stop1);
+      expect(filing.reason, 'NO_SIGNAL');
+      expect(
+        filing.claimedExecutedAt!.millisecondsSinceEpoch,
+        checkInAt.millisecondsSinceEpoch,
+      );
+
+      // ---- Stop 1 is gone from the device; stop 2's history stays ---------
+      expect(await fixture.rowsOfStop(_stop1, execution1), isEmpty);
+      expect(await fixture.store.blockedForRoute(_routeId), isEmpty);
+      expect(await fixture.store.unsyncedForRoute(_routeId), isEmpty);
+      expect(await fixture.rawStates(), ['synced', 'synced']);
+      expect(await fixture.stopProgress.progressFor(_stop1), isNull);
+      expect(await fixture.releasedStops.noticeFor(_stop1), isNull);
+
+      // Back on the route, nothing left to sync.
+      expect(find.byType(AppealFormScreen), findsNothing);
+      expect(find.text(AppStrings.routeAllSynced), findsOneWidget);
+    },
+  );
 }
 
 const _routeId = 'r1';
@@ -265,6 +394,28 @@ DioException _dio({required int status}) {
   );
 }
 
+/// The 409 a write on a released stop gets (backend `stop_released_conflict`).
+DioException _stopReleased(String stop) {
+  final options = RequestOptions(path: '/check-outs');
+  return DioException(
+    requestOptions: options,
+    type: DioExceptionType.badResponse,
+    response: Response<dynamic>(
+      requestOptions: options,
+      statusCode: 409,
+      data: {
+        'detail': {
+          'code': 'STOP_RELEASED',
+          'detail': 'Route stop "$stop" was released back to the pool.',
+          'route_stop_id': stop,
+          'release_reason': 'LOCATION_SILENCE',
+          'appealable': true,
+        },
+      },
+    ),
+  );
+}
+
 /// Everything the test drives: a real [ProviderContainer] with a real
 /// in-memory database, the real [SyncWorker]/[ExecutionRepository]/stores, and
 /// recording fakes for the outermost seams only.
@@ -275,6 +426,7 @@ class _Fixture {
     this.evidenceApi,
     this.routeApi,
     this.connectivity,
+    this.appealApi,
     this.callLog,
   );
 
@@ -283,6 +435,7 @@ class _Fixture {
   final _RecordingEvidenceApi evidenceApi;
   final _RecordingRouteRepository routeApi;
   final _FakeConnectivity connectivity;
+  final RecordingAppealApi appealApi;
   final List<String> callLog;
 
   static Future<_Fixture> create() async {
@@ -291,6 +444,7 @@ class _Fixture {
     final evidenceApi = _RecordingEvidenceApi(callLog);
     final routeApi = _RecordingRouteRepository(callLog);
     final connectivity = _FakeConnectivity();
+    final appealApi = RecordingAppealApi();
     final db = inMemoryDatabase();
 
     final container = ProviderContainer(
@@ -302,6 +456,7 @@ class _Fixture {
         routeRepositoryProvider.overrideWithValue(routeApi),
         locationServiceProvider.overrideWithValue(_FakeLocationService()),
         apiBaseUrlProvider.overrideWithValue('http://test-base'),
+        appealApiProvider.overrideWithValue(appealApi),
       ],
     );
     return _Fixture(
@@ -310,6 +465,7 @@ class _Fixture {
       evidenceApi,
       routeApi,
       connectivity,
+      appealApi,
       callLog,
     );
   }
@@ -319,6 +475,8 @@ class _Fixture {
   LocalWriteStore get store => container.read(localWriteStoreProvider);
   StopProgressStore get stopProgress =>
       container.read(stopProgressStoreProvider);
+  ReleasedStopStore get releasedStops =>
+      container.read(releasedStopStoreProvider);
   AppDatabase get _db => container.read(appDatabaseProvider);
 
   Widget app() => UncontrolledProviderScope(
@@ -383,6 +541,44 @@ class _Fixture {
     return times;
   }
 
+  /// Stop 2 checked in and out on the device.
+  Future<void> runStop2Offline() async {
+    await repo.checkIn(
+      routeId: _routeId,
+      routeStopId: _stop2,
+      qrPayload: _qr,
+      latitude: -7.24,
+      longitude: -35.89,
+    );
+    await repo.checkOut(
+      routeId: _routeId,
+      routeStopId: _stop2,
+      qrPayload: _qr,
+      latitude: -7.24,
+      longitude: -35.89,
+    );
+  }
+
+  /// The server releases stop 1 (LOCATION_SILENCE): its route shows it
+  /// RELEASED and every later write on it — [executionId]'s evidence too —
+  /// gets 409 STOP_RELEASED.
+  void releaseStop1({required String executionId}) {
+    routeApi.stop1Released = true;
+    executionApi.releasedStops.add(_stop1);
+    evidenceApi.releasedExecutions[executionId] = _stop1;
+  }
+
+  /// Every outbox row of [stop], its evidence (of [executionId]) included.
+  Future<List<String>> rowsOfStop(String stop, String executionId) async {
+    final rows = await _db.select(_db.pendingOperations).get();
+    return [
+      for (final row in rows)
+        if (row.payloadJson.contains('"$stop"') ||
+            row.payloadJson.contains('"$executionId"'))
+          row.id,
+    ];
+  }
+
   /// The raw `state` column of every outbox row for the route, FIFO order.
   Future<List<String>> rawStates() async {
     final rows =
@@ -438,6 +634,9 @@ class _FakeConnectivity implements Connectivity {
     _controller.add(true);
   }
 
+  /// Emits nothing: `onOnlineChanged` only reports the regained edge.
+  void goOffline() => _online = false;
+
   Future<void> dispose() => _controller.close();
 }
 
@@ -448,6 +647,9 @@ class _RecordingExecutionApi implements ExecutionApi {
 
   final List<String> _log;
   final List<DateTime> scannedAtArgs = [];
+
+  /// Stops the server released: every scan on them gets 409 STOP_RELEASED.
+  final Set<String> releasedStops = {};
   int _checkInCalls = 0;
   int? _failCheckInOnCall;
   DioException? _failWith;
@@ -472,6 +674,7 @@ class _RecordingExecutionApi implements ExecutionApi {
     _log.add('checkIn:$routeStopId');
     scannedAtArgs.add(scannedAt);
     if (_checkInCalls == _failCheckInOnCall) throw _failWith!;
+    if (releasedStops.contains(routeStopId)) throw _stopReleased(routeStopId!);
     return (
       result: CheckInResult(
         routeStopId: routeStopId!,
@@ -498,6 +701,7 @@ class _RecordingExecutionApi implements ExecutionApi {
   }) async {
     _log.add('checkOut:$routeStopId');
     scannedAtArgs.add(scannedAt);
+    if (releasedStops.contains(routeStopId)) throw _stopReleased(routeStopId!);
     return (
       result: CheckOutResult(
         routeStopId: routeStopId!,
@@ -528,6 +732,9 @@ class _RecordingEvidenceApi implements EvidenceApi {
   final List<String> _log;
   final List<DateTime> capturedAtArgs = [];
 
+  /// Executions whose stop the server released, to that stop.
+  final Map<String, String> releasedExecutions = {};
+
   @override
   Future<DateTime?> uploadPhoto({
     required String executionId,
@@ -538,6 +745,8 @@ class _RecordingEvidenceApi implements EvidenceApi {
   }) async {
     _log.add('uploadPhoto');
     capturedAtArgs.add(capturedAt);
+    final releasedStop = releasedExecutions[executionId];
+    if (releasedStop != null) throw _stopReleased(releasedStop);
     return null;
   }
 
@@ -569,6 +778,15 @@ class _RecordingRouteRepository implements RouteRepository {
   int nextBatchCalls = 0;
   int batchesHandedOut = 0;
 
+  /// The server released stop 1 for location silence.
+  bool stop1Released = false;
+
+  String get _stop1Status => stop1Released
+      ? 'RELEASED'
+      : batchesHandedOut == 0
+      ? 'PENDING'
+      : 'DONE';
+
   RouteSummary _route() => RouteSummary(
     id: _routeId,
     fieldWorkerName: 'João',
@@ -581,7 +799,8 @@ class _RecordingRouteRepository implements RouteRepository {
         id: _stop1,
         orderIndex: 1,
         batchNumber: 1,
-        status: batchesHandedOut == 0 ? 'PENDING' : 'DONE',
+        status: _stop1Status,
+        releaseReason: stop1Released ? 'LOCATION_SILENCE' : null,
         servicePointName: 'Sala 101',
         latitude: -7.23,
         longitude: -35.88,
@@ -633,8 +852,8 @@ class _RecordingRouteRepository implements RouteRepository {
   }) async {
     _log.add('nextBatch');
     nextBatchCalls++;
-    final batchDone =
-        _log.contains('checkOut:$_stop1') && _log.contains('checkOut:$_stop2');
+    final stop1Closed = stop1Released || _log.contains('checkOut:$_stop1');
+    final batchDone = stop1Closed && _log.contains('checkOut:$_stop2');
     if (batchDone) batchesHandedOut++;
     return AllocationResult(route: _route(), poolEmpty: false);
   }

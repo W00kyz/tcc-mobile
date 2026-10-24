@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/appeals/appeal_api.dart';
+import 'package:route_monitor/appeals/appeal_form_screen.dart';
+import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
@@ -21,7 +24,9 @@ import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/forms/form_schema.dart';
 import 'package:route_monitor/forms/form_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/monitoring/location_mode.dart';
@@ -36,10 +41,12 @@ import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_screen.dart';
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
+import '../appeals/fake_appeal_api.dart';
 import '../support/fake_connectivity.dart';
 import '../support/fake_route_repository.dart';
 import '../support/in_memory_database.dart';
@@ -289,6 +296,13 @@ class _InMemoryLocalWriteStore implements LocalWriteStore {
           )
           .toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+  @override
+  Future<void> markStopReleased(
+    String id, {
+    required String routeStopId,
+    required String error,
+  }) => throw UnimplementedError();
 
   @override
   Future<void> markBlocked(String id, String error) async =>
@@ -615,6 +629,8 @@ Widget _screenWith(
   PermissionPort? permissions,
   BackgroundAskStore? backgroundAsked,
   SilenceWatchdog? silenceWatchdog,
+  AppealApi? appealApi,
+  ReleasedStopStore? releasedStopStore,
 }) {
   final resolvedMonitoringApi = monitoringApi ?? _FakeMonitoringApi();
   // Always overridden, regardless of whether the test cares about evidence:
@@ -642,10 +658,17 @@ Widget _screenWith(
   // every render now, and building the real `SyncWorker` reaches
   // `apiBaseUrlFromEnvironment()` (no `--dart-define` under flutter_test).
   final resolvedSyncWorker = syncWorker ?? _RecordingSyncWorker();
+  // Always overridden: the app bar's appeals entry counts the contestable
+  // points on every render, and the released-stop snackbar reads the
+  // device's notices — never a real Dio client or the on-device database
+  // (and no second in-memory one beside a test's own: drift warns).
+  final resolvedReleasedStops = releasedStopStore ?? _NoReleasedStops();
   return ProviderScope(
     overrides: [
       routeRepositoryProvider.overrideWithValue(repository),
       monitoringApiProvider.overrideWithValue(resolvedMonitoringApi),
+      appealApiProvider.overrideWithValue(appealApi ?? RecordingAppealApi()),
+      releasedStopStoreProvider.overrideWithValue(resolvedReleasedStops),
       syncWorkerProvider.overrideWithValue(resolvedSyncWorker),
       locationServiceProvider.overrideWithValue(
         locationService ?? _FakeLocationService(),
@@ -945,8 +968,8 @@ void main() {
 
   group('route states', () {
     testWidgets(
-      'shows only the current batch, without released stops, under the '
-      'done count of the whole day',
+      'shows only the current batch under the done count of the whole day, a '
+      'released stop as released and with no action',
       (tester) async {
         final route = routeWith(
           currentBatch: 2,
@@ -975,7 +998,23 @@ void main() {
         expect(find.text('Lote 2 · 1 ponto feito hoje'), findsOneWidget);
         expect(find.text('Sala Nova'), findsOneWidget);
         expect(find.text('Sala Velha'), findsNothing);
-        expect(find.text('Sala Impedida'), findsNothing);
+        expect(find.text('Sala Impedida'), findsOneWidget);
+        expect(
+          find.text(
+            AppStrings.routeStopReleased(
+              AppStrings.releaseReasonLabel('IMPEDIMENT'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        // Only "Sala Nova" can still be signalled.
+        expect(
+          find.widgetWithText(
+            TextButton,
+            AppStrings.routeSignalImpossibilityButton,
+          ),
+          findsOneWidget,
+        );
       },
     );
 
@@ -2610,11 +2649,10 @@ void main() {
         find.text(AppStrings.impedimentReasonAccessBlocked),
         findsOneWidget,
       );
-      // A single PENDING stop remains (none here) → no "resto da rota" switch.
-      expect(
-        find.text(AppStrings.impedimentRemainderSwitch),
-        findsNothing,
-      );
+      expect(find.text('Não consigo fazer este ponto'), findsOneWidget);
+      // Offered even on the last stop: "can't go on today" is how the worker
+      // ends the day — a STOP impediment there would pull the next batch.
+      expect(find.text('Não consigo continuar hoje'), findsOneWidget);
 
       // Regression: the note field is capped at the backend `note` column
       // (`String(500)`) so an over-long note can't poison the route sync queue.
@@ -3024,6 +3062,111 @@ void main() {
 
     expect(find.byType(NotificationsScreen), findsOneWidget);
   });
+
+  group('released stops (spec 2026-10-20-alocacao-automatica §7.5)', () {
+    final route = routeWith(
+      stops: [
+        stopWith(
+          id: 's1',
+          status: 'RELEASED',
+          releaseReason: 'LOCATION_SILENCE',
+          servicePointName: 'Sala 101',
+        ),
+        stopWith(id: 's2', orderIndex: 2, servicePointName: 'Sala 102'),
+      ],
+    );
+
+    /// The device's database, holding an appealable notice for s1.
+    Future<AppDatabase> dbWithNotice() async {
+      final db = inMemoryDatabase();
+      addTearDown(db.close);
+      await DriftReleasedStopStore(db).record(
+        routeStopId: 's1',
+        releaseReason: 'LOCATION_SILENCE',
+        appealable: true,
+      );
+      return db;
+    }
+
+    void announce(WidgetTester tester, {required bool appealable}) {
+      ProviderScope.containerOf(tester.element(find.byType(RouteScreen)))
+          .read(stopReleaseAnnouncementsProvider.notifier)
+          .announce(
+            StopRelease(
+              routeStopId: 's1',
+              releaseReason: 'LOCATION_SILENCE',
+              appealable: appealable,
+            ),
+          );
+    }
+
+    testWidgets(
+      'an appealable release shows the snackbar, and "Recorrer" opens the '
+      "stop's appeal form",
+      (tester) async {
+        final db = await dbWithNotice();
+        await tester.pumpWidget(
+          _screenWith(
+            _repositoryWith(route),
+            formDraftStore: DriftFormDraftStore(db),
+            releasedStopStore: DriftReleasedStopStore(db),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        announce(tester, appealable: true);
+        await tester.pumpAndSettle();
+
+        expect(find.text(AppStrings.releasedStopsSnackbar), findsOneWidget);
+        await tester.tap(find.text(AppStrings.releasedStopsSnackbarAction));
+        await tester.pumpAndSettle();
+
+        final form = tester.widget<AppealFormScreen>(
+          find.byType(AppealFormScreen),
+        );
+        expect(form.routeStopId, 's1');
+        expect(form.servicePointName, 'Sala 101');
+      },
+    );
+
+    testWidgets('a release the worker cannot appeal shows no snackbar', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_screenWith(_repositoryWith(route)));
+      await tester.pumpAndSettle();
+
+      announce(tester, appealable: false);
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.releasedStopsSnackbar), findsNothing);
+    });
+
+    testWidgets('the app bar counts the points the worker can contest', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _screenWith(
+          _repositoryWith(route),
+          appealApi: RecordingAppealApi(
+            eligibleStops: [
+              AppealableStop(
+                routeStopId: 's1',
+                servicePointName: 'Sala 101',
+                buildingName: 'Bloco CAA',
+                floorLabel: 'Térreo',
+                releaseReason: 'LOCATION_SILENCE',
+                deadline: DateTime.utc(2026, 10, 22, 14),
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip(AppStrings.appealsTooltip), findsOneWidget);
+      expect(find.widgetWithText(Badge, '1'), findsOneWidget);
+    });
+  });
 }
 
 /// Location permissions as the device would answer them: "while in use"
@@ -3072,6 +3215,25 @@ class _ThrowingPermissions implements PermissionPort {
 
   @override
   Future<void> requestNotifications() async {}
+}
+
+/// A device that never saw a stop released.
+class _NoReleasedStops implements ReleasedStopStore {
+  @override
+  Future<bool> record({
+    required String routeStopId,
+    required String releaseReason,
+    required bool appealable,
+  }) async => false;
+
+  @override
+  Future<ReleasedStopNotice?> noticeFor(String routeStopId) async => null;
+
+  @override
+  Future<List<ReleasedStopNotice>> appealableNotices() async => const [];
+
+  @override
+  Future<void> discardStop(String routeStopId) async {}
 }
 
 class _InMemoryAskStore implements BackgroundAskStore {

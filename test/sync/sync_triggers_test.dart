@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/appeals/appeal_api.dart';
+import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -12,6 +14,7 @@ import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
+import '../appeals/fake_appeal_api.dart';
 import '../support/fake_connectivity.dart';
 import '../support/fake_route_repository.dart';
 
@@ -68,6 +71,17 @@ class _RecordingSyncWorker implements SyncWorker {
   Future<void> dispose() async {}
 }
 
+/// Counts `GET /appeals/eligible` calls.
+class _CountingAppealApi extends RecordingAppealApi {
+  int eligibleCalls = 0;
+
+  @override
+  Future<List<AppealableStop>> eligible() {
+    eligibleCalls++;
+    return super.eligible();
+  }
+}
+
 void main() {
   late FakeConnectivity connectivity;
   late _RecordingSyncWorker worker;
@@ -98,6 +112,7 @@ void main() {
     WidgetTester tester, {
     required RouteRepository routeRepository,
     MonitoringApi? monitoringApi,
+    AppealApi? appealApi,
   }) async {
     final container = ProviderContainer(
       overrides: [
@@ -106,6 +121,7 @@ void main() {
         routeRepositoryProvider.overrideWithValue(routeRepository),
         if (monitoringApi != null)
           monitoringApiProvider.overrideWithValue(monitoringApi),
+        if (appealApi != null) appealApiProvider.overrideWithValue(appealApi),
       ],
     );
     addTearDown(container.dispose);
@@ -201,6 +217,26 @@ void main() {
       expect(await container.read(notificationsProvider.future), isEmpty);
       expect(monitoringApi.unreadCountCount, 2);
       expect(monitoringApi.fetchNotificationsCount, 2);
+    },
+  );
+
+  testWidgets(
+    'AppLifecycleState.resumed also refreshes the appeals badge (spec §7.5 — '
+    'points may have been released while the app was away)',
+    (tester) async {
+      final appealApi = _CountingAppealApi();
+      final container = await pumpWithContainer(
+        tester,
+        routeRepository: FakeRouteRepository(),
+        appealApi: appealApi,
+      );
+      await container.read(appealEligibleProvider.future);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await container.read(appealEligibleProvider.future);
+
+      expect(appealApi.eligibleCalls, 2);
     },
   );
 

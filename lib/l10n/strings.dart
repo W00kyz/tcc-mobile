@@ -138,6 +138,9 @@ abstract final class AppStrings {
   static const String routeNextBatchOffline =
       'Conecte-se para receber mais pontos';
 
+  /// A released stop of the current batch: `Liberado · <motivo>`.
+  static String routeStopReleased(String reason) => 'Liberado · $reason';
+
   /// `Lote <n> · <x> ponto(s) feito(s) hoje`.
   static String routeBatchHeader(int batch, int doneToday) =>
       'Lote $batch · $doneToday '
@@ -209,19 +212,108 @@ abstract final class AppStrings {
   static String blockedSyncRowLabel(String kind, String reference) =>
       '$kind — $reference';
 
+  // --- blocked sync screen · released stops (alocação automática §7.5) ---
+  static const String blockedSyncAppealButton = 'Recorrer';
+  static const String blockedSyncDiscardButton = 'Descartar';
+  static const String blockedSyncDiscardTitle = 'Descartar dados deste ponto?';
+  static const String blockedSyncDiscardBody =
+      'As fotos, respostas e registros feitos offline neste ponto serão '
+      'apagados do aparelho.';
+  static const String blockedSyncDiscarded = 'Dados do ponto descartados.';
+
+  /// The heading of a stop whose late writes the server refused.
+  static String blockedSyncReleasedStop(String reference) =>
+      'Ponto liberado — $reference';
+
+  /// Why the server released that stop.
+  static String blockedSyncReleasedReason(String reason) => 'Motivo: $reason';
+
   // --- room picker ---
   static const String roomPickerPrompt =
       'Vários pontos correspondem — escolha o certo:';
 
-  // --- impediment dialog ---
-  static const String impedimentDialogTitle = 'Sinalizar impossibilidade';
+  // --- impediment dialog (alocação automática §7.1) ---
+  static const String impedimentDialogTitle = 'Não consigo fazer este ponto';
   static const String impedimentNoteHint = 'Observação (opcional)';
-  static const String impedimentRemainderSwitch =
-      'Sinalizar para o resto da rota também';
+  static const String impedimentRemainderSwitch = 'Não consigo continuar hoje';
   static const String impedimentReasonAccessBlocked = 'Acesso bloqueado';
   static const String impedimentReasonSiteRefusal = 'Recusa do local';
   static const String impedimentReasonHealthIssue = 'Problema de saúde';
   static const String impedimentReasonOther = 'Outro';
+
+  // --- appeals (alocação automática §7.5) ---
+  static const String appealsTooltip = 'Recursos';
+  static const String appealsAppBarTitle = 'Recursos';
+  static const String appealsEligibleTitle =
+      'Pontos liberados que você pode contestar';
+  static const String appealsEligibleEmpty = 'Nenhum ponto para contestar.';
+  static const String appealsMineTitle = 'Meus recursos';
+  static const String appealsMineEmpty = 'Você ainda não enviou recursos.';
+  static const String appealsLoadError =
+      'Não foi possível carregar os recursos.';
+  static const String releasedStopsSnackbar =
+      'Estes pontos foram liberados — você pode recorrer.';
+  static const String releasedStopsSnackbarAction = 'Recorrer';
+
+  /// The details line of a contestable point.
+  static String appealEligibleDetails({
+    required String building,
+    required String floor,
+    required String reason,
+    required String deadline,
+  }) => '$building · $floor\nMotivo: $reason · Prazo: $deadline';
+
+  /// The details line of a filed appeal: `<prédio> · enviado em <quando>`.
+  static String appealFiledDetails(String building, String filedAt) =>
+      '$building · enviado em $filedAt';
+
+  /// An appeal's `status` in words.
+  static String appealStatusLabel(String status) => switch (status) {
+    'PENDING' => 'Em análise',
+    'ACCEPTED' => 'Aceito',
+    'REJECTED' => 'Recusado',
+    _ => status,
+  };
+
+  /// Who decided an appeal and, when they wrote one, their note.
+  static String appealReview(String reviewer, String? note) =>
+      note == null ? 'Por $reviewer' : '$reviewer: $note';
+
+  // --- appeal form (alocação automática §7.5) ---
+  static const String appealFormTitle = 'Recorrer';
+  static const String appealReasonLabel = 'Motivo';
+  static const String appealReasonNoSignal = 'Fiquei sem sinal';
+  static const String appealReasonLeftBriefly = 'Saí rapidamente do campus';
+  static const String appealReasonAppClosed = 'O app fechou ou descarregou';
+  static const String appealReasonOther = 'Outro';
+  static const String appealNoteHint = 'Observação (opcional)';
+  static const String appealClaimedTimeLabel = 'Horário declarado';
+  static const String appealClaimedTimeNone = 'Não informado';
+  static const String appealSubmit = 'Enviar recurso';
+  static const String appealLocalDataWarning =
+      'As fotos e respostas feitas offline neste ponto não serão enviadas com '
+      'o recurso e serão apagadas do aparelho.';
+  static const String appealWarningConfirm = 'Enviar';
+  static const String appealSent = 'Recurso enviado.';
+  static const String appealSendError =
+      'Não foi possível enviar o recurso. Verifique a conexão e tente '
+      'novamente.';
+
+  /// `Motivo da liberação: <motivo>`.
+  static String appealReleaseReason(String reason) =>
+      'Motivo da liberação: $reason';
+
+  /// Why the server refused an appeal (409 `NOT_APPEALABLE` `reason_code`).
+  static String appealRefusal(String reasonCode) => switch (reasonCode) {
+    'NOT_OWNER' => 'Este ponto não é seu.',
+    'NOT_RELEASED' => 'Este ponto não está liberado.',
+    'REASON_NOT_APPEALABLE' =>
+      'Pontos liberados por impedimento não aceitam recurso.',
+    'ALREADY_CHECKED_OUT' => 'A conclusão deste ponto já foi registrada.',
+    'WINDOW_EXPIRED' => 'O prazo para recorrer deste ponto terminou.',
+    'ALREADY_APPEALED' => 'Você já recorreu deste ponto.',
+    _ => appealSendError,
+  };
 
   // --- form screen ---
   static const String formAppBarTitle = 'Formulário';

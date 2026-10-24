@@ -24,8 +24,10 @@ class ImpedimentChoice {
     this.note,
   });
 
-  /// `STOP` for just the current stop, `ROUTE_REMAINDER` when the field worker
-  /// also flipped the "resto da rota" switch.
+  /// `STOP` for just this stop ("Não consigo fazer este ponto"),
+  /// `ROUTE_REMAINDER` when the field worker flipped "Não consigo continuar
+  /// hoje" — every open stop of the batch goes back to the pool and the route
+  /// pauses (spec 2026-10-20-alocacao-automatica §7.1).
   final String scope;
 
   /// A wire value from [_reasonOptions] — `ACCESS_BLOCKED`, `SITE_REFUSAL`,
@@ -36,16 +38,17 @@ class ImpedimentChoice {
   final String? note;
 }
 
-/// Collects a reason (+ optional note, + optional "resto da rota" scope) for a
-/// "Sinalizar impossibilidade" report. Pure input collection — it holds only
-/// local form state and returns an [ImpedimentChoice] via `Navigator.pop`; the
-/// `ExecutionRepository.reportImpediment` call happens back in `route_screen`.
+/// Collects a reason (+ optional note, + the "Não consigo continuar hoje"
+/// scope) for a "Sinalizar impossibilidade" report. Pure input collection —
+/// it holds only local form state and returns an [ImpedimentChoice] via
+/// `Navigator.pop`; the `ExecutionRepository.reportImpediment` call happens
+/// back in `route_screen`, through the outbox.
+///
+/// The switch is always offered, even on the last open stop: it is how the
+/// worker ends the day ("Encerrar por hoje", spec §6.4) — a STOP impediment
+/// there would close the batch and pull the next one.
 class ImpedimentDialog extends StatefulWidget {
-  const ImpedimentDialog({required this.showRemainderSwitch, super.key});
-
-  /// Whether to offer the "Sinalizar para o resto da rota também" switch —
-  /// `route_screen` sets this only when more than one `PENDING` stop remains.
-  final bool showRemainderSwitch;
+  const ImpedimentDialog({super.key});
 
   @override
   State<ImpedimentDialog> createState() => _ImpedimentDialogState();
@@ -112,13 +115,12 @@ class _ImpedimentDialogState extends State<ImpedimentDialog> {
                 hintText: AppStrings.impedimentNoteHint,
               ),
             ),
-            if (widget.showRemainderSwitch)
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _forRemainder,
-                onChanged: (value) => setState(() => _forRemainder = value),
-                title: const Text(AppStrings.impedimentRemainderSwitch),
-              ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _forRemainder,
+              onChanged: (value) => setState(() => _forRemainder = value),
+              title: const Text(AppStrings.impedimentRemainderSwitch),
+            ),
           ],
         ),
       ),

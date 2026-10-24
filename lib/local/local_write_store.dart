@@ -35,6 +35,7 @@ class PendingOperationRow {
     required this.lastError,
     required this.attempts,
     required this.nextAttemptAt,
+    this.releasedStopId,
   });
 
   final String id;
@@ -51,6 +52,11 @@ class PendingOperationRow {
   /// Epoch milliseconds before which the worker must not retry this row, or
   /// null when it is due immediately.
   final int? nextAttemptAt;
+
+  /// The released stop a `409 STOP_RELEASED` parked this row on, or null.
+  /// A parked row is never retried: the appeal flow (or discarding the
+  /// stop's local data) is what clears it.
+  final String? releasedStopId;
 }
 
 /// The write seam: execution actions enqueue here first, then a drain marks
@@ -70,6 +76,15 @@ abstract class LocalWriteStore {
   /// Retry budget exhausted (spec Ruling 6): move the row to `blocked` so the
   /// worker stops replaying it and the UI can surface it for manual action.
   Future<void> markBlocked(String id, String error);
+
+  /// A `409 STOP_RELEASED`: blocks the row like [markBlocked] and records the
+  /// released stop the server named — the row waits for the appeal flow
+  /// (spec 2026-10-20-alocacao-automatica §7.5), its payload kept.
+  Future<void> markStopReleased(
+    String id, {
+    required String routeStopId,
+    required String error,
+  });
 
   /// Records a scheduled retry: bumps [attempts] and defers the next attempt
   /// until [nextAttemptAt] (epoch millis), leaving the row `failed`/`pending`
@@ -99,9 +114,10 @@ abstract class LocalWriteStore {
   Future<List<String>> routeIdsWithWork();
 
   /// Clears a `blocked` (or `failed`) row back to a clean `pending` state —
-  /// state `pending`, `attempts` 0, `nextAttemptAt`/`lastError` null — so the
-  /// next drain replays it from scratch. Backs `SyncWorker.unblock` (the
-  /// "Tentar de novo" button on the blocked-rows list, spec Ruling 6).
+  /// state `pending`, `attempts` 0, `nextAttemptAt`/`lastError`/
+  /// `releasedStopId` null — so the next drain replays it from scratch.
+  /// Backs `SyncWorker.unblock` (the "Tentar de novo" button on the
+  /// blocked-rows list, spec Ruling 6).
   Future<void> resetToPending(String id);
 }
 
@@ -146,6 +162,23 @@ class DriftLocalWriteStore implements LocalWriteStore {
       _setState(id, PendingOpState.blocked, error: error);
 
   @override
+  Future<void> markStopReleased(
+    String id, {
+    required String routeStopId,
+    required String error,
+  }) {
+    final update = _db.update(_db.pendingOperations)
+      ..where((row) => row.id.equals(id));
+    return update.write(
+      PendingOperationsCompanion(
+        state: Value(PendingOpState.blocked.name),
+        lastError: Value(error),
+        releasedStopId: Value(routeStopId),
+      ),
+    );
+  }
+
+  @override
   Future<void> markRetryScheduled(
     String id, {
     required int attempts,
@@ -171,6 +204,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
         lastError: const Value(null),
         attempts: const Value(0),
         nextAttemptAt: const Value(null),
+        releasedStopId: const Value(null),
       ),
     );
   }
@@ -267,6 +301,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
       lastError: row.lastError,
       attempts: row.attempts,
       nextAttemptAt: row.nextAttemptAt,
+      releasedStopId: row.releasedStopId,
     );
   }
 }

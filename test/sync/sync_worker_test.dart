@@ -8,8 +8,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -272,6 +274,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     int? attempts,
     int? nextAttemptAt,
     bool clearNextAttemptAt = false,
+    String? releasedStopId,
   }) => PendingOperationRow(
     id: row.id,
     kind: row.kind,
@@ -284,6 +287,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     nextAttemptAt: clearNextAttemptAt
         ? null
         : nextAttemptAt ?? row.nextAttemptAt,
+    releasedStopId: releasedStopId ?? row.releasedStopId,
   );
 
   @override
@@ -316,6 +320,18 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     rows[id]!,
     state: PendingOpState.blocked,
     lastError: error,
+  );
+
+  @override
+  Future<void> markStopReleased(
+    String id, {
+    required String routeStopId,
+    required String error,
+  }) async => rows[id] = _copy(
+    rows[id]!,
+    state: PendingOpState.blocked,
+    lastError: error,
+    releasedStopId: routeStopId,
   );
 
   @override
@@ -381,6 +397,28 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       .toList();
 }
 
+/// Records each released stop once, like the Drift store's insert-or-ignore.
+class _FakeReleasedStopStore implements ReleasedStopStore {
+  final Map<String, ({String releaseReason, bool appealable})> notices = {};
+
+  @override
+  Future<bool> record({
+    required String routeStopId,
+    required String releaseReason,
+    required bool appealable,
+  }) async {
+    if (notices.containsKey(routeStopId)) return false;
+    notices[routeStopId] = (
+      releaseReason: releaseReason,
+      appealable: appealable,
+    );
+    return true;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _Harness {
   _Harness() {
     worker = SyncWorker(
@@ -390,6 +428,7 @@ class _Harness {
       connectivity,
       executionApi,
       evidenceApi,
+      releasedStops,
       now: () => now,
       random: _ZeroRandom(),
       onScanDelivered: (scannedAt) {
@@ -397,11 +436,14 @@ class _Harness {
         // ignore: only_throw_errors — replays what a disposed ref throws.
         if (scanCallbackError != null) throw scanCallbackError!;
       },
+      onStopReleased: announcedReleases.add,
     );
   }
 
   final log = <String>[];
   final deliveredScans = <DateTime>[];
+  final announcedReleases = <StopRelease>[];
+  final releasedStops = _FakeReleasedStopStore();
 
   /// When set, the delivery callback throws it (e.g. a disposed Riverpod ref).
   Object? scanCallbackError;
@@ -426,6 +468,25 @@ class _ZeroRandom implements math.Random {
   @override
   bool nextBool() => false;
 }
+
+/// The body of the 409 a scan or upload synced after its stop was released
+/// gets (backend `stop_released_conflict`).
+DioException _stopReleased(
+  String stop, {
+  String reason = 'LOCATION_SILENCE',
+  bool appealable = true,
+}) => _dio(
+  status: 409,
+  body: {
+    'detail': {
+      'code': 'STOP_RELEASED',
+      'detail': 'Route stop "$stop" was released back to the pool ($reason).',
+      'route_stop_id': stop,
+      'release_reason': reason,
+      'appealable': appealable,
+    },
+  },
+);
 
 /// A row's payload on [stop], its execution named after the stop.
 Map<String, dynamic> _stopPayload(String id, String stop) => {
@@ -1112,4 +1173,120 @@ void main() {
       expect(h.store.rows['b']!.state, PendingOpState.pending);
     },
   );
+
+  group('a 409 STOP_RELEASED (spec 2026-10-20-alocacao-automatica §7.5)', () {
+    test(
+      'parks a late check-out on its stop with its data kept, records the '
+      'released stop and announces it — the next stop still syncs',
+      () async {
+        final h = _Harness();
+        h.executionApi.checkOutError = _stopReleased('stop-A');
+        h.store
+          ..seed(
+            'outA',
+            kind: PendingOpKind.checkOut,
+            createdAt: 1,
+            payload: _stopPayload('outA', 'stop-A'),
+          )
+          ..seed(
+            'inB',
+            kind: PendingOpKind.checkIn,
+            createdAt: 2,
+            payload: _stopPayload('inB', 'stop-B'),
+          );
+
+        await h.worker.syncRoute('route-R');
+
+        final parked = h.store.rows['outA']!;
+        expect(parked.state, PendingOpState.blocked);
+        expect(parked.releasedStopId, 'stop-A');
+        expect(parked.payload, _stopPayload('outA', 'stop-A'));
+        expect(h.releasedStops.notices, {
+          'stop-A': (releaseReason: 'LOCATION_SILENCE', appealable: true),
+        });
+        expect(h.announcedReleases.single.routeStopId, 'stop-A');
+        expect(h.announcedReleases.single.appealable, isTrue);
+        expect(h.store.rows['inB']!.state, PendingOpState.synced);
+        // Never delivered: the silence clock must not count it.
+        expect(h.deliveredScans, [DateTime.utc(2026)]);
+      },
+    );
+
+    test(
+      'parks a photo on the stop the server names — evidence carries no stop '
+      'of its own — and holds back the rest of its execution',
+      () async {
+        final h = _Harness();
+        h.evidenceApi.photoError = _stopReleased('stop-A');
+        h.store
+          ..seed(
+            'photo1',
+            kind: PendingOpKind.evidencePhoto,
+            createdAt: 1,
+            payload: _stopPayload('photo1', 'stop-A'),
+          )
+          ..seed(
+            'note1',
+            kind: PendingOpKind.evidenceNote,
+            createdAt: 2,
+            payload: _stopPayload('note1', 'stop-A'),
+          );
+
+        await h.worker.syncRoute('route-R');
+
+        expect(h.store.rows['photo1']!.releasedStopId, 'stop-A');
+        expect(h.store.rows['note1']!.state, PendingOpState.pending);
+        expect(h.log, ['photo:photo1']);
+      },
+    );
+
+    test(
+      'a second 409 on an already-recorded stop announces nothing',
+      () async {
+        final h = _Harness();
+        await h.releasedStops.record(
+          routeStopId: 'stop-A',
+          releaseReason: 'LOCATION_SILENCE',
+          appealable: true,
+        );
+        h.executionApi.checkOutError = _stopReleased('stop-A');
+        h.store.seed(
+          'outA',
+          kind: PendingOpKind.checkOut,
+          createdAt: 1,
+          payload: _stopPayload('outA', 'stop-A'),
+        );
+
+        await h.worker.syncRoute('route-R');
+
+        expect(h.store.rows['outA']!.releasedStopId, 'stop-A');
+        expect(h.announcedReleases, isEmpty);
+      },
+    );
+
+    test(
+      'a release the worker caused (an impediment) is parked and recorded as '
+      'not appealable',
+      () async {
+        final h = _Harness();
+        h.executionApi.checkInError = _stopReleased(
+          'stop-A',
+          reason: 'IMPEDIMENT',
+          appealable: false,
+        );
+        h.store.seed(
+          'inA',
+          kind: PendingOpKind.checkIn,
+          createdAt: 1,
+          payload: _stopPayload('inA', 'stop-A'),
+        );
+
+        await h.worker.syncRoute('route-R');
+
+        expect(h.store.rows['inA']!.releasedStopId, 'stop-A');
+        expect(h.releasedStops.notices['stop-A']!.appealable, isFalse);
+        expect(h.announcedReleases.single.appealable, isFalse);
+      },
+    );
+  });
 }

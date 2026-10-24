@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:route_monitor/appeals/appeals_screen.dart';
 import 'package:route_monitor/auth/approval_screen.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
@@ -84,6 +85,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/meus-dados',
         builder: (context, state) => const MyDataScreen(),
+      ),
+      GoRoute(
+        path: '/recursos',
+        builder: (context, state) => const AppealsScreen(),
       ),
     ],
   );
