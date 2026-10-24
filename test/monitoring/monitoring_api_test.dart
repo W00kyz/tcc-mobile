@@ -81,7 +81,7 @@ void main() {
           'items': [
             {
               'id': 'n1',
-              'kind': 'ROUTE_ASSIGNED',
+              'kind': 'ALERT',
               'title': 'Nova rota',
               'body': 'Você recebeu uma rota para hoje.',
               'created_at': '2026-09-07T09:00:00Z',
@@ -101,7 +101,7 @@ void main() {
     expect(captured.queryParameters['page_size'], 15);
     expect(result, hasLength(1));
     expect(result.single.id, 'n1');
-    expect(result.single.kind, 'ROUTE_ASSIGNED');
+    expect(result.single.kind, 'ALERT');
     expect(result.single.isUnread, isTrue);
   });
 

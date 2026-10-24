@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show QueryExecutor;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show FutureProviderFamily;
 
@@ -14,11 +15,18 @@ import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 
+/// Where [appDatabaseProvider] keeps its data: null for the on-device SQLite
+/// file ([AppDatabase]'s default). A seam so a test runs the real provider
+/// over `NativeDatabase.memory()` — the file executor starts opening
+/// (path_provider, a background isolate) the moment it is built, and that
+/// outlived a unit test.
+final appDatabaseExecutorProvider = Provider<QueryExecutor?>((ref) => null);
+
 /// The on-device SQLite connection, as a true singleton — never construct a
 /// second [AppDatabase] for the same file (Task 16 review). Every provider
 /// that needs storage watches this one instead of building its own.
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase();
+  final db = AppDatabase(ref.watch(appDatabaseExecutorProvider));
   ref.onDispose(db.close);
   return db;
 });

@@ -1,3 +1,4 @@
+import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show ProviderException;
 import 'package:flutter_test/flutter_test.dart';
@@ -82,10 +83,17 @@ void main() {
     'AppDatabase instance for the on-device file',
     () {
       // Task 16's review: never construct a second AppDatabase() for the
-      // same on-device SQLite file. This only reads the provider (Provider
-      // caches its result), it never runs a query, so it never touches the
-      // lazy executor's real platform channel.
-      final container = ProviderContainer();
+      // same on-device SQLite file. The real provider runs, over an
+      // in-memory executor: the file one starts opening (path_provider, a
+      // background isolate) the moment it is built, and that outlived the
+      // test — it failed now and then in the full suite.
+      final container = ProviderContainer(
+        overrides: [
+          appDatabaseExecutorProvider.overrideWithValue(
+            NativeDatabase.memory(),
+          ),
+        ],
+      );
       addTearDown(container.dispose);
 
       final first = container.read(appDatabaseProvider);
