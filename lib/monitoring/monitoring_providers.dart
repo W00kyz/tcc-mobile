@@ -1,11 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/auth/auth_providers.dart';
+import 'package:route_monitor/execution/execution_providers.dart'
+    show appDatabaseProvider;
+import 'package:route_monitor/local/background_ask_store.dart';
+import 'package:route_monitor/monitoring/local_notification_scheduler.dart';
+import 'package:route_monitor/monitoring/location_mode.dart';
+import 'package:route_monitor/monitoring/location_mode_device.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/ongoing_notification.dart';
 import 'package:route_monitor/monitoring/position_reporter.dart';
+import 'package:route_monitor/monitoring/position_source.dart';
+import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/routing/route_providers.dart'
-    show locationServiceProvider;
+    show locationServiceProvider, myDayProvider;
 
 /// Mirrors `executionApiProvider` — a fresh Dio bound to the current session's
 /// bearer token, rebuilt whenever the session changes.
@@ -35,12 +43,66 @@ final ongoingNotificationProvider = Provider<OngoingNotification>(
   (ref) => LocalOngoingNotification(),
 );
 
+/// The background mode's fix stream (spec 2026-10-20-alocacao-automatica
+/// §7.3); overridden in tests.
+final positionSourceProvider = Provider<PositionSource>(
+  (ref) => GeolocatorPositionSource(),
+);
+
 final positionReporterProvider = Provider<PositionReporter>((ref) {
   final reporter = PositionReporter(
     location: ref.watch(locationServiceProvider),
+    positionSource: ref.watch(positionSourceProvider),
     api: ref.watch(monitoringApiProvider),
     notification: ref.watch(ongoingNotificationProvider),
+    // Read at each send, not watched: the watchdog is rebuilt when the
+    // server's limits change, and that must not restart the reporter.
+    onPositionSent: (sentAt) =>
+        ref.read(silenceWatchdogProvider)?.onActivity(sentAt),
   );
   ref.onDispose(reporter.dispose);
   return reporter;
+});
+
+final permissionPortProvider = Provider<PermissionPort>(
+  (ref) => PermissionHandlerPort(),
+);
+
+final backgroundAskStoreProvider = Provider<BackgroundAskStore>(
+  (ref) => DriftBackgroundAskStore(ref.watch(appDatabaseProvider)),
+);
+
+/// The mode the current permissions allow. "Iniciar rota" invalidates it
+/// after asking (`resolveLocationMode`), and so does a resume — the worker
+/// may have changed the permission in the system settings meanwhile.
+final locationModeProvider = FutureProvider<LocationMode>(
+  (ref) => currentLocationMode(ref.watch(permissionPortProvider)),
+);
+
+final localSchedulerProvider = Provider<LocalScheduler>(
+  (ref) => LocalNotificationScheduler(),
+);
+
+/// The silence watchdog, with the limits `GET /routes/me` sent; null until
+/// the first day is loaded. Rebuilt only when those limits change.
+final silenceWatchdogProvider = Provider<SilenceWatchdog?>((ref) {
+  final limits = ref.watch(
+    myDayProvider.select((day) {
+      final value = day.asData?.value;
+      if (value == null) return null;
+      return (
+        warning: value.silenceWarningMinutes,
+        release: value.silenceReleaseMinutes,
+      );
+    }),
+  );
+  if (limits == null) return null;
+  final watchdog = SilenceWatchdog(
+    clock: DateTime.now,
+    scheduler: ref.watch(localSchedulerProvider),
+    warningMinutes: limits.warning,
+    releaseMinutes: limits.release,
+  );
+  ref.onDispose(watchdog.stopWatching);
+  return watchdog;
 });

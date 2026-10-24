@@ -5,11 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
+import 'package:route_monitor/monitoring/location_mode.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/ongoing_notification.dart';
 import 'package:route_monitor/monitoring/position_reporter.dart';
 import 'package:route_monitor/monitoring/position_reporting_trigger.dart';
+import 'package:route_monitor/monitoring/position_source.dart';
+import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
@@ -20,15 +23,28 @@ void main() {
   late _SpyReporter reporter;
   late ProviderContainer container;
   late RouteSummary? currentRoute;
+  late LocationMode locationMode;
+  late _RecordingScheduler scheduler;
+  late SilenceWatchdog watchdog;
 
   setUp(() {
     reporter = _SpyReporter();
     currentRoute = null;
+    locationMode = LocationMode.foregroundOnly;
+    scheduler = _RecordingScheduler();
+    watchdog = SilenceWatchdog(
+      clock: () => DateTime.utc(2026, 10, 20, 8),
+      scheduler: scheduler,
+      warningMinutes: 30,
+      releaseMinutes: 45,
+    );
     container = ProviderContainer(
       overrides: [
         positionReporterProvider.overrideWithValue(reporter),
         myDayProvider.overrideWith((ref) async => myDayWith(currentRoute)),
         sessionProvider.overrideWithBuild((ref, notifier) => _session()),
+        locationModeProvider.overrideWith((ref) async => locationMode),
+        silenceWatchdogProvider.overrideWithValue(watchdog),
       ],
     );
     addTearDown(container.dispose);
@@ -57,6 +73,48 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(reporter.started, ['r1']);
+    expect(reporter.modes, [LocationMode.foregroundOnly]);
+    // `position_report_interval_seconds` from `GET /routes/me`.
+    expect(reporter.intervals, [const Duration(seconds: 60)]);
+  });
+
+  testWidgets('starts in background mode when "always" is granted', (
+    tester,
+  ) async {
+    locationMode = LocationMode.background;
+    setRoute(_route('IN_PROGRESS'));
+    await pump(tester);
+    await tester.pumpAndSettle();
+
+    expect(reporter.modes, [LocationMode.background]);
+  });
+
+  testWidgets('watches the silence clock while the route is IN_PROGRESS', (
+    tester,
+  ) async {
+    setRoute(_route('IN_PROGRESS'));
+    await pump(tester);
+    await tester.pumpAndSettle();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    expect(scheduler.scheduled, [DateTime.utc(2026, 10, 20, 8, 30)]);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    expect(scheduler.cancelled, [SilenceWatchdog.notificationId]);
+  });
+
+  testWidgets('stops the silence clock once the route leaves IN_PROGRESS', (
+    tester,
+  ) async {
+    setRoute(_route('IN_PROGRESS'));
+    await pump(tester);
+    await tester.pumpAndSettle();
+
+    setRoute(_route('PAUSED'));
+    await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+
+    expect(scheduler.scheduled, isEmpty);
   });
 
   testWidgets('stops the reporter before the first batch of the day', (
@@ -97,15 +155,19 @@ void main() {
           sessionProvider.overrideWithBuild(
             (ref, notifier) => _session(consentRequired: true),
           ),
+          locationModeProvider.overrideWith((ref) async => locationMode),
+          silenceWatchdogProvider.overrideWithValue(watchdog),
         ],
       );
       addTearDown(container.dispose);
 
       await pump(tester);
       await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
 
       expect(reporter.started, isEmpty);
       expect(reporter.stopCount, greaterThanOrEqualTo(1));
+      expect(scheduler.scheduled, isEmpty);
     },
   );
 
@@ -170,17 +232,26 @@ class _SpyReporter extends PositionReporter {
     : notification = _FakeOngoingNotification(),
       super(
         location: _NullLocation(),
+        positionSource: _NullPositionSource(),
         api: _NullApi(),
         notification: _FakeOngoingNotification(),
       );
 
   final _FakeOngoingNotification notification;
   final List<String> started = [];
+  final List<LocationMode> modes = [];
+  final List<Duration> intervals = [];
   int stopCount = 0;
 
   @override
-  void start(String routeId) {
+  void start(
+    String routeId, {
+    LocationMode mode = LocationMode.foregroundOnly,
+    Duration interval = const Duration(seconds: 60),
+  }) {
     started.add(routeId);
+    modes.add(mode);
+    intervals.add(interval);
     unawaited(notification.show());
   }
 
@@ -230,4 +301,26 @@ class _NullApi implements MonitoringApi {
   Future<void> markRead(String id) async {
     throw UnimplementedError();
   }
+}
+
+class _NullPositionSource implements PositionSource {
+  @override
+  Stream<Coordinates> watch({required Duration interval}) =>
+      const Stream.empty();
+}
+
+class _RecordingScheduler implements LocalScheduler {
+  final List<DateTime> scheduled = [];
+  final List<int> cancelled = [];
+
+  @override
+  Future<void> schedule({
+    required int id,
+    required DateTime at,
+    required String title,
+    required String body,
+  }) async => scheduled.add(at);
+
+  @override
+  Future<void> cancel(int id) async => cancelled.add(id);
 }

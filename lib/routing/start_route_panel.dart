@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/monitoring/location_mode.dart';
+import 'package:route_monitor/monitoring/location_mode_device.dart';
+import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 
 /// The "Iniciar rota" button, alone on a day with no route yet or under the
@@ -67,6 +70,7 @@ class _StartRoutePanelState extends ConsumerState<StartRoutePanel> {
     setState(() => _starting = true);
     final AllocationOutcome outcome;
     try {
+      await _settleLocationMode();
       outcome = await ref.read(batchAllocationProvider.notifier).start();
     } finally {
       if (mounted) setState(() => _starting = false);
@@ -74,6 +78,18 @@ class _StartRoutePanelState extends ConsumerState<StartRoutePanel> {
     final message = _startOutcomeMessage(outcome);
     if (message == null) return;
     messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// Before the first batch: "while in use", then — once per device — the
+  /// explained "always" request (spec §7.3). The reporter picks the mode up
+  /// from `locationModeProvider` when the route turns `IN_PROGRESS`.
+  Future<void> _settleLocationMode() async {
+    await resolveLocationMode(
+      ref.read(permissionPortProvider),
+      prompts: DialogLocationModePrompts(context),
+      asked: ref.read(backgroundAskStoreProvider),
+    );
+    ref.invalidate(locationModeProvider);
   }
 }
 

@@ -317,4 +317,27 @@ abstract final class AppStrings {
   static const String locationPurposeRationale =
       'A localização é usada apenas para confirmar a presença nos pontos da '
       'rota e não é compartilhada fora da Prefeitura Universitária.';
+
+  // --- location in two modes and the silence warning (alocação §7.3) ---
+  /// The fixed notification of the background-location foreground service.
+  static const String routeInProgressTitle = 'Rota em andamento';
+  static const String routeInProgressText = collectionNotificationBody;
+  static const String locationAlwaysRationale =
+      'Para não perder seus pontos com a tela bloqueada, permita a '
+      'localização o tempo todo durante a rota.';
+  static const String locationForegroundOnlyNote =
+      'Sem essa permissão, abra o app de tempos em tempos durante a rota.';
+  static const String locationPromptContinue = 'Continuar';
+  static const String locationPromptUnderstood = 'Entendi';
+  static const String silenceNotificationTitle = 'Localização não enviada';
+  static const String silenceNotificationChannelName = 'Aviso de localização';
+  static const String silenceNotificationChannelDescription =
+      'Avisa quando a localização não é enviada há algum tempo durante a '
+      'rota.';
+
+  /// The silence warning: [silent] minutes without a sent position, the
+  /// points released in [untilRelease] minutes.
+  static String silenceWarning(int silent, int untilRelease) =>
+      'Sem enviar sua localização há $silent min. Seus pontos serão '
+      'liberados em $untilRelease min. Abra o app ou procure sinal.';
 }

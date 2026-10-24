@@ -23,9 +23,11 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
+import 'package:route_monitor/monitoring/location_mode.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/notifications_screen.dart';
+import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
@@ -609,6 +611,9 @@ Widget _screenWith(
   Session? session,
   MonitoringApi? monitoringApi,
   Connectivity? connectivity,
+  PermissionPort? permissions,
+  BackgroundAskStore? backgroundAsked,
+  SilenceWatchdog? silenceWatchdog,
 }) {
   final resolvedMonitoringApi = monitoringApi ?? _FakeMonitoringApi();
   // Always overridden, regardless of whether the test cares about evidence:
@@ -658,6 +663,17 @@ Widget _screenWith(
       // --dart-define here) — a fixed value unless a test needs a specific
       // one (the synced-photo thumbnail URL/header test).
       apiBaseUrlProvider.overrideWithValue(apiBaseUrl ?? 'http://test-base'),
+      // "Iniciar rota" settles the location mode first: never the real
+      // permission_handler under flutter_test, and — unless a test is about
+      // that flow — the "always" question already asked, so no dialog.
+      permissionPortProvider.overrideWithValue(
+        permissions ?? _FakePermissions(),
+      ),
+      backgroundAskStoreProvider.overrideWithValue(
+        backgroundAsked ?? _InMemoryAskStore(asked: true),
+      ),
+      if (silenceWatchdog != null)
+        silenceWatchdogProvider.overrideWithValue(silenceWatchdog),
       if (session != null)
         sessionProvider.overrideWith(() => _FixedSession(session)),
       if (evidenceCapture != null)
@@ -711,6 +727,17 @@ void main() {
     Finder startButton() =>
         find.widgetWithText(FilledButton, AppStrings.routeStartButton);
 
+    /// No route yet; "Iniciar rota" hands out a one-stop batch.
+    FakeRouteRepository startableRepository() {
+      final repository = _repositoryWith(null);
+      final firstBatch = routeWith(stops: [stopWith(id: 's1')]);
+      repository.allocate = () {
+        repository.day = myDayWith(firstBatch);
+        return AllocationResult(route: firstBatch, poolEmpty: false);
+      };
+      return repository;
+    }
+
     testWidgets('a non-service day says so and offers no start', (
       tester,
     ) async {
@@ -752,6 +779,56 @@ void main() {
         expect(startButton(), findsNothing);
       },
     );
+
+    testWidgets(
+      'the first "Iniciar rota" explains and asks for "always" location',
+      (tester) async {
+        final permissions = _FakePermissions(grantsAlways: true);
+        final asked = _InMemoryAskStore();
+        final repository = startableRepository();
+        await tester.pumpWidget(
+          _screenWith(
+            repository,
+            permissions: permissions,
+            backgroundAsked: asked,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(startButton());
+        await tester.pumpAndSettle();
+        expect(find.text(AppStrings.locationAlwaysRationale), findsOneWidget);
+        expect(repository.allocationCalls, isEmpty);
+
+        await tester.tap(find.text(AppStrings.locationPromptContinue));
+        await tester.pumpAndSettle();
+
+        expect(permissions.alwaysRequests, 1);
+        expect(asked.asked, isTrue);
+        expect(repository.allocationCalls, ['start']);
+      },
+    );
+
+    testWidgets('a refused "always" leaves a one-time note, then starts', (
+      tester,
+    ) async {
+      final repository = startableRepository();
+      await tester.pumpWidget(
+        _screenWith(repository, backgroundAsked: _InMemoryAskStore()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(startButton());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(AppStrings.locationPromptContinue));
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.locationForegroundOnlyNote), findsOneWidget);
+      await tester.tap(find.text(AppStrings.locationPromptUnderstood));
+      await tester.pumpAndSettle();
+
+      expect(repository.allocationCalls, ['start']);
+    });
 
     testWidgets('offline, "Iniciar rota" asks for a connection', (
       tester,
@@ -1508,6 +1585,71 @@ void main() {
       );
     },
   );
+
+  group('the silence clock (spec §7.3)', () {
+    final t0 = DateTime.utc(2026, 10, 20, 8);
+    late DateTime now;
+    late SilenceWatchdog watchdog;
+
+    setUp(() {
+      now = t0;
+      watchdog = SilenceWatchdog(
+        clock: () => now,
+        scheduler: _NoopScheduler(),
+        warningMinutes: 30,
+        releaseMinutes: 45,
+      )..startWatching();
+    });
+
+    testWidgets('a check-in counts as activity', (tester) async {
+      await tester.pumpWidget(
+        _screenWith(
+          _repositoryWith(inProgressRoute()),
+          executionApi: _FakeExecutionApi(),
+          silenceWatchdog: watchdog,
+        ),
+      );
+      await tester.pumpAndSettle();
+      now = t0.add(const Duration(minutes: 29));
+
+      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      now = t0.add(const Duration(minutes: 31));
+      expect(watchdog.currentWarning(), isNull);
+    });
+
+    testWidgets('a check-out counts as activity', (tester) async {
+      await tester.pumpWidget(
+        _screenWith(
+          _repositoryWith(inProgressStopRoute()),
+          executionApi: _FakeExecutionApi(),
+          silenceWatchdog: watchdog,
+        ),
+      );
+      await tester.pumpAndSettle();
+      now = t0.add(const Duration(minutes: 29));
+
+      await tapConcluirAndScan(tester, 'v1.floor.1.sig');
+      await tester.pumpAndSettle();
+
+      now = t0.add(const Duration(minutes: 31));
+      expect(watchdog.currentWarning(), isNull);
+    });
+
+    testWidgets('a silent worker sees the warning banner', (tester) async {
+      now = t0.add(const Duration(minutes: 32));
+      await tester.pumpWidget(
+        _screenWith(
+          _repositoryWith(inProgressRoute()),
+          silenceWatchdog: watchdog,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.silenceWarning(32, 13)), findsOneWidget);
+    });
+  });
 
   testWidgets(
     'runs the check-out flow end-to-end: scans, checks out, reloads the '
@@ -2859,4 +3001,54 @@ void main() {
 
     expect(find.byType(NotificationsScreen), findsOneWidget);
   });
+}
+
+/// Location permissions as the device would answer them: "while in use"
+/// granted, "always" as the test says.
+class _FakePermissions implements PermissionPort {
+  _FakePermissions({this.grantsAlways = false});
+
+  final bool grantsAlways;
+  bool _always = false;
+  int alwaysRequests = 0;
+
+  @override
+  Future<bool> requestWhileInUse() async => true;
+
+  @override
+  Future<bool> isAlwaysGranted() async => _always;
+
+  @override
+  Future<bool> requestAlways() async {
+    alwaysRequests++;
+    return _always = grantsAlways;
+  }
+
+  @override
+  Future<void> requestNotifications() async {}
+}
+
+class _InMemoryAskStore implements BackgroundAskStore {
+  _InMemoryAskStore({this.asked = false});
+
+  bool asked;
+
+  @override
+  Future<bool> wasAsked() async => asked;
+
+  @override
+  Future<void> markAsked() async => asked = true;
+}
+
+class _NoopScheduler implements LocalScheduler {
+  @override
+  Future<void> schedule({
+    required int id,
+    required DateTime at,
+    required String title,
+    required String body,
+  }) async {}
+
+  @override
+  Future<void> cancel(int id) async {}
 }
