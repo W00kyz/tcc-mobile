@@ -64,21 +64,10 @@ final executionRepositoryProvider = Provider<ExecutionRepository>(
   (ref) => ExecutionRepository(
     ref.watch(localWriteStoreProvider),
     ref.watch(stopProgressStoreProvider),
-    ref.watch(syncMetaStoreProvider),
     ref.watch(syncWorkerProvider),
     ref.watch(formDraftStoreProvider),
   ),
 );
-
-/// True once "Iniciar rota" has been tapped for `routeId` on this device —
-/// the optimistic marker RouteScreen reads so the route flips to "iniciada"
-/// before the outbox row syncs (spec Ruling 5).
-final FutureProviderFamily<bool, String> routeStartedLocallyProvider =
-    FutureProvider.family<bool, String>(
-      (ref, routeId) async =>
-          await ref.watch(syncMetaStoreProvider).getRouteStartedAt(routeId) !=
-          null,
-    );
 
 /// Null both for an untouched stop and for the Ruling 17 cold-start gap (a
 /// stop that turned `IN_PROGRESS` before `StopProgress` existed) — RouteScreen

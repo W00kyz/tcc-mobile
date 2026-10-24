@@ -19,11 +19,13 @@ import 'package:route_monitor/local/stop_progress_store.dart'
 import 'package:route_monitor/monitoring/collection_banner.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/notifications_screen.dart';
+import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/start_route_panel.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:uuid/uuid.dart';
@@ -36,26 +38,6 @@ class _Scan {
   const _Scan(this.rawValue, this.coordinates);
   final String rawValue;
   final Coordinates? coordinates;
-}
-
-/// Formats an arrival window as `HH:MM–HH:MM` (RF14). Returns `null` when
-/// neither bound is set, and a single `HH:MM` when only one bound is present.
-String? _formatWindow(DateTime? from, DateTime? to) {
-  if (from == null && to == null) return null;
-  if (from != null && to != null) {
-    return '${_hhmm(from)}–${_hhmm(to)}';
-  }
-  return _hhmm(from ?? to!);
-}
-
-String _hhmm(DateTime time) {
-  // INTENTIONAL: read .hour/.minute straight off the DateTime, no .toLocal().
-  // Arrival windows come from the backend as wall-clock times tagged UTC
-  // (system-wide convention — see dashboard RouteBuilderPage `extractTime`).
-  // Adding .toLocal() here would shift every window by the UTC offset.
-  final hour = time.hour.toString().padLeft(2, '0');
-  final minute = time.minute.toString().padLeft(2, '0');
-  return '$hour:$minute';
 }
 
 /// Formats the travel-from-previous leg as `N m · N min` (RF12). Returns `null`
@@ -78,7 +60,10 @@ class RouteScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final routesAsync = ref.watch(myRoutesProvider);
+    final dayAsync = ref.watch(myDayProvider);
+    // Watched here so the automatic next-batch pull lives as long as the
+    // screen does (spec §6.4), and its offline banner shows below.
+    final nextBatch = ref.watch(batchAllocationProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -97,71 +82,90 @@ class RouteScreen extends ConsumerWidget {
           // Renders itself only while a route is IN_PROGRESS (RNF11).
           const CollectionBanner(),
           Expanded(
-            child: routesAsync.when(
+            child: dayAsync.when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (error, _) =>
                   const Center(child: Text(AppStrings.routeLoadError)),
-              data: (routes) {
-                if (routes.isEmpty) {
-                  return const Center(
-                    child: Text(AppStrings.routeEmpty),
-                  );
-                }
-                final route = routes.first;
-                final startedLocally =
-                    ref
-                        .watch(routeStartedLocallyProvider(route.id))
-                        .asData
-                        ?.value ??
-                    false;
-                final started = route.startedAt != null || startedLocally;
-                return Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _RouteHeader(route: route, started: started),
-                      const SizedBox(height: 12),
-                      _SyncBanner(routeId: route.id),
-                      const SizedBox(height: 12),
-                      FilledButton.tonal(
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => MapScreen(
-                              route: route,
-                              tileProviderOverride: mapTileProvider,
-                            ),
-                          ),
-                        ),
-                        child: const Text(AppStrings.routeViewMapButton),
-                      ),
-                      const SizedBox(height: 16),
-                      Expanded(
-                        child: ListView(
-                          children: [
-                            for (final stop in route.stops)
-                              _buildStopRow(context, ref, route, stop),
-                          ],
-                        ),
-                      ),
-                      // Only a PLANNED route can start: a manager may close an
-                      // unstarted route by hand (RF53), leaving it DONE.
-                      if (!started && route.status == 'PLANNED')
-                        FilledButton(
-                          onPressed: () => _startRoute(context, ref, route.id),
-                          child: const Text(AppStrings.routeStartButton),
-                        ),
-                      if (_canCheckIn(route))
-                        FilledButton(
-                          onPressed: () => _checkIn(context, ref, route),
-                          child: const Text(AppStrings.routeCheckInButton),
-                        ),
-                    ],
-                  ),
-                );
-              },
+              data: (day) => _buildDay(context, ref, day, nextBatch),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// One state per moment of the day: no service, no route yet, a batch to
+  /// work, points released (resume), nothing left.
+  Widget _buildDay(
+    BuildContext context,
+    WidgetRef ref,
+    MyDay day,
+    NextBatchState nextBatch,
+  ) {
+    final route = day.route;
+    if (route == null) {
+      return day.serviceDay
+          ? const StartRoutePanel()
+          : const Center(child: Text(AppStrings.routeNotServiceDay));
+    }
+    return switch (route.status) {
+      'PAUSED' => StartRoutePanel(
+        paused: true,
+        releaseReason: route.latestReleaseReason,
+      ),
+      'DONE' => const Center(child: Text(AppStrings.routeNoMorePoints)),
+      _ => _buildBatch(context, ref, route, nextBatch),
+    };
+  }
+
+  Widget _buildBatch(
+    BuildContext context,
+    WidgetRef ref,
+    RouteSummary route,
+    NextBatchState nextBatch,
+  ) {
+    final batchStops = route.currentBatchStops;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            AppStrings.routeBatchHeader(route.currentBatch, route.doneToday),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          if (nextBatch == NextBatchState.waitingForNetwork) ...[
+            const SizedBox(height: 12),
+            const _NextBatchOfflineBanner(),
+          ],
+          const SizedBox(height: 12),
+          _SyncBanner(routeId: route.id),
+          const SizedBox(height: 12),
+          FilledButton.tonal(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => MapScreen(
+                  route: route,
+                  tileProviderOverride: mapTileProvider,
+                ),
+              ),
+            ),
+            child: const Text(AppStrings.routeViewMapButton),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: ListView(
+              children: [
+                for (final stop in batchStops)
+                  _buildStopRow(context, ref, route, stop),
+              ],
+            ),
+          ),
+          if (_canCheckIn(batchStops))
+            FilledButton(
+              onPressed: () => _checkIn(context, ref, route),
+              child: const Text(AppStrings.routeCheckInButton),
+            ),
         ],
       ),
     );
@@ -245,7 +249,9 @@ class RouteScreen extends ConsumerWidget {
     RouteSummary route,
     RouteStopSummary stop,
   ) async {
-    final pendingCount = route.stops.where((s) => s.status == 'PENDING').length;
+    final pendingCount = route.currentBatchStops
+        .where((s) => s.status == 'PENDING')
+        .length;
     final choice = await showDialog<ImpedimentChoice>(
       context: context,
       builder: (_) => ImpedimentDialog(showRemainderSwitch: pendingCount > 1),
@@ -273,10 +279,10 @@ class RouteScreen extends ConsumerWidget {
   /// Checks for a `PENDING` stop specifically, not just "not DONE" — an
   /// `IN_PROGRESS` stop (already checked in, awaiting checkout, Task 18) has
   /// no `PENDING` candidate left on its floor, so scanning again would only
-  /// get a confusing 422 FLOOR_NOT_ON_ROUTE from the backend.
-  bool _canCheckIn(RouteSummary route) =>
-      route.status == 'IN_PROGRESS' &&
-      route.stops.any((stop) => stop.status == 'PENDING');
+  /// get a confusing 422 FLOOR_NOT_ON_ROUTE from the backend. Only the
+  /// current batch counts: it is the only one shown, on an IN_PROGRESS route.
+  bool _canCheckIn(List<RouteStopSummary> batchStops) =>
+      batchStops.any((stop) => stop.status == 'PENDING');
 
   Future<void> _checkIn(
     BuildContext context,
@@ -292,7 +298,7 @@ class RouteScreen extends ConsumerWidget {
     // route_stop_id: either it resolves one automatically or the field
     // worker picks from the pending stops (Ruling P8 — nothing is ever
     // enqueued with a null route_stop_id).
-    final pendingStops = route.stops
+    final pendingStops = route.currentBatchStops
         .where((stop) => stop.status == 'PENDING')
         .toList();
     final resolution = resolveRoomLocally(
@@ -336,7 +342,7 @@ class RouteScreen extends ConsumerWidget {
           .read(formDraftStoreProvider)
           .snapshotFrom(executionId, routeStopId, checkedInStop.form!);
     }
-    ref.invalidate(myRoutesProvider);
+    ref.invalidate(myDayProvider);
     if (context.mounted) {
       ScaffoldMessenger.of(
         context,
@@ -370,10 +376,11 @@ class RouteScreen extends ConsumerWidget {
           checkoutIdempotencyKey: _uuid.v4(),
         );
     // A local check-out flips the stop to DONE now (spec Ruling 5); this
-    // invalidate re-reads myRoutesProvider so the server view catches up too
+    // invalidate re-reads myDayProvider so the server view catches up too
     // — the "Concluir" button's visibility is status == 'IN_PROGRESS', and
-    // the done-icon rendering in _StopTile takes over.
-    ref.invalidate(myRoutesProvider);
+    // the done-icon rendering in _StopTile takes over. The reload is also
+    // what lets the batch controller see a finished batch and pull the next.
+    ref.invalidate(myDayProvider);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text(AppStrings.routeCheckOutDone)),
@@ -423,48 +430,6 @@ class RouteScreen extends ConsumerWidget {
       return null;
     }
   }
-
-  Future<void> _startRoute(
-    BuildContext context,
-    WidgetRef ref,
-    String routeId,
-  ) async {
-    final location = ref.read(locationServiceProvider);
-    final Coordinates position;
-    try {
-      position = await location.getCurrentPosition(
-        purpose: LocationPurpose.checkin,
-      );
-      // Deliberately broad: GeolocatorLocationService can fail with a
-      // StateError (permission denied), a platform exception, or a timeout
-      // — all of them map to the same user-facing message here.
-      // ignore: avoid_catches_without_on_clauses
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(AppStrings.routeLocationUnavailable),
-          ),
-        );
-      }
-      return;
-    }
-
-    // No network call and no try/catch here any more (Etapa 6 Task 9): the
-    // write only enqueues an outbox row + a local "started" marker and kicks
-    // the sync worker. The SyncWorker owns the dispatch, the 409
-    // "already started" handling (spec Ruling 8) and every failure class.
-    await ref
-        .read(executionRepositoryProvider)
-        .startRoute(
-          routeId: routeId,
-          latitude: position.latitude,
-          longitude: position.longitude,
-        );
-    // Re-read the optimistic marker so the button flips now, without waiting
-    // on a myRoutesProvider refetch (spec Ruling 5).
-    ref.invalidate(routeStartedLocallyProvider(routeId));
-  }
 }
 
 /// The app-bar bell that opens [NotificationsScreen], with a count badge while
@@ -488,33 +453,31 @@ class _NotificationsBell extends ConsumerWidget {
   }
 }
 
-class _RouteHeader extends StatelessWidget {
-  const _RouteHeader({required this.route, required this.started});
-
-  final RouteSummary route;
-
-  /// True when the server says the route is started OR this device has a
-  /// local optimistic marker from a not-yet-synced "Iniciar rota" tap.
-  final bool started;
+/// "Conecte-se para receber mais pontos": the batch is finished on this
+/// device but the next one could not be pulled; it is retried as soon as the
+/// connection comes back (spec §6.4).
+class _NextBatchOfflineBanner extends StatelessWidget {
+  const _NextBatchOfflineBanner();
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Flexible(
-          child: Text(
-            started
-                ? AppStrings.routeStartedHeader
-                : AppStrings.routeNotStartedHeader,
-            style: Theme.of(context).textTheme.titleMedium,
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      color: scheme.tertiaryContainer,
+      child: Row(
+        children: [
+          Icon(Icons.wifi_off, color: scheme.onTertiaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              AppStrings.routeNextBatchOffline,
+              style: TextStyle(color: scheme.onTertiaryContainer),
+            ),
           ),
-        ),
-        if (route.routeType == 'OCCASIONAL')
-          const Padding(
-            padding: EdgeInsets.only(left: 8),
-            child: Chip(label: Text(AppStrings.routeOccasionalChip)),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -661,10 +624,6 @@ class _StopTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDone = effectiveStatus == 'DONE';
-    final window = _formatWindow(
-      stop.expectedArrivalFrom,
-      stop.expectedArrivalTo,
-    );
     final leg = _formatLeg(stop.distanceFromPrevM, stop.durationFromPrevS);
 
     return Column(
@@ -693,22 +652,9 @@ class _StopTile extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 8),
                   child: _StopSyncChipLabel(syncChip),
                 ),
-              if (stop.reassigned)
-                const Padding(
-                  padding: EdgeInsets.only(left: 8),
-                  child: Chip(label: Text(AppStrings.routeStopReassignedChip)),
-                ),
             ],
           ),
-          subtitle: window == null && leg == null
-              ? null
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (leg != null) Text(AppStrings.routeLeg(leg)),
-                    if (window != null) Text(AppStrings.routeWindow(window)),
-                  ],
-                ),
+          subtitle: leg == null ? null : Text(AppStrings.routeLeg(leg)),
           trailing: onConcluir == null && formFillAction == null
               ? null
               : TextButton(

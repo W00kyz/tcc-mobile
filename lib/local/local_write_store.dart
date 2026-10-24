@@ -12,7 +12,6 @@ enum PendingOpKind {
   checkOut,
   evidencePhoto,
   evidenceNote,
-  startRoute,
   impediment,
 }
 

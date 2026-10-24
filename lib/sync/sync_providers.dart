@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/misc.dart'
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
-import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -33,7 +32,6 @@ final syncWorkerProvider = Provider<SyncWorker>((ref) {
     ref.watch(connectivityProvider),
     ref.watch(executionApiProvider),
     ref.watch(evidenceApiProvider),
-    ref.watch(routeRepositoryProvider),
   );
   ref.onDispose(worker.dispose);
   return worker;
@@ -60,7 +58,7 @@ blockedOperationsProvider =
 enum StopSyncChip { none, pending, blocked }
 
 /// Resolves the [StopSyncChip] for one stop by scanning the route's outbox
-/// rows: a check-in/out/start row belongs to the stop when its payload
+/// rows: a check-in/out/impediment row belongs to the stop when its payload
 /// `route_stop_id` matches; an evidence row belongs when its `execution_id`
 /// matches the stop's open execution (from `stopProgressForProvider`).
 /// Keyed by `(routeId, routeStopId)` — the row lookup needs the route id.
@@ -83,7 +81,6 @@ stopSyncChipProvider =
         switch (row.kind) {
           case PendingOpKind.checkIn:
           case PendingOpKind.checkOut:
-          case PendingOpKind.startRoute:
           case PendingOpKind.impediment:
             return row.payload['route_stop_id'] == routeStopId;
           case PendingOpKind.evidencePhoto:

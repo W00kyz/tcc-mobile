@@ -32,10 +32,13 @@ import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_screen.dart';
+import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
+import '../support/fake_connectivity.dart';
+import '../support/fake_route_repository.dart';
 import '../support/in_memory_database.dart';
 import 'no_tiles_tile_provider.dart';
 
@@ -43,15 +46,26 @@ import 'no_tiles_tile_provider.dart';
 /// repository fires this fire-and-forget after each enqueue (spec Ruling 2);
 /// RouteScreen tests only care that the enqueue happened, not the network.
 class _RecordingSyncWorker implements SyncWorker {
-  _RecordingSyncWorker({this.statusStream});
+  _RecordingSyncWorker({this.statusStream, this.drains});
 
   final Stream<RouteSyncStatus>? statusStream;
+
+  /// When set, each `syncRoute` also delivers every unsynced row of that
+  /// store — the server accepted them all.
+  final LocalWriteStore? drains;
   final List<String> syncedRoutes = [];
   final List<String> unblocked = [];
   int syncAllCount = 0;
 
   @override
-  Future<void> syncRoute(String routeId) async => syncedRoutes.add(routeId);
+  Future<void> syncRoute(String routeId) async {
+    syncedRoutes.add(routeId);
+    final store = drains;
+    if (store == null) return;
+    for (final row in await store.unsyncedForRoute(routeId)) {
+      await store.markSynced(row.id);
+    }
+  }
 
   @override
   Future<void> syncAll() async => syncAllCount++;
@@ -74,124 +88,26 @@ final Uint8List _onePixelPng = base64Decode(
   '42YAAAAASUVORK5CYII=',
 );
 
-final _unstartedRoute = RouteSummary(
-  id: 'r1',
-  fieldWorkerName: 'João',
-  routeDate: DateTime(2026, 8, 25),
-  routeType: 'REGULAR',
-  status: 'PLANNED',
-  startedAt: null,
-  stops: const [
-    RouteStopSummary(
-      id: 's1',
-      orderIndex: 1,
-      status: 'PENDING',
-      servicePointName: 'Sala 101',
-      latitude: -7.21,
-      longitude: -35.91,
-    ),
-  ],
+/// Batch 1 of today's route, open: one PENDING stop.
+final RouteSummary _openBatchRoute = routeWith(
+  stops: [stopWith(id: 's1', servicePointName: 'Sala 101')],
 );
 
-class _FakeRouteRepository implements RouteRepository {
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => [
-    _unstartedRoute,
-  ];
+/// A [FakeRouteRepository] whose `GET /routes/me` holds [route] (none yet
+/// when null).
+FakeRouteRepository _repositoryWith(RouteSummary? route) =>
+    FakeRouteRepository(myDayWith(route));
 
-  @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async {
-    throw UnimplementedError('not exercised in this test');
-  }
-}
-
-/// In-memory [SyncMetaStore] — RouteScreen watches
-/// `routeStartedLocallyProvider` on every render now (Etapa 6 Task 9), so
-/// every test needs this instead of the real Drift-backed store.
+/// In-memory [SyncMetaStore], so no test reaches the real Drift-backed
+/// store.
 class _InMemorySyncMetaStore implements SyncMetaStore {
   double? offset;
-  final Map<String, DateTime> routeStartedAt = {};
 
   @override
   Future<double?> getClockOffsetSeconds() async => offset;
 
   @override
   Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
-
-  @override
-  Future<DateTime?> getRouteStartedAt(String routeId) async =>
-      routeStartedAt[routeId];
-
-  @override
-  Future<void> setRouteStartedAt(String routeId, DateTime startedAt) async =>
-      routeStartedAt[routeId] = startedAt;
-}
-
-class _StaticRouteRepository implements RouteRepository {
-  _StaticRouteRepository(this.routes);
-
-  final List<RouteSummary> routes;
-
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => routes;
-
-  @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async {
-    throw UnimplementedError('not exercised in this test');
-  }
-}
-
-/// Counts `fetchMyRoutes` calls so a check-out test can assert
-/// `myRoutesProvider` was actually invalidated (a second fetch happened)
-/// rather than only checking the success snackbar.
-class _CountingRouteRepository implements RouteRepository {
-  _CountingRouteRepository(this.routes);
-
-  final List<RouteSummary> routes;
-  int fetchCount = 0;
-
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async {
-    fetchCount++;
-    return routes;
-  }
-
-  @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async {
-    throw UnimplementedError('not exercised in this test');
-  }
-}
-
-class _ThrowingRouteRepository implements RouteRepository {
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async {
-    throw DioException(requestOptions: RequestOptions(path: '/routes/me'));
-  }
-
-  @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async {
-    throw UnimplementedError('not exercised in this test');
-  }
 }
 
 class _FakeLocationService implements LocationService {
@@ -658,16 +574,15 @@ class _FakeHttpClientResponse extends Stream<List<int>>
 
 RouteSummary _routeWith({
   required List<RouteStopSummary> stops,
-  String routeType = 'REGULAR',
-  String status = 'PLANNED',
+  String status = 'IN_PROGRESS',
   DateTime? startedAt,
 }) => RouteSummary(
   id: 'r1',
   fieldWorkerName: 'João',
   routeDate: DateTime(2026, 8, 25),
-  routeType: routeType,
   status: status,
   startedAt: startedAt,
+  currentBatch: 1,
   stops: stops,
 );
 
@@ -685,6 +600,7 @@ Widget _screenWith(
   String? apiBaseUrl,
   Session? session,
   MonitoringApi? monitoringApi,
+  Connectivity? connectivity,
 }) {
   final resolvedMonitoringApi = monitoringApi ?? _FakeMonitoringApi();
   // Always overridden, regardless of whether the test cares about evidence:
@@ -717,8 +633,14 @@ Widget _screenWith(
       routeRepositoryProvider.overrideWithValue(repository),
       monitoringApiProvider.overrideWithValue(resolvedMonitoringApi),
       syncWorkerProvider.overrideWithValue(resolvedSyncWorker),
-      if (locationService != null)
-        locationServiceProvider.overrideWithValue(locationService),
+      locationServiceProvider.overrideWithValue(
+        locationService ?? _FakeLocationService(),
+      ),
+      // Online unless a test says otherwise: the next-batch controller the
+      // screen mounts must never reach the real connectivity_plus plugin.
+      connectivityProvider.overrideWithValue(
+        connectivity ?? FakeConnectivity(isOnline: true),
+      ),
       stopProgressStoreProvider.overrideWithValue(resolvedOpenExecutions),
       evidenceApiProvider.overrideWithValue(resolvedEvidenceApi),
       localWriteStoreProvider.overrideWithValue(resolvedLocalStore),
@@ -742,7 +664,6 @@ Widget _screenWith(
           ExecutionRepository(
             resolvedLocalStore,
             resolvedOpenExecutions,
-            resolvedSyncMeta,
             resolvedSyncWorker,
             resolvedFormDraftStore,
           ),
@@ -764,248 +685,267 @@ class _FixedSession extends SessionNotifier {
 }
 
 void main() {
-  testWidgets('shows the assigned stop and a start button', (tester) async {
-    await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
+  testWidgets('shows the error state when the fetch fails', (tester) async {
+    await tester.pumpWidget(
+      _screenWith(
+        FakeRouteRepository()
+          ..fetchError = DioException(
+            requestOptions: RequestOptions(path: '/routes/me'),
+          ),
+      ),
+    );
     await tester.pumpAndSettle();
 
-    expect(find.text('Sala 101'), findsOneWidget);
-    expect(
-      find.widgetWithText(FilledButton, AppStrings.routeStartButton),
-      findsOneWidget,
+    expect(find.text(AppStrings.routeLoadError), findsOneWidget);
+  });
+
+  group('before the first batch', () {
+    Finder startButton() =>
+        find.widgetWithText(FilledButton, AppStrings.routeStartButton);
+
+    testWidgets('a non-service day says so and offers no start', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _screenWith(FakeRouteRepository(myDayWith(null, serviceDay: false))),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.routeNotServiceDay), findsOneWidget);
+      expect(startButton(), findsNothing);
+    });
+
+    testWidgets(
+      '"Iniciar rota" allocates from the current position and shows the '
+      'batch under its header',
+      (tester) async {
+        final repository = _repositoryWith(null);
+        final firstBatch = routeWith(
+          stops: [
+            stopWith(id: 's1', servicePointName: 'Sala 101'),
+            stopWith(id: 's2', orderIndex: 2, servicePointName: 'Sala 102'),
+          ],
+        );
+        repository.allocate = () {
+          repository.day = myDayWith(firstBatch);
+          return AllocationResult(route: firstBatch, poolEmpty: false);
+        };
+        await tester.pumpWidget(_screenWith(repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(startButton());
+        await tester.pumpAndSettle();
+
+        expect(repository.allocationCalls, ['start']);
+        expect(repository.lastPosition, (lat: -7.23, lng: -35.88));
+        expect(find.text(AppStrings.routeBatchHeader(1, 0)), findsOneWidget);
+        expect(find.text('Sala 101'), findsOneWidget);
+        expect(find.text('Sala 102'), findsOneWidget);
+        expect(startButton(), findsNothing);
+      },
+    );
+
+    testWidgets('offline, "Iniciar rota" asks for a connection', (
+      tester,
+    ) async {
+      final repository = _repositoryWith(null);
+      await tester.pumpWidget(
+        _screenWith(repository, connectivity: FakeConnectivity()),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(startButton());
+      await tester.pumpAndSettle();
+
+      expect(find.text(AppStrings.routeStartOffline), findsOneWidget);
+      expect(repository.allocationCalls, isEmpty);
+    });
+
+    final refusals = <String, (Exception, String)>{
+      'outside the campus': (
+        const OutsideCampusException(),
+        AppStrings.routeOutsideCampus,
+      ),
+      'after the workday': (
+        const WorkdayOverException(),
+        AppStrings.routeWorkdayOver,
+      ),
+      'on a non-service day': (
+        const NotAServiceDayException(),
+        AppStrings.routeNotServiceDay,
+      ),
+      'with the route already done': (
+        const RouteDoneException(),
+        AppStrings.routeNoMorePoints,
+      ),
+      'with the privacy notice still owed (plain 403)': (
+        DioException(
+          requestOptions: RequestOptions(path: '/routes/start'),
+          response: Response<Object>(
+            requestOptions: RequestOptions(path: '/routes/start'),
+            statusCode: 403,
+          ),
+        ),
+        AppStrings.routeStartFailed,
+      ),
+    };
+    for (final MapEntry(key: situation, value: (error, message))
+        in refusals.entries) {
+      testWidgets('"Iniciar rota" $situation shows "$message"', (tester) async {
+        final repository = _repositoryWith(null)..allocate = () => throw error;
+        await tester.pumpWidget(_screenWith(repository));
+        await tester.pumpAndSettle();
+
+        await tester.tap(startButton());
+        await tester.pumpAndSettle();
+
+        expect(find.text(message), findsOneWidget);
+        expect(startButton(), findsOneWidget);
+      });
+    }
+
+    testWidgets('an empty pool on "Iniciar rota" says there is nothing left', (
+      tester,
+    ) async {
+      final done = routeWith(status: 'DONE', stops: const []);
+      final repository = _repositoryWith(null);
+      repository.allocate = () {
+        repository.day = myDayWith(done);
+        return AllocationResult(route: done, poolEmpty: true);
+      };
+      await tester.pumpWidget(_screenWith(repository));
+      await tester.pumpAndSettle();
+
+      await tester.tap(startButton());
+      await tester.pumpAndSettle();
+
+      // The snackbar and the finished-route state both say it.
+      expect(find.text(AppStrings.routeNoMorePoints), findsNWidgets(2));
+    });
+
+    testWidgets(
+      'a GPS failure on "Iniciar rota" shows the location snackbar and asks '
+      'the server for nothing',
+      (tester) async {
+        final repository = _repositoryWith(null);
+        await tester.pumpWidget(
+          _screenWith(repository, locationService: _FailingLocationService()),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(startButton());
+        await tester.pumpAndSettle();
+
+        expect(find.text(AppStrings.routeLocationUnavailable), findsOneWidget);
+        expect(repository.allocationCalls, isEmpty);
+      },
     );
   });
 
-  testWidgets(
-    'tapping "Iniciar rota" enqueues a startRoute row and flips the UI to '
-    '"iniciada" immediately, without a myRoutesProvider refetch',
-    (tester) async {
-      final store = _InMemoryLocalWriteStore();
-      final syncMeta = _InMemorySyncMetaStore();
-      final repository = _CountingRouteRepository([_unstartedRoute]);
-      await tester.pumpWidget(
-        _screenWith(
-          repository,
-          locationService: _FakeLocationService(),
-          executionApi: _FakeExecutionApi(),
-          localWriteStore: store,
-          syncMetaStore: syncMeta,
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(repository.fetchCount, 1);
+  group('route states', () {
+    testWidgets(
+      'shows only the current batch, without released stops, under the '
+      'done count of the whole day',
+      (tester) async {
+        final route = routeWith(
+          currentBatch: 2,
+          stops: [
+            stopWith(id: 'a', status: 'DONE', servicePointName: 'Sala Velha'),
+            stopWith(
+              id: 'b',
+              orderIndex: 2,
+              batchNumber: 2,
+              status: 'RELEASED',
+              releaseReason: 'IMPEDIMENT',
+              servicePointName: 'Sala Impedida',
+            ),
+            stopWith(
+              id: 'c',
+              orderIndex: 3,
+              batchNumber: 2,
+              servicePointName: 'Sala Nova',
+            ),
+          ],
+        );
+        await tester.pumpWidget(_screenWith(_repositoryWith(route)));
+        await tester.pumpAndSettle();
 
-      await tester.tap(
-        find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+        expect(find.text(AppStrings.routeBatchHeader(2, 1)), findsOneWidget);
+        expect(find.text('Lote 2 · 1 ponto feito hoje'), findsOneWidget);
+        expect(find.text('Sala Nova'), findsOneWidget);
+        expect(find.text('Sala Velha'), findsNothing);
+        expect(find.text('Sala Impedida'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a paused route explains why and "Iniciar rota" resumes it',
+      (tester) async {
+        final paused = routeWith(
+          status: 'PAUSED',
+          stops: [
+            stopWith(
+              id: 's1',
+              status: 'RELEASED',
+              releaseReason: 'LEFT_CAMPUS',
+              servicePointName: 'Sala 101',
+            ),
+          ],
+        );
+        final repository = _repositoryWith(paused);
+        await tester.pumpWidget(_screenWith(repository));
+        await tester.pumpAndSettle();
+
+        expect(find.text(AppStrings.routePausedTitle), findsOneWidget);
+        expect(
+          find.text(
+            AppStrings.routePausedReason(
+              AppStrings.releaseReasonLabel('LEFT_CAMPUS'),
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('Sala 101'), findsNothing);
+        expect(
+          find.widgetWithText(
+            TextButton,
+            AppStrings.routeSignalImpossibilityButton,
+          ),
+          findsNothing,
+        );
+
+        await tester.tap(
+          find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+        );
+        await tester.pumpAndSettle();
+
+        expect(repository.allocationCalls, ['start']);
+      },
+    );
+
+    testWidgets('a finished route says there are no more points today', (
+      tester,
+    ) async {
+      final done = routeWith(
+        status: 'DONE',
+        stops: [stopWith(id: 's1', status: 'DONE')],
       );
+      await tester.pumpWidget(_screenWith(_repositoryWith(done)));
       await tester.pumpAndSettle();
 
+      expect(find.text(AppStrings.routeNoMorePoints), findsOneWidget);
       expect(
         find.widgetWithText(FilledButton, AppStrings.routeStartButton),
         findsNothing,
       );
-      expect(find.text(AppStrings.routeStartedHeader), findsOneWidget);
-      expect(repository.fetchCount, 1);
-
-      final rows = await store.unsyncedForRoute('r1');
-      expect(rows, hasLength(1));
-      expect(rows.single.kind, PendingOpKind.startRoute);
-      expect(rows.single.payload['latitude'], -7.23);
-      expect(await syncMeta.getRouteStartedAt('r1'), isNotNull);
-    },
-  );
-
-  testWidgets(
-    'a GPS failure on "Iniciar rota" shows the location snackbar and '
-    'enqueues nothing',
-    (tester) async {
-      final store = _InMemoryLocalWriteStore();
-      await tester.pumpWidget(
-        _screenWith(
-          _StaticRouteRepository([_unstartedRoute]),
-          locationService: _FailingLocationService(),
-          executionApi: _FakeExecutionApi(),
-          localWriteStore: store,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(
-        find.widgetWithText(FilledButton, AppStrings.routeStartButton),
-      );
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text(AppStrings.routeLocationUnavailable),
-        findsOneWidget,
-      );
-      expect(await store.unsyncedForRoute('r1'), isEmpty);
-    },
-  );
-
-  testWidgets('shows the empty state when there are no routes', (tester) async {
-    await tester.pumpWidget(_screenWith(_StaticRouteRepository(const [])));
-    await tester.pumpAndSettle();
-
-    expect(find.text(AppStrings.routeEmpty), findsOneWidget);
+    });
   });
 
-  testWidgets('shows the error state when the fetch fails', (tester) async {
-    await tester.pumpWidget(_screenWith(_ThrowingRouteRepository()));
+  testWidgets('shows the stop order index', (tester) async {
+    await tester.pumpWidget(_screenWith(_repositoryWith(_openBatchRoute)));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text(AppStrings.routeLoadError),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('renders the EVENTUAL chip for an occasional route', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      _screenWith(
-        _StaticRouteRepository([
-          _routeWith(
-            routeType: 'OCCASIONAL',
-            stops: const [
-              RouteStopSummary(
-                id: 's1',
-                orderIndex: 1,
-                status: 'PENDING',
-                servicePointName: 'Sala 101',
-                latitude: -7.21,
-                longitude: -35.91,
-              ),
-            ],
-          ),
-        ]),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.widgetWithText(Chip, AppStrings.routeOccasionalChip),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('hides the EVENTUAL chip for a regular route', (tester) async {
-    await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.widgetWithText(Chip, AppStrings.routeOccasionalChip),
-      findsNothing,
-    );
-  });
-
-  testWidgets('marks a reassigned stop', (tester) async {
-    await tester.pumpWidget(
-      _screenWith(
-        _StaticRouteRepository([
-          _routeWith(
-            stops: const [
-              RouteStopSummary(
-                id: 's1',
-                orderIndex: 1,
-                status: 'PENDING',
-                servicePointName: 'Sala 101',
-                latitude: -7.21,
-                longitude: -35.91,
-                reassigned: true,
-              ),
-            ],
-          ),
-        ]),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text(AppStrings.routeStopReassignedChip), findsOneWidget);
-  });
-
-  testWidgets('hides the reassigned badge for a normal stop', (tester) async {
-    await tester.pumpWidget(
-      _screenWith(
-        _StaticRouteRepository([
-          _routeWith(
-            stops: const [
-              RouteStopSummary(
-                id: 's1',
-                orderIndex: 1,
-                status: 'PENDING',
-                servicePointName: 'Sala 101',
-                latitude: -7.21,
-                longitude: -35.91,
-              ),
-            ],
-          ),
-        ]),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text(AppStrings.routeStopReassignedChip), findsNothing);
-  });
-
-  testWidgets('renders the arrival window when it is set', (tester) async {
-    await tester.pumpWidget(
-      _screenWith(
-        _StaticRouteRepository([
-          _routeWith(
-            stops: [
-              RouteStopSummary(
-                id: 's1',
-                orderIndex: 1,
-                status: 'PENDING',
-                servicePointName: 'Sala 101',
-                latitude: -7.21,
-                longitude: -35.91,
-                expectedArrivalFrom: DateTime(2026, 8, 25, 8),
-                expectedArrivalTo: DateTime(2026, 8, 25, 8, 30),
-              ),
-            ],
-          ),
-        ]),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.textContaining('08:00'), findsOneWidget);
-    expect(find.textContaining('08:00–08:30'), findsOneWidget);
-  });
-
-  testWidgets('renders a one-sided window as a bare HH:MM', (tester) async {
-    await tester.pumpWidget(
-      _screenWith(
-        _StaticRouteRepository([
-          _routeWith(
-            stops: [
-              RouteStopSummary(
-                id: 's1',
-                orderIndex: 1,
-                status: 'PENDING',
-                servicePointName: 'Sala 101',
-                latitude: -7.21,
-                longitude: -35.91,
-                expectedArrivalFrom: DateTime(2026, 8, 25, 8),
-              ),
-            ],
-          ),
-        ]),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text(AppStrings.routeWindow('08:00')), findsOneWidget);
-    expect(find.textContaining('–'), findsNothing);
-  });
-
-  testWidgets('omits the window line when no window is set', (tester) async {
-    await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
-    await tester.pumpAndSettle();
-
-    expect(find.textContaining('Janela:'), findsNothing);
+    expect(find.widgetWithText(CircleAvatar, '1'), findsOneWidget);
   });
 
   testWidgets('renders the travel-from-previous distance and time', (
@@ -1013,12 +953,13 @@ void main() {
   ) async {
     await tester.pumpWidget(
       _screenWith(
-        _StaticRouteRepository([
+        _repositoryWith(
           _routeWith(
             stops: const [
               RouteStopSummary(
                 id: 's1',
                 orderIndex: 1,
+                batchNumber: 1,
                 status: 'PENDING',
                 servicePointName: 'Sala 101',
                 latitude: -7.21,
@@ -1027,6 +968,7 @@ void main() {
               RouteStopSummary(
                 id: 's2',
                 orderIndex: 2,
+                batchNumber: 1,
                 status: 'PENDING',
                 servicePointName: 'Sala 102',
                 latitude: -7.22,
@@ -1036,20 +978,13 @@ void main() {
               ),
             ],
           ),
-        ]),
+        ),
       ),
     );
     await tester.pumpAndSettle();
 
     expect(find.textContaining('120 m'), findsOneWidget);
     expect(find.textContaining('3 min'), findsOneWidget);
-  });
-
-  testWidgets('shows the stop order index', (tester) async {
-    await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
-    await tester.pumpAndSettle();
-
-    expect(find.widgetWithText(CircleAvatar, '1'), findsOneWidget);
   });
 
   testWidgets('navigates to the map when "Ver no mapa" is tapped', (
@@ -1062,7 +997,10 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          routeRepositoryProvider.overrideWithValue(_FakeRouteRepository()),
+          routeRepositoryProvider.overrideWithValue(
+            _repositoryWith(_openBatchRoute),
+          ),
+          connectivityProvider.overrideWithValue(FakeConnectivity()),
           monitoringApiProvider.overrideWithValue(_FakeMonitoringApi()),
           syncMetaStoreProvider.overrideWithValue(_InMemorySyncMetaStore()),
           syncWorkerProvider.overrideWithValue(_RecordingSyncWorker()),
@@ -1091,32 +1029,19 @@ void main() {
   });
 
   testWidgets(
-    'hides the check-in button when the route has not started',
-    (tester) async {
-      await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.widgetWithText(FilledButton, AppStrings.routeCheckInButton),
-        findsNothing,
-      );
-    },
-  );
-
-  testWidgets(
     'shows the check-in button when the route is in progress with a '
     'pending stop',
     (tester) async {
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([
+          _repositoryWith(
             _routeWith(
-              status: 'IN_PROGRESS',
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
                   id: 's1',
                   orderIndex: 1,
+                  batchNumber: 1,
                   status: 'PENDING',
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
@@ -1124,7 +1049,7 @@ void main() {
                 ),
               ],
             ),
-          ]),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -1141,14 +1066,14 @@ void main() {
     (tester) async {
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([
+          _repositoryWith(
             _routeWith(
-              status: 'IN_PROGRESS',
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
                   id: 's1',
                   orderIndex: 1,
+                  batchNumber: 1,
                   status: 'DONE',
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
@@ -1156,7 +1081,7 @@ void main() {
                 ),
               ],
             ),
-          ]),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -1178,14 +1103,14 @@ void main() {
       // confusing 422 FLOOR_NOT_ON_ROUTE dead end (task-17 review).
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([
+          _repositoryWith(
             _routeWith(
-              status: 'IN_PROGRESS',
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
                   id: 's1',
                   orderIndex: 1,
+                  batchNumber: 1,
                   status: 'IN_PROGRESS',
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
@@ -1193,7 +1118,7 @@ void main() {
                 ),
               ],
             ),
-          ]),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -1206,12 +1131,12 @@ void main() {
   );
 
   RouteSummary inProgressRoute() => _routeWith(
-    status: 'IN_PROGRESS',
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
         id: 's1',
         orderIndex: 1,
+        batchNumber: 1,
         status: 'PENDING',
         servicePointName: 'Sala 101',
         latitude: -7.21,
@@ -1260,12 +1185,12 @@ void main() {
   }
 
   RouteSummary inProgressStopRoute() => _routeWith(
-    status: 'IN_PROGRESS',
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
         id: 's1',
         orderIndex: 1,
+        batchNumber: 1,
         status: 'IN_PROGRESS',
         servicePointName: 'Sala 101',
         latitude: -7.21,
@@ -1280,7 +1205,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           locationService: _FakeLocationService(),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1307,7 +1232,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           locationService: _FakeLocationService(),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1338,7 +1263,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           locationService: _FailingLocationService(),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1373,12 +1298,12 @@ void main() {
   // relative to it so the offline room resolution (spec Ruling 4) lands on a
   // known branch.
   RouteSummary oneRoomInRadiusRoute() => _routeWith(
-    status: 'IN_PROGRESS',
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
         id: 's1',
         orderIndex: 1,
+        batchNumber: 1,
         status: 'PENDING',
         servicePointName: 'Sala 101',
         latitude: -7.23,
@@ -1387,6 +1312,7 @@ void main() {
       RouteStopSummary(
         id: 's2',
         orderIndex: 2,
+        batchNumber: 1,
         status: 'PENDING',
         servicePointName: 'Sala 102',
         // ~2.5 km away — well outside the 50 m check radius.
@@ -1397,12 +1323,12 @@ void main() {
   );
 
   RouteSummary twoRoomsInRadiusRoute() => _routeWith(
-    status: 'IN_PROGRESS',
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
         id: 's1',
         orderIndex: 1,
+        batchNumber: 1,
         status: 'PENDING',
         servicePointName: 'Sala 101',
         latitude: -7.23,
@@ -1411,6 +1337,7 @@ void main() {
       RouteStopSummary(
         id: 's2',
         orderIndex: 2,
+        batchNumber: 1,
         status: 'PENDING',
         servicePointName: 'Sala 102',
         // ~11 m from the GPS fix — inside the radius, but farther than s1.
@@ -1427,7 +1354,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([oneRoomInRadiusRoute()]),
+          _repositoryWith(oneRoomInRadiusRoute()),
           locationService: _FakeLocationService(),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1457,7 +1384,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([twoRoomsInRadiusRoute()]),
+          _repositoryWith(twoRoomsInRadiusRoute()),
           locationService: _FakeLocationService(),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1498,7 +1425,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([twoRoomsInRadiusRoute()]),
+          _repositoryWith(twoRoomsInRadiusRoute()),
           locationService: _FakeLocationService(),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1527,7 +1454,7 @@ void main() {
       // validation.py:117).
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           locationService: _FailingLocationService(),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1564,7 +1491,7 @@ void main() {
     'shows a "Concluir" action only for an IN_PROGRESS stop, not a PENDING '
     'one',
     (tester) async {
-      await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
+      await tester.pumpWidget(_screenWith(_repositoryWith(_openBatchRoute)));
       await tester.pumpAndSettle();
 
       expect(
@@ -1575,11 +1502,11 @@ void main() {
   );
 
   testWidgets(
-    'runs the check-out flow end-to-end: scans, checks out, invalidates '
-    'myRoutesProvider and shows success',
+    'runs the check-out flow end-to-end: scans, checks out, reloads the '
+    'day and shows success',
     (tester) async {
       final store = _InMemoryLocalWriteStore();
-      final repository = _CountingRouteRepository([inProgressStopRoute()]);
+      final repository = _repositoryWith(inProgressStopRoute());
       await tester.pumpWidget(
         _screenWith(
           repository,
@@ -1609,7 +1536,7 @@ void main() {
     'OpenExecutions row (Ruling 17 cold-start gap)',
     (tester) async {
       await tester.pumpWidget(
-        _screenWith(_StaticRouteRepository([inProgressStopRoute()])),
+        _screenWith(_repositoryWith(inProgressStopRoute())),
       );
       await tester.pumpAndSettle();
 
@@ -1624,7 +1551,7 @@ void main() {
     (tester) async {
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
         ),
       );
@@ -1649,14 +1576,14 @@ void main() {
     (tester) async {
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([
+          _repositoryWith(
             _routeWith(
-              status: 'IN_PROGRESS',
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
                   id: 's1',
                   orderIndex: 1,
+                  batchNumber: 1,
                   status: 'DONE',
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
@@ -1665,6 +1592,7 @@ void main() {
                 RouteStopSummary(
                   id: 's2',
                   orderIndex: 2,
+                  batchNumber: 1,
                   status: 'IN_PROGRESS',
                   servicePointName: 'Sala 102',
                   latitude: -7.22,
@@ -1673,6 +1601,7 @@ void main() {
                 RouteStopSummary(
                   id: 's3',
                   orderIndex: 3,
+                  batchNumber: 1,
                   status: 'PENDING',
                   servicePointName: 'Sala 103',
                   latitude: -7.23,
@@ -1680,7 +1609,7 @@ void main() {
                 ),
               ],
             ),
-          ]),
+          ),
           stopProgressStore: _FakeStopProgressStore({'s2': 'exec-1'}),
         ),
       );
@@ -1729,7 +1658,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1763,7 +1692,7 @@ void main() {
       final evidenceApi = _FakeEvidenceApi();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           evidenceApi: evidenceApi,
@@ -1799,7 +1728,7 @@ void main() {
       final evidenceApi = _FakeEvidenceApi();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           evidenceApi: evidenceApi,
@@ -1827,7 +1756,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -1859,7 +1788,7 @@ void main() {
       final evidenceApi = _FakeEvidenceApi();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           evidenceApi: evidenceApi,
         ),
@@ -1911,7 +1840,7 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           evidenceApi: evidenceApi,
           localWriteStore: localStore,
@@ -1946,7 +1875,7 @@ void main() {
         );
         await tester.pumpWidget(
           _screenWith(
-            _StaticRouteRepository([inProgressStopRoute()]),
+            _repositoryWith(inProgressStopRoute()),
             stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
             evidenceApi: evidenceApi,
             apiBaseUrl: 'http://test-base',
@@ -1985,7 +1914,7 @@ void main() {
         );
         await tester.pumpWidget(
           _screenWith(
-            _StaticRouteRepository([inProgressStopRoute()]),
+            _repositoryWith(inProgressStopRoute()),
             stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
             evidenceApi: evidenceApi,
             apiBaseUrl: 'http://test-base',
@@ -2018,7 +1947,7 @@ void main() {
     (tester) async {
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
         ),
       );
@@ -2045,7 +1974,7 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           syncWorker: worker,
         ),
       );
@@ -2072,7 +2001,7 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           syncWorker: worker,
         ),
       );
@@ -2102,7 +2031,7 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           syncWorker: worker,
           localWriteStore: store,
         ),
@@ -2132,14 +2061,14 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([
+          _repositoryWith(
             _routeWith(
-              status: 'IN_PROGRESS',
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
                   id: 's1',
                   orderIndex: 1,
+                  batchNumber: 1,
                   status: 'PENDING',
                   servicePointName: 'Sala 101',
                   latitude: -7.21,
@@ -2148,6 +2077,7 @@ void main() {
                 RouteStopSummary(
                   id: 's2',
                   orderIndex: 2,
+                  batchNumber: 1,
                   status: 'PENDING',
                   servicePointName: 'Sala 102',
                   latitude: -7.22,
@@ -2155,7 +2085,7 @@ void main() {
                 ),
               ],
             ),
-          ]),
+          ),
           localWriteStore: store,
         ),
       );
@@ -2179,7 +2109,7 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           localWriteStore: store,
         ),
@@ -2203,7 +2133,7 @@ void main() {
       await store.markBlocked('op-1', 'HTTP 422');
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           localWriteStore: store,
         ),
       );
@@ -2234,7 +2164,7 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           localWriteStore: store,
         ),
@@ -2254,7 +2184,7 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressRoute()]),
+          _repositoryWith(inProgressRoute()),
           syncWorker: worker,
         ),
       );
@@ -2282,12 +2212,12 @@ void main() {
   );
 
   RouteSummary inProgressStopWithFormRoute() => _routeWith(
-    status: 'IN_PROGRESS',
     startedAt: DateTime(2026, 8, 25, 8),
     stops: [
       RouteStopSummary(
         id: 's1',
         orderIndex: 1,
+        batchNumber: 1,
         status: 'IN_PROGRESS',
         servicePointName: 'Sala 101',
         latitude: -7.21,
@@ -2308,7 +2238,7 @@ void main() {
 
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopWithFormRoute()]),
+          _repositoryWith(inProgressStopWithFormRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           formDraftStore: formStore,
         ),
@@ -2341,7 +2271,7 @@ void main() {
 
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopWithFormRoute()]),
+          _repositoryWith(inProgressStopWithFormRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
           formDraftStore: formStore,
         ),
@@ -2379,7 +2309,7 @@ void main() {
     (tester) async {
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
         ),
       );
@@ -2410,12 +2340,12 @@ void main() {
       // the same value the snapshot was written under.
       final progressStore = _FakeStopProgressStore();
       final route = _routeWith(
-        status: 'IN_PROGRESS',
         startedAt: DateTime(2026, 8, 25, 8),
         stops: [
           RouteStopSummary(
             id: 's1',
             orderIndex: 1,
+            batchNumber: 1,
             status: 'PENDING',
             servicePointName: 'Sala 101',
             latitude: -7.21,
@@ -2426,7 +2356,7 @@ void main() {
       );
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([route]),
+          _repositoryWith(route),
           locationService: _FakeLocationService(),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
@@ -2449,12 +2379,12 @@ void main() {
   // --- Task 10: "Sinalizar impossibilidade" -----------------------------
 
   RouteSummary inProgressStopWithTwoPendingRoute() => _routeWith(
-    status: 'IN_PROGRESS',
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
         id: 's1',
         orderIndex: 1,
+        batchNumber: 1,
         status: 'IN_PROGRESS',
         servicePointName: 'Sala 101',
         latitude: -7.21,
@@ -2463,6 +2393,7 @@ void main() {
       RouteStopSummary(
         id: 's2',
         orderIndex: 2,
+        batchNumber: 1,
         status: 'PENDING',
         servicePointName: 'Sala 102',
         latitude: -7.22,
@@ -2471,6 +2402,7 @@ void main() {
       RouteStopSummary(
         id: 's3',
         orderIndex: 3,
+        batchNumber: 1,
         status: 'PENDING',
         servicePointName: 'Sala 103',
         latitude: -7.23,
@@ -2486,7 +2418,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
         ),
@@ -2538,7 +2470,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopWithTwoPendingRoute()]),
+          _repositoryWith(inProgressStopWithTwoPendingRoute()),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
         ),
@@ -2578,7 +2510,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([inProgressStopRoute()]),
+          _repositoryWith(inProgressStopRoute()),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
         ),
@@ -2601,31 +2533,13 @@ void main() {
     },
   );
 
-  testWidgets(
-    'no "Sinalizar impossibilidade" action on a not-yet-started route',
-    (tester) async {
-      // _FakeRouteRepository serves a PLANNED route — the backend rejects an
-      // impediment before the route is IN_PROGRESS (RF16).
-      await tester.pumpWidget(_screenWith(_FakeRouteRepository()));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.widgetWithText(
-          TextButton,
-          AppStrings.routeSignalImpossibilityButton,
-        ),
-        findsNothing,
-      );
-    },
-  );
-
   RouteSummary pendingStopOnInProgressRoute() => _routeWith(
-    status: 'IN_PROGRESS',
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
         id: 's1',
         orderIndex: 1,
+        batchNumber: 1,
         status: 'PENDING',
         servicePointName: 'Sala 101',
         latitude: -7.21,
@@ -2642,7 +2556,7 @@ void main() {
       final store = _InMemoryLocalWriteStore();
       await tester.pumpWidget(
         _screenWith(
-          _StaticRouteRepository([pendingStopOnInProgressRoute()]),
+          _repositoryWith(pendingStopOnInProgressRoute()),
           executionApi: _FakeExecutionApi(),
           localWriteStore: store,
         ),
@@ -2671,12 +2585,99 @@ void main() {
     },
   );
 
+  group('next batch', () {
+    RouteSummary lastStopInProgress() => routeWith(
+      stops: [
+        stopWith(id: 's1', status: 'IN_PROGRESS', servicePointName: 'Sala 101'),
+      ],
+    );
+
+    RouteSummary secondBatch() => routeWith(
+      currentBatch: 2,
+      stops: [
+        stopWith(id: 's1', status: 'DONE', servicePointName: 'Sala 101'),
+        stopWith(
+          id: 's2',
+          orderIndex: 2,
+          batchNumber: 2,
+          servicePointName: 'Sala 202',
+        ),
+      ],
+    );
+
+    void handOutSecondBatch(FakeRouteRepository repository) {
+      repository.allocate = () {
+        repository.day = myDayWith(secondBatch());
+        return AllocationResult(route: secondBatch(), poolEmpty: false);
+      };
+    }
+
+    testWidgets(
+      'checking out the last open stop delivers it and pulls the next batch',
+      (tester) async {
+        final store = _InMemoryLocalWriteStore();
+        final repository = _repositoryWith(lastStopInProgress());
+        handOutSecondBatch(repository);
+        await tester.pumpWidget(
+          _screenWith(
+            repository,
+            executionApi: _FakeExecutionApi(),
+            localWriteStore: store,
+            stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
+            syncWorker: _RecordingSyncWorker(drains: store),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(repository.allocationCalls, isEmpty);
+
+        await tapConcluirAndScan(tester, 'v1.floor.1.sig');
+        await tester.pumpAndSettle();
+
+        expect(repository.allocationCalls, ['nextBatch:r1']);
+        expect(await store.unsyncedForRoute('r1'), isEmpty);
+        expect(find.text(AppStrings.routeBatchHeader(2, 1)), findsOneWidget);
+        expect(find.text('Sala 202'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'offline, a finished batch shows the reconnect banner and pulls the '
+      'next batch once the connection is back',
+      (tester) async {
+        final connectivity = FakeConnectivity();
+        addTearDown(connectivity.dispose);
+        final progress = _FakeStopProgressStore({'s1': 'exec-1'});
+        await progress.markDone('s1');
+        final repository = _repositoryWith(lastStopInProgress());
+        handOutSecondBatch(repository);
+        await tester.pumpWidget(
+          _screenWith(
+            repository,
+            connectivity: connectivity,
+            stopProgressStore: progress,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text(AppStrings.routeNextBatchOffline), findsOneWidget);
+        expect(repository.allocationCalls, isEmpty);
+
+        connectivity.goOnline();
+        await tester.pumpAndSettle();
+
+        expect(repository.allocationCalls, ['nextBatch:r1']);
+        expect(find.text(AppStrings.routeNextBatchOffline), findsNothing);
+        expect(find.text('Sala 202'), findsOneWidget);
+      },
+    );
+  });
+
   testWidgets('shows the unread count on the notification bell badge', (
     tester,
   ) async {
     await tester.pumpWidget(
       _screenWith(
-        _FakeRouteRepository(),
+        _repositoryWith(_openBatchRoute),
         monitoringApi: _FakeMonitoringApi(unread: 3),
       ),
     );
@@ -2692,7 +2693,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      _screenWith(_FakeRouteRepository()),
+      _screenWith(_repositoryWith(_openBatchRoute)),
     );
     await tester.pumpAndSettle();
 
@@ -2704,7 +2705,7 @@ void main() {
   ) async {
     await tester.pumpWidget(
       _screenWith(
-        _FakeRouteRepository(),
+        _repositoryWith(_openBatchRoute),
         monitoringApi: _FakeMonitoringApi(unread: 1),
       ),
     );

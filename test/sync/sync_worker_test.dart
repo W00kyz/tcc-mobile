@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -9,7 +10,6 @@ import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
-import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -39,6 +39,9 @@ class _FakeExecutionApi implements ExecutionApi {
   Exception? impedimentError;
   bool consumeError = true;
   DateTime? serverDate;
+
+  /// When set, every check-in waits on it — holds a drain pass mid-flight.
+  Completer<void>? checkInGate;
   double? lastClientClockOffset;
   String? lastFormVersionId;
   List<Map<String, Object?>>? lastAnswers;
@@ -65,6 +68,7 @@ class _FakeExecutionApi implements ExecutionApi {
   }) async {
     log.add('checkIn:$idempotencyKey');
     lastClientClockOffset = clientClockOffsetSeconds;
+    await checkInGate?.future;
     final error = checkInError;
     if (error != null) {
       if (consumeError) checkInError = null;
@@ -216,65 +220,12 @@ class _FakeStopProgressStore implements StopProgressStore {
 
 class _FakeSyncMetaStore implements SyncMetaStore {
   double? offset;
-  final Map<String, DateTime> routeStartedAt = {};
 
   @override
   Future<double?> getClockOffsetSeconds() async => offset;
 
   @override
   Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
-
-  @override
-  Future<DateTime?> getRouteStartedAt(String routeId) async =>
-      routeStartedAt[routeId];
-
-  @override
-  Future<void> setRouteStartedAt(String routeId, DateTime startedAt) async =>
-      routeStartedAt[routeId] = startedAt;
-}
-
-class _FakeRouteRepository implements RouteRepository {
-  _FakeRouteRepository(this.log);
-
-  final List<String> log;
-  Exception? startError;
-
-  ({String routeId, double latitude, double longitude, DateTime startedAt})?
-  lastStart;
-
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async =>
-      throw UnimplementedError();
-
-  @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async {
-    log.add('start:$routeId');
-    lastStart = (
-      routeId: routeId,
-      latitude: latitude,
-      longitude: longitude,
-      startedAt: startedAt,
-    );
-    final error = startError;
-    if (error != null) {
-      startError = null;
-      throw error;
-    }
-    return RouteSummary(
-      id: routeId,
-      fieldWorkerName: 'João',
-      routeDate: DateTime.utc(2026, 6),
-      routeType: 'REGULAR',
-      status: 'IN_PROGRESS',
-      startedAt: startedAt,
-      stops: const [],
-    );
-  }
 }
 
 class _FakeLocalWriteStore implements LocalWriteStore {
@@ -439,7 +390,6 @@ class _Harness {
       connectivity,
       executionApi,
       evidenceApi,
-      routeApi,
       now: () => now,
       random: _ZeroRandom(),
     );
@@ -452,7 +402,6 @@ class _Harness {
   final connectivity = FakeConnectivity(isOnline: true);
   late final executionApi = _FakeExecutionApi(log);
   late final evidenceApi = _FakeEvidenceApi(log);
-  late final routeApi = _FakeRouteRepository(log);
   DateTime now = DateTime.utc(2026, 6, 1, 12);
   late final SyncWorker worker;
 }
@@ -667,6 +616,57 @@ void main() {
   });
 
   test(
+    'a 403 WORKER_NOT_APPROVED blocks the row at once, with no retry '
+    'scheduled — the approval gate owns the UI from there',
+    () async {
+      final h = _Harness();
+      h.executionApi.checkInError = _dio(
+        status: 403,
+        body: {
+          'detail': {'code': 'WORKER_NOT_APPROVED', 'detail': 'deactivated'},
+        },
+      );
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+      await h.worker.syncRoute('route-R');
+      await h.worker.syncRoute('route-R');
+
+      final row = h.store.rows['a']!;
+      expect(row.state, PendingOpState.blocked);
+      expect(row.attempts, 0);
+      expect(row.nextAttemptAt, isNull);
+      expect(h.log, ['checkIn:a']);
+    },
+  );
+
+  test(
+    'syncRoute during a running pass waits for it and drains a row '
+    'enqueued meanwhile, so awaiting it means the server has the row',
+    () async {
+      final h = _Harness();
+      final gate = Completer<void>();
+      h.executionApi.checkInGate = gate;
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+
+      final first = h.worker.syncRoute('route-R');
+      await Future<void>.delayed(Duration.zero);
+      h.store.seed('c', kind: PendingOpKind.checkOut, createdAt: 2);
+      var joinedDone = false;
+      final joined = h.worker
+          .syncRoute('route-R')
+          .then((_) => joinedDone = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(joinedDone, isFalse);
+
+      gate.complete();
+      await Future.wait([first, joined]);
+
+      expect(h.log, ['checkIn:a', 'checkOut:c']);
+      expect(h.store.rows['c']!.state, PendingOpState.synced);
+    },
+  );
+
+  test(
     'an "already applied" 409 counts as success and the queue continues',
     () async {
       final h = _Harness();
@@ -735,6 +735,32 @@ void main() {
   });
 
   test(
+    'a blocked row keeps its route halted on later passes too, until it is '
+    'retried by hand (Etapa 6 Ruling 6: "a rota inteira para")',
+    () async {
+      final h = _Harness();
+      h.store
+        ..seed(
+          'a',
+          kind: PendingOpKind.checkIn,
+          createdAt: 1,
+          state: PendingOpState.blocked,
+        )
+        ..seed('c', kind: PendingOpKind.checkOut, createdAt: 2);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, isEmpty);
+      expect(h.store.rows['c']!.state, PendingOpState.pending);
+
+      await h.worker.unblock('a');
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['checkIn:a', 'checkOut:c']);
+    },
+  );
+
+  test(
     'syncAll still drains an unblocked route when another is blocked',
     () async {
       final h = _Harness();
@@ -787,77 +813,6 @@ void main() {
       await h.worker.syncRoute('route-R');
 
       expect(h.store.rows['a']!.state, PendingOpState.blocked);
-    },
-  );
-
-  Map<String, dynamic> startPayload(DateTime startedAt) => {
-    'route_id': 'route-R',
-    'latitude': -7.21,
-    'longitude': -35.91,
-    'started_at': startedAt.toIso8601String(),
-  };
-
-  test(
-    'a startRoute row dispatches via RouteRepository.startRoute with the '
-    'payload values including the exact started_at',
-    () async {
-      final h = _Harness();
-      final startedAt = DateTime.utc(2026, 6, 1, 7, 30);
-      h.store.seed(
-        's',
-        kind: PendingOpKind.startRoute,
-        createdAt: 1,
-        payload: startPayload(startedAt),
-      );
-
-      await h.worker.syncRoute('route-R');
-
-      expect(h.log, ['start:route-R']);
-      expect(h.store.rows['s']!.state, PendingOpState.synced);
-      expect(h.routeApi.lastStart, isNotNull);
-      expect(h.routeApi.lastStart!.latitude, -7.21);
-      expect(h.routeApi.lastStart!.longitude, -35.91);
-      expect(h.routeApi.lastStart!.startedAt, startedAt);
-    },
-  );
-
-  test(
-    'a 409 "already started" on a startRoute row counts as success',
-    () async {
-      final h = _Harness();
-      h.routeApi.startError = _dio(
-        status: 409,
-        body: {'detail': 'Route "route-R" was already started at ...'},
-      );
-      h.store.seed(
-        's',
-        kind: PendingOpKind.startRoute,
-        createdAt: 1,
-        payload: startPayload(DateTime.utc(2026, 6, 1, 7, 30)),
-      );
-
-      await h.worker.syncRoute('route-R');
-
-      expect(h.store.rows['s']!.state, PendingOpState.synced);
-    },
-  );
-
-  test(
-    'a startRoute row before a check-in row dispatches first (FIFO)',
-    () async {
-      final h = _Harness();
-      h.store
-        ..seed(
-          's',
-          kind: PendingOpKind.startRoute,
-          createdAt: 1,
-          payload: startPayload(DateTime.utc(2026, 6, 1, 7, 30)),
-        )
-        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 2);
-
-      await h.worker.syncRoute('route-R');
-
-      expect(h.log, ['start:route-R', 'checkIn:a']);
     },
   );
 

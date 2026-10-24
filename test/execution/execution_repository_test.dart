@@ -8,7 +8,6 @@ import 'package:route_monitor/forms/form_draft_store.dart';
 import 'package:route_monitor/forms/form_schema.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
-import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -154,25 +153,6 @@ class _FakeSyncWorker implements SyncWorker {
   Future<void> dispose() => throw UnimplementedError();
 }
 
-class _FakeSyncMetaStore implements SyncMetaStore {
-  double? offset;
-  final Map<String, DateTime> routeStartedAt = {};
-
-  @override
-  Future<double?> getClockOffsetSeconds() async => offset;
-
-  @override
-  Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
-
-  @override
-  Future<DateTime?> getRouteStartedAt(String routeId) async =>
-      routeStartedAt[routeId];
-
-  @override
-  Future<void> setRouteStartedAt(String routeId, DateTime startedAt) async =>
-      routeStartedAt[routeId] = startedAt;
-}
-
 /// In-memory stand-in for [DriftFormDraftStore] — just enough to seed a
 /// draft under an executionId and observe whether `checkOut` cleared it.
 class _FakeFormDraftStore implements FormDraftStore {
@@ -218,7 +198,6 @@ class _FakeFormDraftStore implements FormDraftStore {
 void main() {
   late _FakeLocalWriteStore store;
   late _FakeStopProgressStore stopProgress;
-  late _FakeSyncMetaStore syncMeta;
   late _FakeSyncWorker syncWorker;
   late _FakeFormDraftStore formDraftStore;
   late ExecutionRepository repository;
@@ -226,13 +205,11 @@ void main() {
   setUp(() {
     store = _FakeLocalWriteStore();
     stopProgress = _FakeStopProgressStore();
-    syncMeta = _FakeSyncMetaStore();
     syncWorker = _FakeSyncWorker();
     formDraftStore = _FakeFormDraftStore();
     repository = ExecutionRepository(
       store,
       stopProgress,
-      syncMeta,
       syncWorker,
       formDraftStore,
     );
@@ -327,40 +304,6 @@ void main() {
     expect(rows, hasLength(1));
     expect(rows.single.id, 'K');
     expect(syncWorker.syncedRoutes, ['route-A', 'route-A']);
-  });
-
-  test('startRoute enqueues one pending startRoute row, records the local '
-      'started marker and kicks the sync worker once', () async {
-    await repository.startRoute(
-      routeId: 'route-A',
-      latitude: -7.2,
-      longitude: -35.9,
-    );
-
-    final rows = await store.unsyncedForRoute('route-A');
-    expect(rows, hasLength(1));
-    expect(rows.single.state, PendingOpState.pending);
-    expect(rows.single.kind, PendingOpKind.startRoute);
-    expect(rows.single.payload['route_id'], 'route-A');
-    expect(rows.single.payload['latitude'], -7.2);
-    expect(rows.single.payload['longitude'], -35.9);
-    expect(rows.single.payload['started_at'], isA<String>());
-    expect(
-      () => DateTime.parse(rows.single.payload['started_at'] as String),
-      returnsNormally,
-    );
-
-    expect(await syncMeta.getRouteStartedAt('route-A'), isNotNull);
-    expect(syncWorker.syncedRoutes, ['route-A']);
-  });
-
-  test('startRoute returns immediately even though the sync kick never '
-      'completes (fire-and-forget)', () async {
-    await repository
-        .startRoute(routeId: 'route-A', latitude: -7.2, longitude: -35.9)
-        .timeout(const Duration(seconds: 1));
-
-    expect(syncWorker.syncedRoutes, ['route-A']);
   });
 
   test('checkOut enqueues one pending row, marks the stop DONE and kicks '

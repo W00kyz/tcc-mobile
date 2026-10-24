@@ -56,27 +56,23 @@ class BlockedSyncScreen extends ConsumerWidget {
 }
 
 /// A `Check-in — <route_stop_id>` style label. Evidence rows carry an
-/// `execution_id` instead of a stop id; a `startRoute` row carries neither,
-/// so it falls back to the route id (the Task 9 carry-note: the blocked
-/// `startRoute` row IS the truth signal for a stuck local "iniciada" marker).
+/// `execution_id` instead of a stop id.
 String _rowLabel(PendingOperationRow row) {
   final kind = switch (row.kind) {
     PendingOpKind.checkIn => AppStrings.blockedSyncKindCheckIn,
     PendingOpKind.checkOut => AppStrings.blockedSyncKindCheckOut,
     PendingOpKind.evidencePhoto => AppStrings.blockedSyncKindPhoto,
     PendingOpKind.evidenceNote => AppStrings.blockedSyncKindNote,
-    PendingOpKind.startRoute => AppStrings.blockedSyncKindStartRoute,
     PendingOpKind.impediment => AppStrings.blockedSyncKindImpediment,
   };
   final reference = switch (row.kind) {
     PendingOpKind.checkIn ||
     PendingOpKind.checkOut ||
     // A ROUTE_REMAINDER impediment has a null route_stop_id and falls back
-    // to the kind label alone, same as a bare startRoute row.
+    // to the kind label alone.
     PendingOpKind.impediment => row.payload['route_stop_id'] as String?,
     PendingOpKind.evidencePhoto ||
     PendingOpKind.evidenceNote => row.payload['execution_id'] as String?,
-    PendingOpKind.startRoute => row.routeId,
   };
   return reference == null
       ? kind

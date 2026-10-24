@@ -32,10 +32,13 @@ import 'package:route_monitor/sync/sync_worker.dart';
 
 import '../support/in_memory_database.dart';
 
-/// DELIVERABLE PROOF for Etapa 6 (RF35): a whole route is executed with the
+/// DELIVERABLE PROOF for Etapa 6 (RF35): a whole batch is executed with the
 /// device offline and synced later with the ORIGINAL device timestamps
-/// preserved. Spec Ruling 11 + §7 open point 4 — this integration test wires
-/// the REAL worker + outbox + repository + UI on an in-memory database and
+/// preserved — and only then is the next batch asked for (spec
+/// 2026-10-20-alocacao-automatica §6.4: "Iniciar rota" itself is online, so
+/// the route is already IN_PROGRESS when the worker walks into the basement).
+/// Spec Ruling 11 + §7 open point 4 — this integration test wires the REAL
+/// worker + outbox + repository + UI on an in-memory database and
 /// fakes only the outermost seams (Connectivity, the two APIs, the route
 /// repository, GPS). The true end-to-end (a real camera in a real basement)
 /// is the manual field step.
@@ -55,22 +58,22 @@ void main() {
   LiveTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-    'a full route runs offline and syncs later with the original timestamps',
+    'a full batch runs offline, syncs later with the original timestamps, '
+    'and only then pulls the next batch',
     (tester) async {
       final fixture = await _Fixture.create();
       addTearDown(fixture.dispose);
 
-      // ---- Offline phase: 6 actions, nothing may hit the network ----------
-      final actionTimes = await fixture.runFullRouteOffline();
+      // ---- Offline phase: 5 actions, nothing may hit the network ----------
+      final actionTimes = await fixture.runFullBatchOffline();
 
       // Nothing reached the "network".
       expect(fixture.executionApi.calls, isEmpty);
       expect(fixture.evidenceApi.calls, isEmpty);
-      expect(fixture.routeApi.startCalls, 0);
 
-      // 6 outbox rows, all pending.
+      // 5 outbox rows, all pending.
       final offlineRows = await fixture.store.unsyncedForRoute(_routeId);
-      expect(offlineRows, hasLength(6));
+      expect(offlineRows, hasLength(5));
       expect(
         offlineRows.map((r) => r.state),
         everyElement(PendingOpState.pending),
@@ -87,15 +90,18 @@ void main() {
       );
 
       // Mount the screen; its real _SyncBanner subscribes to the real worker
-      // status stream and reports the 6 waiting actions (plural).
-      await fixture.container.read(myRoutesProvider.future); // warm: no spinner
+      // status stream and reports the 5 waiting actions (plural). The batch
+      // is finished on the device, so the next one waits for the network.
+      await fixture.container.read(myDayProvider.future); // warm: no spinner
       await tester.pumpWidget(fixture.app());
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
       expect(
-        find.text(AppStrings.routePendingSync(6)),
+        find.text(AppStrings.routePendingSync(5)),
         findsOneWidget,
       );
+      expect(find.text(AppStrings.routeNextBatchOffline), findsOneWidget);
+      expect(fixture.routeApi.nextBatchCalls, 0);
 
       // ---- Timestamp-preservation proof (the RF35 crux) -------------------
       // A real gap: a (wrongly) sync-stamped timestamp would land after
@@ -111,29 +117,28 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
 
-      // FIFO order, exactly the 6 actions oldest-first.
+      // FIFO order, exactly the 5 actions oldest-first — and the next batch
+      // only after the server has every one of them.
       expect(fixture.callLog, [
-        'startRoute',
         'checkIn:$_stop1',
         'uploadPhoto',
         'checkOut:$_stop1',
         'checkIn:$_stop2',
         'checkOut:$_stop2',
+        'nextBatch',
       ]);
 
       // Each dispatched call carried the timestamp captured BEFORE that
       // action — never the sync time. Recorded in FIFO/dispatch order:
-      // startRoute, checkIn(s1), uploadPhoto, checkOut(s1), checkIn(s2),
-      // checkOut(s2).
+      // checkIn(s1), uploadPhoto, checkOut(s1), checkIn(s2), checkOut(s2).
       final recorded = <DateTime>[
-        fixture.routeApi.startedAtArgs.single,
         fixture.executionApi.scannedAtArgs[0],
         fixture.evidenceApi.capturedAtArgs.single,
         fixture.executionApi.scannedAtArgs[1],
         fixture.executionApi.scannedAtArgs[2],
         fixture.executionApi.scannedAtArgs[3],
       ];
-      for (var i = 0; i < 6; i++) {
+      for (var i = 0; i < 5; i++) {
         expect(
           recorded[i].isBefore(actionTimes[i]),
           isFalse,
@@ -160,13 +165,16 @@ void main() {
         }
       }
 
-      // All 6 rows are now `synced` (state, not deleted — spec Ruling 3).
+      // All 5 rows are now `synced` (state, not deleted — spec Ruling 3).
       final syncedStates = await fixture.rawStates();
-      expect(syncedStates, hasLength(6));
+      expect(syncedStates, hasLength(5));
       expect(syncedStates, everyElement('synced'));
       expect(await fixture.store.unsyncedForRoute(_routeId), isEmpty);
 
-      // Banner flips to the all-clear state.
+      // The second batch is on screen and the banner flips to all-clear.
+      expect(find.text(AppStrings.routeBatchHeader(2, 2)), findsOneWidget);
+      expect(find.text('Sala 201'), findsOneWidget);
+      expect(find.text(AppStrings.routeNextBatchOffline), findsNothing);
       expect(find.text(AppStrings.routeAllSynced), findsOneWidget);
 
       // ---- Idempotent re-drain -----------------------------------------
@@ -186,8 +194,8 @@ void main() {
       // The 2nd checkIn dispatch (stop 2) fails hard.
       fixture.executionApi.failCheckInOnCallWith(2, _dio(status: 422));
 
-      await fixture.runFullRouteOffline();
-      await fixture.container.read(myRoutesProvider.future);
+      await fixture.runFullBatchOffline();
+      await fixture.container.read(myDayProvider.future);
 
       await tester.pumpWidget(fixture.app());
       await tester.pump(const Duration(milliseconds: 100));
@@ -202,7 +210,6 @@ void main() {
       final stillPending = await fixture.store.unsyncedForRoute(_routeId);
 
       // stop 1's whole chain synced.
-      expect(byKind['startRoute'], ['synced']);
       expect(byKind['checkIn'], containsAll(<String>['synced', 'blocked']));
       expect(byKind['evidencePhoto'], ['synced']);
       // The stop-2 check-in is blocked (hard 422, not retried forever).
@@ -213,8 +220,8 @@ void main() {
       expect(stillPending, hasLength(1));
       expect(stillPending.single.kind, PendingOpKind.checkOut);
       expect(stillPending.single.payload['route_stop_id'], _stop2);
+      // No next batch either: the server never got the stop-2 check-out.
       expect(fixture.callLog, [
-        'startRoute',
         'checkIn:$_stop1',
         'uploadPhoto',
         'checkOut:$_stop1',
@@ -320,18 +327,12 @@ class _Fixture {
     ),
   );
 
-  /// Drives the 6 field actions through the REAL [ExecutionRepository] while
-  /// offline, capturing wall-clock time immediately before each one. Returns
-  /// the 6 capture instants in action order.
-  Future<List<DateTime>> runFullRouteOffline() async {
+  /// Drives the 5 field actions of the batch through the REAL
+  /// [ExecutionRepository] while offline, capturing wall-clock time
+  /// immediately before each one. Returns the 5 capture instants in action
+  /// order.
+  Future<List<DateTime>> runFullBatchOffline() async {
     final times = <DateTime>[];
-
-    times.add(_nowUtc());
-    await repo.startRoute(
-      routeId: _routeId,
-      latitude: -7.23,
-      longitude: -35.88,
-    );
 
     times.add(_nowUtc());
     final execution1 = await repo.checkIn(
@@ -555,53 +556,78 @@ class _RecordingEvidenceApi implements EvidenceApi {
   List<String> get calls => _log.where((c) => c.contains('pload')).toList();
 }
 
+/// The server side of the day: batch 1 (stops 1 and 2) until the next batch
+/// is asked for, batch 2 (one new stop) from then on.
 class _RecordingRouteRepository implements RouteRepository {
   _RecordingRouteRepository(this._log);
 
   final List<String> _log;
-  final List<DateTime> startedAtArgs = [];
-  int startCalls = 0;
+  int nextBatchCalls = 0;
+
+  RouteSummary _route() => RouteSummary(
+    id: _routeId,
+    fieldWorkerName: 'João',
+    routeDate: DateTime(2026, 9, 3),
+    status: 'IN_PROGRESS',
+    startedAt: DateTime.utc(2026, 9, 3, 8),
+    currentBatch: nextBatchCalls == 0 ? 1 : 2,
+    stops: [
+      RouteStopSummary(
+        id: _stop1,
+        orderIndex: 1,
+        batchNumber: 1,
+        status: nextBatchCalls == 0 ? 'PENDING' : 'DONE',
+        servicePointName: 'Sala 101',
+        latitude: -7.23,
+        longitude: -35.88,
+      ),
+      RouteStopSummary(
+        id: _stop2,
+        orderIndex: 2,
+        batchNumber: 1,
+        status: nextBatchCalls == 0 ? 'PENDING' : 'DONE',
+        servicePointName: 'Sala 102',
+        latitude: -7.24,
+        longitude: -35.89,
+      ),
+      if (nextBatchCalls > 0)
+        const RouteStopSummary(
+          id: 's3',
+          orderIndex: 3,
+          batchNumber: 2,
+          status: 'PENDING',
+          servicePointName: 'Sala 201',
+          latitude: -7.25,
+          longitude: -35.9,
+        ),
+    ],
+  );
 
   @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => [
-    RouteSummary(
-      id: _routeId,
-      fieldWorkerName: 'João',
-      routeDate: DateTime(2026, 9, 3),
-      routeType: 'REGULAR',
-      status: 'IN_PROGRESS',
-      startedAt: DateTime.utc(2026, 9, 3, 8),
-      stops: const [
-        RouteStopSummary(
-          id: _stop1,
-          orderIndex: 1,
-          status: 'PENDING',
-          servicePointName: 'Sala 101',
-          latitude: -7.23,
-          longitude: -35.88,
-        ),
-        RouteStopSummary(
-          id: _stop2,
-          orderIndex: 2,
-          status: 'PENDING',
-          servicePointName: 'Sala 102',
-          latitude: -7.24,
-          longitude: -35.89,
-        ),
-      ],
-    ),
-  ];
+  Future<MyDay> fetchMyDay() async => MyDay(
+    serviceDay: true,
+    route: _route(),
+    positionIntervalSeconds: 60,
+    silenceWarningMinutes: 30,
+    silenceReleaseMinutes: 45,
+  );
 
   @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
+  Future<AllocationResult> startOrResume({
+    required double lat,
+    required double lng,
+    required DateTime capturedAt,
+  }) async => throw UnimplementedError('the route is already started');
+
+  @override
+  Future<AllocationResult> nextBatch(
+    String routeId, {
+    required double lat,
+    required double lng,
+    required DateTime capturedAt,
   }) async {
-    _log.add('startRoute');
-    startCalls++;
-    startedAtArgs.add(startedAt);
-    return (await fetchMyRoutes()).first;
+    _log.add('nextBatch');
+    nextBatchCalls++;
+    return AllocationResult(route: _route(), poolEmpty: false);
   }
 }

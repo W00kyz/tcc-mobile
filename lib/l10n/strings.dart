@@ -103,14 +103,9 @@ abstract final class AppStrings {
   // --- route screen ---
   static const String routeAppBarTitle = 'Rota de hoje';
   static const String routeLoadError = 'Não foi possível carregar sua rota.';
-  static const String routeEmpty = 'Nenhuma rota atribuída para hoje.';
   static const String routeViewMapButton = 'Ver no mapa';
   static const String routeStartButton = 'Iniciar rota';
   static const String routeCheckInButton = 'Fazer check-in';
-  static const String routeStartedHeader = 'Rota iniciada';
-  static const String routeNotStartedHeader = 'Rota não iniciada';
-  static const String routeOccasionalChip = 'EVENTUAL';
-  static const String routeStopReassignedChip = 'Reatribuído';
   static const String formMediaTakePhoto = 'Tirar foto';
   static const String formMediaRemove = 'Remover foto';
   static const String formMediaLimit = 'Limite de 10 fotos por pergunta.';
@@ -129,6 +124,38 @@ abstract final class AppStrings {
   static const String routeLocationUnavailableCheckIn =
       'Não foi possível obter sua localização; check-in seguirá sem GPS.';
 
+  // --- route screen · batches (spec 2026-10-20-alocacao-automatica §6.4) ---
+  static const String routeNotServiceDay = 'Hoje não é dia de serviço.';
+  static const String routeStartOffline =
+      'Conecte-se à internet para iniciar a rota.';
+  static const String routeOutsideCampus =
+      'Você precisa estar no campus para iniciar.';
+  static const String routeWorkdayOver = 'O expediente de hoje já terminou.';
+  static const String routeNoMorePoints = 'Não há mais pontos hoje.';
+  static const String routeStartFailed =
+      'Não foi possível iniciar a rota. Tente novamente.';
+  static const String routePausedTitle = 'Seus pontos foram liberados';
+  static const String routeNextBatchOffline =
+      'Conecte-se para receber mais pontos';
+
+  /// `Lote <n> · <x> ponto(s) feito(s) hoje`.
+  static String routeBatchHeader(int batch, int doneToday) =>
+      'Lote $batch · $doneToday '
+      '${doneToday == 1 ? 'ponto feito' : 'pontos feitos'} hoje';
+
+  /// Why a paused route's points went back to the pool.
+  static String routePausedReason(String reason) => 'Motivo: $reason';
+
+  /// A stop's `release_reason` code in words (same labels as the dashboard).
+  static String releaseReasonLabel(String code) => switch (code) {
+    'IMPEDIMENT' => 'Impedimento',
+    'ROUTE_REMAINDER' => 'Resto da rota impedido',
+    'LEFT_CAMPUS' => 'Saiu do campus',
+    'LOCATION_SILENCE' => 'Sem localização',
+    'END_OF_DAY' => 'Fim do expediente',
+    _ => code,
+  };
+
   // --- route screen · sync banner ---
   static const String routeSyncBlockedBanner =
       'Sincronização bloqueada — toque para ver';
@@ -143,9 +170,6 @@ abstract final class AppStrings {
 
   /// The travel-from-previous leg line, e.g. `a 120 m · 2 min`.
   static String routeLeg(String leg) => 'a $leg';
-
-  /// The arrival-window subtitle, e.g. `Janela: 08:00–08:30`.
-  static String routeWindow(String window) => 'Janela: $window';
 
   // --- route screen · evidence ---
   static const String routeAddPhotoButton = 'Adicionar foto';
@@ -179,7 +203,6 @@ abstract final class AppStrings {
   static const String blockedSyncKindCheckOut = 'Check-out';
   static const String blockedSyncKindPhoto = 'Foto';
   static const String blockedSyncKindNote = 'Observação';
-  static const String blockedSyncKindStartRoute = 'Início de rota';
   static const String blockedSyncKindImpediment = 'Impedimento';
 
   /// A `<kind> — <reference>` outbox-row label.

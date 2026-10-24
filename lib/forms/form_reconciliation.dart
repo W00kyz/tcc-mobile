@@ -12,8 +12,8 @@ import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
 /// RF39/RF40 reconciliation on re-fetch (spec §6.3, Task 11's
-/// `FormDraftStore.reconcile`): every time `myRoutesProvider` resolves a
-/// fresh route list, diff each `IN_PROGRESS` stop's local form draft against
+/// `FormDraftStore.reconcile`): every time `myDayProvider` resolves a
+/// fresh day, diff each `IN_PROGRESS` stop's local form draft against
 /// the stop's currently-published `FormSchema` and reconcile it when the
 /// versions differ. A stale draft otherwise only gets reconciled on its next
 /// check-in/out, which may be hours away — this closes that gap the moment
@@ -28,23 +28,21 @@ import 'package:route_monitor/routing/route_repository.dart';
 /// from rendering, and a failure here (a transient store error) has no user
 /// waiting on it — the next re-fetch tries again.
 final formReconciliationProvider = Provider<void>((ref) {
-  final routes = ref.watch(myRoutesProvider).value;
-  if (routes == null) return;
+  final route = ref.watch(myDayProvider).value?.route;
+  if (route == null) return;
   final stopProgress = ref.watch(stopProgressStoreProvider);
   final formDraftStore = ref.watch(formDraftStoreProvider);
-  unawaited(_reconcileRoutes(ref, routes, stopProgress, formDraftStore));
+  unawaited(_reconcileRoute(ref, route, stopProgress, formDraftStore));
 });
 
-Future<void> _reconcileRoutes(
+Future<void> _reconcileRoute(
   Ref ref,
-  List<RouteSummary> routes,
+  RouteSummary route,
   StopProgressStore stopProgress,
   FormDraftStore formDraftStore,
 ) async {
-  for (final route in routes) {
-    for (final stop in route.stops) {
-      await _reconcileStopIfStale(ref, stop, stopProgress, formDraftStore);
-    }
+  for (final stop in route.stops) {
+    await _reconcileStopIfStale(ref, stop, stopProgress, formDraftStore);
   }
 }
 

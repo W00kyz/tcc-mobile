@@ -146,33 +146,6 @@ void main() {
   });
 
   testWidgets(
-    'a blocked startRoute row renders with the "Início de rota" label',
-    (tester) async {
-      final store = _FakeLocalWriteStore()
-        ..seedBlocked(
-          'op-start',
-          kind: PendingOpKind.startRoute,
-          payload: {'route_id': 'r1'},
-          lastError: 'HTTP 409 route already started',
-        );
-      final worker = _FakeSyncWorker(store);
-
-      await tester.pumpWidget(_screen(store, worker));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text(
-          AppStrings.blockedSyncRowLabel(
-            AppStrings.blockedSyncKindStartRoute,
-            'r1',
-          ),
-        ),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets(
     '"Tentar de novo" calls unblock(id), then syncAll, and the row drops off '
     'the refreshed list',
     (tester) async {

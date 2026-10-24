@@ -11,6 +11,7 @@ RouteStopSummary _stop(
 }) => RouteStopSummary(
   id: id,
   orderIndex: 1,
+  batchNumber: 1,
   status: status,
   servicePointName: name ?? 'Sala $id',
   latitude: latitude,

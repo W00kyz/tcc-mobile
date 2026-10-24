@@ -5,8 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/monitoring/monitoring_providers.dart'
     show notificationsProvider, unreadCountProvider;
-import 'package:route_monitor/routing/route_providers.dart'
-    show myRoutesProvider;
+import 'package:route_monitor/routing/route_providers.dart' show myDayProvider;
 import 'package:route_monitor/sync/sync_providers.dart';
 
 /// App-wide observer that drains the outbox on the two automatic triggers of
@@ -62,14 +61,14 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
   /// Fire-and-forget: a trigger asks the worker to drain, it does not wait for
   /// the pass. `SyncWorker` already guards against overlapping drains.
   ///
-  /// Also invalidates `myRoutesProvider` (Task 14) so a resume/reconnect
-  /// re-fetches the route list — which in turn feeds
-  /// `formReconciliationProvider` fresh `FormSchema`s to diff local drafts
-  /// against (RF39/RF40). Gated on `Connectivity.isOnline`: `myRoutesProvider`
-  /// has no cache-on-error, so invalidating it while offline (e.g. the app
-  /// resuming with no network yet) would throw on the re-fetch and
+  /// Also invalidates `myDayProvider` (Task 14) so a resume/reconnect
+  /// re-fetches the day — which in turn feeds `formReconciliationProvider`
+  /// fresh `FormSchema`s to diff local drafts against (RF39/RF40), and lets
+  /// the next-batch controller see a batch finished while the app was away.
+  /// Gated on `Connectivity.isOnline`: a re-fetch while offline only falls
+  /// back to the device snapshot, or — with none saved — throws, and
   /// `route_screen.dart`'s error branch would replace the whole,
-  /// still-perfectly-valid route list with a generic error message.
+  /// still-perfectly-valid day with a generic error message.
   ///
   /// The notification providers are also refreshed here (RF49): the route
   /// screen is the home screen and mounts once, so a route assigned/modified
@@ -86,7 +85,7 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
 
   Future<void> _invalidateRoutesIfOnline() async {
     if (await ref.read(connectivityProvider).isOnline) {
-      ref.invalidate(myRoutesProvider);
+      ref.invalidate(myDayProvider);
     }
   }
 

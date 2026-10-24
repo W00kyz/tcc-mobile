@@ -8,7 +8,6 @@ import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
-import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 
@@ -43,8 +42,7 @@ class SyncWorker {
     this._syncMeta,
     this._connectivity,
     this._executionApi,
-    this._evidenceApi,
-    this._routeApi, {
+    this._evidenceApi, {
     DateTime Function() now = DateTime.now,
     math.Random? random,
     // A private field can't be an initializing formal with a public param
@@ -59,24 +57,69 @@ class SyncWorker {
   final Connectivity _connectivity;
   final ExecutionApi _executionApi;
   final EvidenceApi _evidenceApi;
-  final RouteRepository _routeApi;
   final DateTime Function() _now;
   final math.Random _random;
 
-  /// Route ids with a drain pass in flight — the re-entrancy guard that keeps
+  /// The drain pass in flight per route — the re-entrancy guard that keeps
   /// two triggers (foreground + regained connectivity) from interleaving.
-  final Set<String> _running = {};
+  final Map<String, Future<void>> _passes = {};
+
+  /// The one pass queued behind a running one, shared by every caller that
+  /// arrives while it runs.
+  final Map<String, Future<void>> _followUps = {};
 
   final Map<String, StreamController<RouteSyncStatus>> _statusControllers = {};
 
-  /// One FIFO pass over [routeId]'s due rows. No-op when a pass is already
-  /// running for this route or the device is offline.
+  /// One FIFO pass over [routeId]'s due rows; does nothing while the device
+  /// is offline. Called while a pass is running, it queues one more pass
+  /// behind it and completes with that one — the running pass read its rows
+  /// before a write enqueued meanwhile, so awaiting this means every row due
+  /// at call time was attempted (the next-batch pull relies on it: the
+  /// server must have the last check-out before it is asked for a batch).
+  ///
+  ///     await worker.syncRoute(routeId);
   Future<void> syncRoute(String routeId) async {
-    if (_running.contains(routeId)) return;
+    final running = _passes[routeId];
+    if (running == null) return _startPass(routeId);
+    return _followUps[routeId] ??= _passAfter(running, routeId);
+  }
+
+  Future<void> _passAfter(Future<void> running, String routeId) async {
+    try {
+      await running;
+    } finally {
+      // `remove` hands back this very follow-up, already being awaited.
+      unawaited(_followUps.remove(routeId));
+    }
+    // A caller may have started a fresh pass in between; it read the queue
+    // after the enqueue too, so join it rather than run two at once.
+    await (_passes[routeId] ?? _startPass(routeId));
+  }
+
+  Future<void> _startPass(String routeId) {
+    final pass = _drainAndRelease(routeId);
+    _passes[routeId] = pass;
+    return pass;
+  }
+
+  Future<void> _drainAndRelease(String routeId) async {
+    try {
+      await _drain(routeId);
+    } finally {
+      // `remove` hands back this very pass, already being awaited.
+      unawaited(_passes.remove(routeId));
+    }
+  }
+
+  Future<void> _drain(String routeId) async {
     if (!await _connectivity.isOnline) return;
-    _running.add(routeId);
     await _refresh(routeId, syncing: true);
     try {
+      // Ruling 6: a blocked row halts its route on every later pass too —
+      // nothing queued behind it may overtake it (a check-out never reaches
+      // the server without its check-in). "Tentar de novo" (`unblock`)
+      // resets it and the queue moves again.
+      if ((await _store.blockedForRoute(routeId)).isNotEmpty) return;
       final rows = await _store.dueForRoute(
         routeId,
         now: _now().millisecondsSinceEpoch,
@@ -88,7 +131,6 @@ class SyncWorker {
         if (!advanced) break;
       }
     } finally {
-      _running.remove(routeId);
       await _refresh(routeId);
     }
   }
@@ -179,7 +221,6 @@ class SyncWorker {
     return switch (row.kind) {
       PendingOpKind.checkIn => _performCheckIn(payload),
       PendingOpKind.checkOut => _performCheckOut(payload),
-      PendingOpKind.startRoute => _performStartRoute(payload),
       PendingOpKind.impediment => _performImpediment(payload),
       PendingOpKind.evidencePhoto => _evidenceApi.uploadPhoto(
         executionId: payload['execution_id'] as String,
@@ -237,19 +278,6 @@ class SyncWorker {
     );
     await _stopProgress.markDone(response.result.routeStopId);
     return response.serverDate;
-  }
-
-  Future<DateTime?> _performStartRoute(Map<String, dynamic> payload) async {
-    await _routeApi.startRoute(
-      routeId: payload['route_id'] as String,
-      latitude: (payload['latitude'] as num).toDouble(),
-      longitude: (payload['longitude'] as num).toDouble(),
-      startedAt: DateTime.parse(payload['started_at'] as String),
-    );
-    // No serverDate to return: `start` carries a client-supplied
-    // `started_at` and the response body is a RouteSummary, not a bare
-    // instant. Check-in/out already measure the clock offset (Ruling 7).
-    return null;
   }
 
   Future<DateTime?> _performImpediment(Map<String, dynamic> payload) async {

@@ -9,14 +9,6 @@ abstract class SyncMetaStore {
   Future<double?> getClockOffsetSeconds();
 
   Future<void> setClockOffsetSeconds(double seconds);
-
-  /// The tap-time instant "Iniciar rota" was pressed for [routeId], or null
-  /// before it has been pressed on this device. The optimistic marker that
-  /// lets the UI treat the route as started while the outbox row is still
-  /// `pending` (spec Ruling 5).
-  Future<DateTime?> getRouteStartedAt(String routeId);
-
-  Future<void> setRouteStartedAt(String routeId, DateTime startedAt);
 }
 
 class DriftSyncMetaStore implements SyncMetaStore {
@@ -35,19 +27,6 @@ class DriftSyncMetaStore implements SyncMetaStore {
   @override
   Future<void> setClockOffsetSeconds(double seconds) =>
       _set(_clockOffsetKey, seconds.toString());
-
-  static String _routeStartedAtKey(String routeId) =>
-      'route:$routeId:started_at';
-
-  @override
-  Future<DateTime?> getRouteStartedAt(String routeId) async {
-    final raw = await _get(_routeStartedAtKey(routeId));
-    return raw == null ? null : DateTime.parse(raw);
-  }
-
-  @override
-  Future<void> setRouteStartedAt(String routeId, DateTime startedAt) =>
-      _set(_routeStartedAtKey(routeId), startedAt.toIso8601String());
 
   Future<String?> _get(String key) async {
     final row = await (_db.select(

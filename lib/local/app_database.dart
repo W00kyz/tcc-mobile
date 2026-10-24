@@ -100,7 +100,7 @@ class AppDatabase extends _$AppDatabase {
     : super(executor ?? driftDatabase(name: 'route_monitor'));
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -130,6 +130,22 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 4) {
         await m.createTable(formDraftItems);
+      }
+      if (from < 5) {
+        // "Iniciar rota" left the outbox: it is an online call now (spec
+        // 2026-10-20-alocacao-automatica §9). A queued `startRoute` row would
+        // make `PendingOpKind.values.byName` throw on the next drain, and its
+        // replay would hit an endpoint that no longer exists.
+        await customStatement(
+          "DELETE FROM pending_operations WHERE kind = 'startRoute'",
+        );
+        // The optimistic "iniciada" markers went with it, and the cached
+        // `/routes/me` body was a route list — the new body is a `MyDay`.
+        await customStatement(
+          'DELETE FROM sync_meta '
+          "WHERE key LIKE 'route:%:started_at' "
+          "OR key LIKE 'routes_me_snapshot:%'",
+        );
       }
     },
   );

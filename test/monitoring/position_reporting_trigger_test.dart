@@ -14,18 +14,20 @@ import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
+import '../support/fake_route_repository.dart';
+
 void main() {
   late _SpyReporter reporter;
   late ProviderContainer container;
-  late List<RouteSummary> currentRoutes;
+  late RouteSummary? currentRoute;
 
   setUp(() {
     reporter = _SpyReporter();
-    currentRoutes = const [];
+    currentRoute = null;
     container = ProviderContainer(
       overrides: [
         positionReporterProvider.overrideWithValue(reporter),
-        myRoutesProvider.overrideWith((ref) async => currentRoutes),
+        myDayProvider.overrideWith((ref) async => myDayWith(currentRoute)),
         sessionProvider.overrideWithBuild((ref, notifier) => _session()),
       ],
     );
@@ -44,23 +46,23 @@ void main() {
     );
   }
 
-  void setRoutes(List<RouteSummary> routes) {
-    currentRoutes = routes;
-    container.invalidate(myRoutesProvider);
+  void setRoute(RouteSummary? route) {
+    currentRoute = route;
+    container.invalidate(myDayProvider);
   }
 
   testWidgets('starts the reporter for an IN_PROGRESS route', (tester) async {
-    setRoutes([_route('r1', 'IN_PROGRESS')]);
+    setRoute(_route('IN_PROGRESS'));
     await pump(tester);
     await tester.pumpAndSettle();
 
     expect(reporter.started, ['r1']);
   });
 
-  testWidgets('stops the reporter when no route is IN_PROGRESS', (
+  testWidgets('stops the reporter before the first batch of the day', (
     tester,
   ) async {
-    setRoutes([_route('r1', 'PLANNED')]);
+    setRoute(null);
     await pump(tester);
     await tester.pumpAndSettle();
 
@@ -71,12 +73,12 @@ void main() {
   testWidgets('stops the reporter once the route leaves IN_PROGRESS', (
     tester,
   ) async {
-    setRoutes([_route('r1', 'IN_PROGRESS')]);
+    setRoute(_route('IN_PROGRESS'));
     await pump(tester);
     await tester.pumpAndSettle();
     expect(reporter.started, ['r1']);
 
-    setRoutes([_route('r1', 'DONE')]);
+    setRoute(_route('DONE'));
     await tester.pumpAndSettle();
 
     expect(reporter.stopCount, greaterThanOrEqualTo(1));
@@ -87,11 +89,11 @@ void main() {
   testWidgets(
     'never starts the reporter while the session still owes consent (RNF10)',
     (tester) async {
-      currentRoutes = [_route('r1', 'IN_PROGRESS')];
+      currentRoute = _route('IN_PROGRESS');
       container = ProviderContainer(
         overrides: [
           positionReporterProvider.overrideWithValue(reporter),
-          myRoutesProvider.overrideWith((ref) async => currentRoutes),
+          myDayProvider.overrideWith((ref) async => myDayWith(currentRoute)),
           sessionProvider.overrideWithBuild(
             (ref, notifier) => _session(consentRequired: true),
           ),
@@ -107,14 +109,14 @@ void main() {
     },
   );
 
-  // The `if (routes == null) return child;` guard is the load-bearing
-  // login-screen-crash guard: with no successful route list, the widget must
+  // The `if (day == null) return child;` guard is the load-bearing
+  // login-screen-crash guard: with no successful day, the widget must
   // NOT touch `positionReporterProvider` (it reads `API_BASE_URL`, unset on the
   // login screen). Here `positionReporterProvider` is deliberately left
   // un-overridden and pointed at a builder that throws, so any read fails.
   for (final state in ['error', 'loading']) {
     testWidgets(
-      'renders child without reading the reporter ($state route list)',
+      'renders child without reading the reporter ($state day)',
       (
         tester,
       ) async {
@@ -126,9 +128,9 @@ void main() {
               (ref) =>
                   throw StateError('positionReporterProvider must not be read'),
             ),
-            myRoutesProvider.overrideWith((ref) async {
+            myDayProvider.overrideWith((ref) async {
               if (state == 'error') throw Exception('logged out');
-              return Completer<List<RouteSummary>>().future;
+              return Completer<MyDay>().future;
             }),
           ],
         );
@@ -161,15 +163,7 @@ Session _session({bool consentRequired = false}) => Session(
   consentRequired: consentRequired,
 );
 
-RouteSummary _route(String id, String status) => RouteSummary(
-  id: id,
-  fieldWorkerName: 'Ana',
-  routeDate: DateTime.utc(2026, 9, 7),
-  routeType: 'DAILY',
-  status: status,
-  startedAt: null,
-  stops: const [],
-);
+RouteSummary _route(String status) => routeWith(status: status, stops: []);
 
 class _SpyReporter extends PositionReporter {
   _SpyReporter()
