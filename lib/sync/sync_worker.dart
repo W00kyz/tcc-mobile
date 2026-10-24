@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
@@ -189,13 +190,19 @@ class SyncWorker {
     _statusControllers.clear();
   }
 
-  /// Dispatches one row and says where it ended.
+  /// Dispatches one row and says where it ended. A synced scan is reported
+  /// only once the row's state is final, so the report can never change it.
   Future<_Dispatched> _dispatch(PendingOperationRow row) async {
+    final outcome = await _attempt(row);
+    if (outcome == _Dispatched.synced) _reportScanDelivered(row);
+    return outcome;
+  }
+
+  Future<_Dispatched> _attempt(PendingOperationRow row) async {
     try {
       final serverDate = await _perform(row);
       await _store.markSynced(row.id);
       await _recordOffset(serverDate);
-      _reportScanDelivered(row);
       return _Dispatched.synced;
       // Deliberately broad: _classify sorts every failure (DioException,
       // AmbiguousRoomException, or anything else) into soft/alreadyApplied/
@@ -204,9 +211,8 @@ class SyncWorker {
     } catch (error) {
       final classification = _classify(error);
       if (classification == SyncErrorClass.alreadyApplied) {
-        await _store.markSynced(row.id);
         // The server had it already — and counted its scan then.
-        _reportScanDelivered(row);
+        await _store.markSynced(row.id);
         return _Dispatched.synced;
       }
       if (classification == SyncErrorClass.awaitingAuth) {
@@ -225,11 +231,29 @@ class SyncWorker {
     }
   }
 
+  /// Best-effort: the row is already synced, and a failing listener (e.g. a
+  /// disposed Riverpod ref) must neither un-sync it nor stop the pass.
   void _reportScanDelivered(PendingOperationRow row) {
     final isScan =
         row.kind == PendingOpKind.checkIn || row.kind == PendingOpKind.checkOut;
     if (!isScan) return;
-    _onScanDelivered?.call(DateTime.parse(row.payload['scanned_at'] as String));
+    try {
+      _onScanDelivered?.call(
+        DateTime.parse(row.payload['scanned_at'] as String),
+      );
+      // Deliberately broad, for the reason above.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (error, stack) {
+      developer.log(
+        jsonEncode({
+          'event': 'scan_delivery_report_failed',
+          'operation_id': row.id,
+          'error': '$error',
+        }),
+        name: 'sync_worker',
+        stackTrace: stack,
+      );
+    }
   }
 
   /// Ruling 5 review carry: `markRetryScheduled` does not set `state=failed`,

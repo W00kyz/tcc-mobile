@@ -392,12 +392,19 @@ class _Harness {
       evidenceApi,
       now: () => now,
       random: _ZeroRandom(),
-      onScanDelivered: deliveredScans.add,
+      onScanDelivered: (scannedAt) {
+        deliveredScans.add(scannedAt);
+        // ignore: only_throw_errors — replays what a disposed ref throws.
+        if (scanCallbackError != null) throw scanCallbackError!;
+      },
     );
   }
 
   final log = <String>[];
   final deliveredScans = <DateTime>[];
+
+  /// When set, the delivery callback throws it (e.g. a disposed Riverpod ref).
+  Object? scanCallbackError;
   late final store = _FakeLocalWriteStore();
   final stopProgress = _FakeStopProgressStore();
   final syncMeta = _FakeSyncMetaStore();
@@ -747,6 +754,39 @@ void main() {
       await h.worker.syncRoute('route-R');
 
       expect(h.deliveredScans, isEmpty);
+    });
+
+    test(
+      'a throwing callback never un-syncs the row or stops the pass',
+      () async {
+        final h = _Harness()..scanCallbackError = StateError('ref unmounted');
+        h.store
+          ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+          ..seed('b', kind: PendingOpKind.evidencePhoto, createdAt: 2);
+
+        await h.worker.syncRoute('route-R');
+
+        expect(h.store.rows['a']!.state, PendingOpState.synced);
+        expect(h.store.rows['b']!.state, PendingOpState.synced);
+        expect(h.log, ['checkIn:a', 'photo:b']);
+      },
+    );
+
+    test('…nor on the "already applied" path', () async {
+      final h = _Harness()..scanCallbackError = StateError('ref unmounted');
+      h.executionApi.checkInError = _dio(
+        status: 409,
+        body: {'detail': 'Route already started'},
+      );
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.evidencePhoto, createdAt: 2);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.store.rows['a']!.state, PendingOpState.synced);
+      expect(h.store.rows['b']!.state, PendingOpState.synced);
+      expect(h.log, ['checkIn:a', 'photo:b']);
     });
 
     test('a scan the server already had still counts', () async {

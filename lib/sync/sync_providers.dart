@@ -35,9 +35,12 @@ final syncWorkerProvider = Provider<SyncWorker>((ref) {
     ref.watch(executionApiProvider),
     ref.watch(evidenceApiProvider),
     // Read at each delivery, not watched: the watchdog's rebuilds must not
-    // rebuild the outbox worker.
-    onScanDelivered: (scannedAt) =>
-        ref.read(silenceWatchdogProvider)?.onActivity(scannedAt),
+    // rebuild the outbox worker. A pass that outlives this worker (another
+    // user signed in mid-drain) finds the ref unmounted and reports nothing.
+    onScanDelivered: (scannedAt) {
+      if (!ref.mounted) return;
+      ref.read(silenceWatchdogProvider)?.onActivity(scannedAt);
+    },
   );
   ref.onDispose(worker.dispose);
   return worker;

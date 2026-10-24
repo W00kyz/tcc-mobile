@@ -60,9 +60,13 @@ final positionReporterProvider = Provider<PositionReporter>((ref) {
     api: ref.watch(monitoringApiProvider),
     notification: ref.watch(ongoingNotificationProvider),
     // Read at each send, not watched: the watchdog is rebuilt when the
-    // server's limits change, and that must not restart the reporter.
-    onPositionSent: (sentAt) =>
-        ref.read(silenceWatchdogProvider)?.onActivity(sentAt),
+    // server's limits change, and that must not restart the reporter. A send
+    // that lands after this reporter was disposed (another user) finds the
+    // ref unmounted and reports nothing — reading it would throw.
+    onPositionSent: (sentAt) {
+      if (!ref.mounted) return;
+      ref.read(silenceWatchdogProvider)?.onActivity(sentAt);
+    },
   );
   ref.onDispose(reporter.dispose);
   return reporter;

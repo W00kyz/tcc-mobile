@@ -165,7 +165,10 @@ Dio buildUserScopedSessionDio(Ref ref, {required String baseUrl}) {
   final notifier = ref.read(sessionProvider.notifier);
   return buildDio(
     baseUrl: baseUrl,
-    readAccessToken: () => ref.read(sessionProvider)?.accessToken,
+    // A request still in flight from a client whose provider was disposed
+    // (another user) sends no token rather than throw on the dead ref.
+    readAccessToken: () =>
+        ref.mounted ? ref.read(sessionProvider)?.accessToken : null,
     onUnauthorized: notifier.refreshAccessToken,
     onWorkerNotApproved: notifier.refreshWorkerStanding,
   );

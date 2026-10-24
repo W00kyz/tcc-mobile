@@ -44,13 +44,23 @@ final stopProgressStoreProvider = Provider<StopProgressStore>(
   (ref) => DriftStopProgressStore(ref.watch(appDatabaseProvider)),
 );
 
+// Scoped to the signed-in user, not to the session (like
+// `monitoringApiProvider`): the sync worker holds these for its whole life,
+// and a token refresh rebuilding it mid-drain left the running pass on a
+// disposed ref (`buildUserScopedSessionDio`).
 final executionApiProvider = Provider<ExecutionApi>((ref) {
-  final dio = buildSessionDio(ref);
+  final dio = buildUserScopedSessionDio(
+    ref,
+    baseUrl: ref.watch(apiBaseUrlProvider),
+  );
   return DioExecutionApi(dio);
 });
 
 final evidenceApiProvider = Provider<EvidenceApi>((ref) {
-  final dio = buildSessionDio(ref);
+  final dio = buildUserScopedSessionDio(
+    ref,
+    baseUrl: ref.watch(apiBaseUrlProvider),
+  );
   return DioEvidenceApi(dio);
 });
 

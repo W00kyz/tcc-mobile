@@ -9,15 +9,20 @@ import 'package:route_monitor/local/app_database.dart';
 // executionApiProvider builds on top of env.dart's apiBaseUrlFromEnvironment
 // (see env_test.dart), which throws StateError under plain `flutter test`
 // because no --dart-define is passed. Riverpod wraps any error a provider's
-// body throws in a ProviderException, so that is the shape a container read
+// body throws in a ProviderException — once more for each provider it went
+// through (here `apiBaseUrlProvider`) — so that is the shape a container read
 // surfaces here, regardless of whether a session is present yet.
 final Matcher _throwsWrappedStateError = throwsA(
-  isA<ProviderException>().having(
-    (exception) => exception.exception,
-    'exception',
-    isA<StateError>(),
-  ),
+  isA<ProviderException>().having(_rootCause, 'root cause', isA<StateError>()),
 );
+
+Object _rootCause(ProviderException exception) {
+  var cause = exception.exception;
+  while (cause is ProviderException) {
+    cause = cause.exception;
+  }
+  return cause;
+}
 
 void main() {
   test(
