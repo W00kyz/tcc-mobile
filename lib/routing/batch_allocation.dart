@@ -19,8 +19,9 @@ import 'package:route_monitor/sync/sync_status.dart';
 enum AllocationOutcome {
   allocated,
 
-  /// Nothing left to hand out today — also what `ROUTE_DONE` means: a retry
-  /// after the empty-pool answer was lost.
+  /// Nothing to hand out right now (the route is DONE until points go back
+  /// to the pool — "Verificar de novo" asks again). Also what `ROUTE_DONE`
+  /// (a route of a past day) is shown as.
   poolEmpty,
   notAServiceDay,
   workdayOver,
@@ -28,8 +29,10 @@ enum AllocationOutcome {
   offline,
   locationUnavailable,
 
-  /// Any other refusal: a 403 (privacy notice owed, worker not approved — the
-  /// app's gates take it from there), a 404, a 5xx.
+  /// Any other refusal: a 403, a 404, a 5xx. A 403 `CONSENT_REQUIRED` or
+  /// `WORKER_NOT_APPROVED` has already flagged the session by the time this
+  /// comes back (the interceptors of `buildSessionDio`), so the router moves
+  /// to the consent or waiting screen; any other one is just a failure.
   failed,
 }
 

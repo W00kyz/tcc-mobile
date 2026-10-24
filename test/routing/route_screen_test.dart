@@ -1063,9 +1063,11 @@ void main() {
       },
     );
 
-    testWidgets('a finished route says there are no more points today', (
-      tester,
-    ) async {
+    Finder checkAgainButton() =>
+        find.widgetWithText(FilledButton, AppStrings.routeCheckAgainButton);
+
+    testWidgets('a finished route says there are no points now and offers to '
+        'check again', (tester) async {
       final done = routeWith(
         status: 'DONE',
         stops: [stopWith(id: 's1', status: 'DONE')],
@@ -1073,11 +1075,67 @@ void main() {
       await tester.pumpWidget(_screenWith(_repositoryWith(done)));
       await tester.pumpAndSettle();
 
-      expect(find.text(AppStrings.routeNoMorePoints), findsOneWidget);
+      expect(find.text('Não há mais pontos agora.'), findsOneWidget);
+      expect(checkAgainButton(), findsOneWidget);
       expect(
         find.widgetWithText(FilledButton, AppStrings.routeStartButton),
         findsNothing,
       );
+    });
+
+    testWidgets('"Verificar de novo" takes the points released since', (
+      tester,
+    ) async {
+      // Spec §1: a colleague's point went back to the pool after this route
+      // ran out; asking again reopens the route with it.
+      final done = routeWith(
+        status: 'DONE',
+        stops: [stopWith(id: 's1', status: 'DONE')],
+      );
+      final reopened = routeWith(
+        currentBatch: 2,
+        stops: [
+          stopWith(id: 's1', status: 'DONE'),
+          stopWith(
+            id: 's2',
+            orderIndex: 2,
+            batchNumber: 2,
+            servicePointName: 'Sala 205',
+          ),
+        ],
+      );
+      final repository = _repositoryWith(done);
+      repository.allocate = () {
+        repository.day = myDayWith(reopened);
+        return AllocationResult(route: reopened, poolEmpty: false);
+      };
+      await tester.pumpWidget(_screenWith(repository));
+      await tester.pumpAndSettle();
+
+      await tester.tap(checkAgainButton());
+      await tester.pumpAndSettle();
+
+      expect(repository.allocationCalls, ['start']);
+      expect(find.text('Sala 205'), findsOneWidget);
+      expect(checkAgainButton(), findsNothing);
+    });
+
+    testWidgets('"Verificar de novo" with the pool still empty says so', (
+      tester,
+    ) async {
+      final done = routeWith(status: 'DONE', stops: const []);
+      final repository = _repositoryWith(done)
+        ..allocate = () => AllocationResult(route: done, poolEmpty: true);
+      await tester.pumpWidget(_screenWith(repository));
+      await tester.pumpAndSettle();
+
+      await tester.tap(checkAgainButton());
+      await tester.pumpAndSettle();
+
+      expect(repository.allocationCalls, ['start']);
+      // The snackbar and the finished-route state both say it.
+      expect(find.text(AppStrings.routeNoMorePoints), findsNWidgets(2));
+      expect(checkAgainButton(), findsOneWidget);
     });
   });
 

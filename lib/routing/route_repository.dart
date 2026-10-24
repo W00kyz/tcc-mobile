@@ -236,8 +236,10 @@ final class OutsideCampusException implements Exception {
       'expected a position inside the campus bounds.';
 }
 
-/// 409 `ROUTE_DONE`: today's route is already closed — the same meaning as an
-/// empty pool, which is what a retry after a lost `pool_empty` answer gets.
+/// 409 `ROUTE_DONE`: the route asked about belongs to a past day (the app kept
+/// yesterday's route past midnight). The server never refuses today's route
+/// so — a DONE route of today is looked at again and answers `pool_empty`.
+/// Shown like an empty pool: "no points now", and the day reloads.
 final class RouteDoneException implements Exception {
   const RouteDoneException();
 
@@ -353,8 +355,9 @@ class DioRouteRepository implements RouteRepository {
       if (error.response == null) throw OfflineException(path);
       final refusal = _refusalFor(error);
       if (refusal != null) throw refusal;
-      // 403 (privacy notice owed, worker not approved), 404 (another
-      // worker's route), 5xx: the caller's generic failure path.
+      // 403, 404 (another worker's route), 5xx: the caller's generic failure
+      // path. A 403 CONSENT_REQUIRED / WORKER_NOT_APPROVED already flagged the
+      // session on its way here (buildSessionDio), and the router moves on.
       rethrow;
     }
   }

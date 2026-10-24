@@ -123,7 +123,9 @@ class RouteScreen extends ConsumerWidget {
         paused: true,
         releaseReason: route.latestReleaseReason,
       ),
-      'DONE' => const Center(child: Text(AppStrings.routeNoMorePoints)),
+      // Not final before the workday ends: points released later go back to
+      // the pool, and "Verificar de novo" asks for them (spec §1).
+      'DONE' => const StartRoutePanel(done: true),
       _ => _buildBatch(context, ref, route, nextBatch),
     };
   }

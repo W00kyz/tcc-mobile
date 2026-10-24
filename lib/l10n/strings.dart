@@ -131,7 +131,8 @@ abstract final class AppStrings {
   static const String routeOutsideCampus =
       'Você precisa estar no campus para iniciar.';
   static const String routeWorkdayOver = 'O expediente de hoje já terminou.';
-  static const String routeNoMorePoints = 'Não há mais pontos hoje.';
+  static const String routeNoMorePoints = 'Não há mais pontos agora.';
+  static const String routeCheckAgainButton = 'Verificar de novo';
   static const String routeStartFailed =
       'Não foi possível iniciar a rota. Tente novamente.';
   static const String routePausedTitle = 'Seus pontos foram liberados';
@@ -347,9 +348,8 @@ abstract final class AppStrings {
       'Não foi possível carregar as notificações.';
   static const String notificationsEmpty = 'Nenhuma notificação.';
   static const String notificationKindAlert = 'Alerta';
-  static const String notificationKindRouteAssigned = 'Nova rota';
-  static const String notificationKindRouteModified = 'Rota alterada';
-  static const String notificationKindStopReassigned = 'Ponto reatribuído';
+  static const String notificationKindImpedimentReported = 'Impossibilidade';
+  static const String notificationKindAppealFiled = 'Recurso';
 
   /// `<kind> · <timestamp>` metadata line under a notification.
   static String notificationMeta(String kind, String timestamp) =>

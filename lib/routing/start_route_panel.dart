@@ -10,15 +10,26 @@ import 'package:route_monitor/routing/batch_allocation.dart';
 
 /// The "Iniciar rota" button, alone on a day with no route yet or under the
 /// "Seus pontos foram liberados" notice of a paused route (where it resumes
-/// the route with a new batch). The outcome of a refused start is shown as a
-/// snackbar; a successful one reloads the day, which replaces this panel.
+/// the route with a new batch) — or, on a route the pool ran out for, the
+/// "Verificar de novo" button under "Não há mais pontos agora.": points
+/// released since (a colleague went silent, say) reopen it (spec §1). The
+/// outcome of a refused start is shown as a snackbar; a successful one reloads
+/// the day, which replaces this panel.
 ///
 ///     StartRoutePanel(paused: true, releaseReason: route.latestReleaseReason)
 class StartRoutePanel extends ConsumerStatefulWidget {
-  const StartRoutePanel({super.key, this.paused = false, this.releaseReason});
+  const StartRoutePanel({
+    super.key,
+    this.paused = false,
+    this.done = false,
+    this.releaseReason,
+  });
 
   /// True on a `PAUSED` route: explains why before offering to resume.
   final bool paused;
+
+  /// True on a `DONE` route: nothing was left in the pool last time asked.
+  final bool done;
 
   /// The `release_reason` code behind the pause, when known.
   final String? releaseReason;
@@ -52,11 +63,19 @@ class _StartRoutePanelState extends ConsumerState<StartRoutePanel> {
                 ),
               const SizedBox(height: 16),
             ],
+            if (widget.done) ...[
+              const Text(AppStrings.routeNoMorePoints),
+              const SizedBox(height: 16),
+            ],
             FilledButton(
               // Disabled while a request is out; the server would hand the
               // same batch back to a double tap anyway.
               onPressed: _starting ? null : _start,
-              child: const Text(AppStrings.routeStartButton),
+              child: Text(
+                widget.done
+                    ? AppStrings.routeCheckAgainButton
+                    : AppStrings.routeStartButton,
+              ),
             ),
           ],
         ),
