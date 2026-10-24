@@ -292,10 +292,10 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text(AppStrings.blockedSyncReleasedStop('s1')), findsOne);
+        expect(find.text(AppStrings.releasedStopTitle('s1')), findsOne);
         expect(
           find.text(
-            AppStrings.blockedSyncReleasedReason(
+            AppStrings.releasedStopReason(
               AppStrings.releaseReasonLabel('LOCATION_SILENCE'),
             ),
           ),
@@ -307,7 +307,7 @@ void main() {
           findsOneWidget,
         );
         expect(
-          find.widgetWithText(TextButton, AppStrings.blockedSyncAppealButton),
+          find.widgetWithText(TextButton, AppStrings.releasedStopAppealButton),
           findsOneWidget,
         );
       },
@@ -326,7 +326,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, AppStrings.blockedSyncAppealButton),
+        find.widgetWithText(TextButton, AppStrings.releasedStopAppealButton),
       );
       await tester.pumpAndSettle();
 
@@ -351,25 +351,25 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.widgetWithText(TextButton, AppStrings.blockedSyncAppealButton),
+          find.widgetWithText(TextButton, AppStrings.releasedStopAppealButton),
           findsNothing,
         );
         await tester.tap(
-          find.widgetWithText(TextButton, AppStrings.blockedSyncDiscardButton),
+          find.widgetWithText(TextButton, AppStrings.releasedStopDiscardButton),
         );
         await tester.pumpAndSettle();
-        expect(find.text(AppStrings.blockedSyncDiscardBody), findsOneWidget);
+        expect(find.text(AppStrings.releasedStopDiscardBody), findsOneWidget);
         await tester.tap(
           find.widgetWithText(
             FilledButton,
-            AppStrings.blockedSyncDiscardButton,
+            AppStrings.releasedStopDiscardButton,
           ),
         );
         await tester.pumpAndSettle();
 
         expect(released.discarded, ['s1']);
         expect(
-          find.text(AppStrings.blockedSyncReleasedStop('s1')),
+          find.text(AppStrings.releasedStopTitle('s1')),
           findsNothing,
         );
         expect(
@@ -395,7 +395,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.widgetWithText(TextButton, AppStrings.blockedSyncDiscardButton),
+        find.widgetWithText(TextButton, AppStrings.releasedStopDiscardButton),
       );
       await tester.pumpAndSettle();
       await tester.tap(
@@ -404,7 +404,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(released.discarded, isEmpty);
-      expect(find.text(AppStrings.blockedSyncReleasedStop('s1')), findsOne);
+      expect(find.text(AppStrings.releasedStopTitle('s1')), findsOne);
     });
   });
 }

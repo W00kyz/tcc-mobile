@@ -1146,6 +1146,9 @@ void main() {
           syncWorkerProvider.overrideWithValue(_RecordingSyncWorker()),
           stopProgressStoreProvider.overrideWithValue(_NoopStopProgressStore()),
           localWriteStoreProvider.overrideWithValue(_InMemoryLocalWriteStore()),
+          // The appeals badge reads both: never the network or the device DB.
+          appealApiProvider.overrideWithValue(RecordingAppealApi()),
+          releasedStopStoreProvider.overrideWithValue(_NoReleasedStops()),
         ],
         child: MaterialApp(
           home: RouteScreen(mapTileProvider: NoTilesTileProvider()),
@@ -3141,6 +3144,47 @@ void main() {
       expect(find.text(AppStrings.releasedStopsSnackbar), findsNothing);
     });
 
+    testWidgets(
+      'a reload of the day refreshes the appeals badge: the server may have '
+      'released points meanwhile',
+      (tester) async {
+        final appealApi = RecordingAppealApi();
+        await tester.pumpWidget(
+          _screenWith(_repositoryWith(route), appealApi: appealApi),
+        );
+        await tester.pumpAndSettle();
+        final callsAfterLoad = appealApi.eligibleCalls;
+
+        ProviderScope.containerOf(
+          tester.element(find.byType(RouteScreen)),
+        ).invalidate(myDayProvider);
+        await tester.pumpAndSettle();
+
+        expect(appealApi.eligibleCalls, callsAfterLoad + 1);
+      },
+    );
+
+    testWidgets('a released stop without a reason reads just "Liberado"', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _screenWith(
+          _repositoryWith(
+            routeWith(
+              stops: [
+                stopWith(id: 's1', status: 'RELEASED', servicePointName: 'X'),
+                stopWith(id: 's2', orderIndex: 2),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Liberado'), findsOneWidget);
+      expect(find.textContaining('Liberado · '), findsNothing);
+    });
+
     testWidgets('the app bar counts the points the worker can contest', (
       tester,
     ) async {
@@ -3230,7 +3274,7 @@ class _NoReleasedStops implements ReleasedStopStore {
   Future<ReleasedStopNotice?> noticeFor(String routeStopId) async => null;
 
   @override
-  Future<List<ReleasedStopNotice>> appealableNotices() async => const [];
+  Future<List<ReleasedStopNotice>> allNotices() async => const [];
 
   @override
   Future<void> discardStop(String routeStopId) async {}

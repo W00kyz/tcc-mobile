@@ -12,9 +12,13 @@ import 'package:drift/drift.dart' show OrderingTerm;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
+import 'package:route_monitor/appeals/appeal_api.dart';
 import 'package:route_monitor/appeals/appeal_form_screen.dart';
 import 'package:route_monitor/appeals/appeal_providers.dart';
+import 'package:route_monitor/appeals/appeals_screen.dart';
 import 'package:route_monitor/appeals/day_time.dart';
+import 'package:route_monitor/appeals/released_stop_entry.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
@@ -31,6 +35,7 @@ import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_screen.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
+import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -367,6 +372,201 @@ void main() {
       expect(find.text(AppStrings.routeAllSynced), findsOneWidget);
     },
   );
+
+  group('a release that closes the route (spec §7.2–§7.4)', () {
+    /// A button of the device entry on `/recursos` — not the snackbar's
+    /// action of the same name.
+    Finder entryButton(String label) => find.descendant(
+      of: find.byType(ReleasedStopEntry),
+      matching: find.widgetWithText(TextButton, label),
+    );
+
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    /// Offline at stop 1: check-in and check-out (and, with [photo], a
+    /// photo in between). Returns the stop-1 execution id.
+    Future<String> workStop1Offline(
+      _Fixture fixture, {
+      bool photo = false,
+    }) async {
+      final execution = await fixture.repo.checkIn(
+        routeId: _routeId,
+        routeStopId: _stop1,
+        qrPayload: _qr,
+      );
+      if (photo) {
+        await fixture.repo.addPhoto(
+          routeId: _routeId,
+          executionId: execution,
+          photo: _photo,
+        );
+      }
+      await fixture.repo.checkOut(
+        routeId: _routeId,
+        routeStopId: _stop1,
+        qrPayload: _qr,
+      );
+      return execution;
+    }
+
+    /// Mounts the app on the closed day, brings the network back and syncs.
+    Future<void> syncTheClosedDay(WidgetTester tester, _Fixture fixture) async {
+      await fixture.container.read(myDayProvider.future);
+      await tester.pumpWidget(fixture.app());
+      await settle(tester);
+      fixture.connectivity.goOnline();
+      await fixture.worker.syncAll();
+      await settle(tester);
+    }
+
+    Future<void> openAppeals(WidgetTester tester) async {
+      await tester.tap(find.byTooltip(AppStrings.appealsTooltip));
+      await settle(tester);
+      expect(find.byType(AppealsScreen), findsOneWidget);
+    }
+
+    Future<void> expectStop1GoneAndAllSynced(
+      _Fixture fixture,
+      String execution,
+    ) async {
+      expect(await fixture.rowsOfStop(_stop1, execution), isEmpty);
+      expect(await fixture.stopProgress.progressFor(_stop1), isNull);
+      expect(await fixture.releasedStops.noticeFor(_stop1), isNull);
+      final status = await fixture.syncStatus();
+      expect(status.state, RouteSyncState.idle);
+      expect(status.pending, 0);
+      expect(status.blocked, 0);
+    }
+
+    testWidgets(
+      'silence frees every live stop and pauses the route: the parked '
+      'check-in, and the check-out held behind it, are appealed from '
+      '/recursos and leave the device',
+      (tester) async {
+        final fixture = await _Fixture.create();
+        addTearDown(fixture.dispose);
+        final execution = await workStop1Offline(fixture);
+        fixture.releaseEveryLiveStop(
+          reason: 'LOCATION_SILENCE',
+          appealable: true,
+          routeStatus: 'PAUSED',
+          stop1Execution: execution,
+        );
+        fixture.appealApi.eligibleStops = [
+          AppealableStop(
+            routeStopId: _stop1,
+            servicePointName: 'Sala 101',
+            buildingName: 'Bloco CAA',
+            floorLabel: 'Térreo',
+            releaseReason: 'LOCATION_SILENCE',
+            deadline: DateTime.utc(2026, 9, 5, 12),
+          ),
+        ];
+
+        await syncTheClosedDay(tester, fixture);
+
+        // The check-in came back 409 and was parked; its check-out stayed
+        // behind it (BlockedScope) and never left the device.
+        expect(fixture.callLog, ['checkIn:$_stop1']);
+        final parked = await fixture.store.blockedForRoute(_routeId);
+        expect(parked.single.kind, PendingOpKind.checkIn);
+        expect(parked.single.releasedStopId, _stop1);
+        final held = await fixture.store.unsyncedForRoute(_routeId);
+        expect(held.single.kind, PendingOpKind.checkOut);
+        // A paused day draws no sync banner: the blocked-sync screen is out
+        // of reach, so /recursos is the way out.
+        expect(find.text(AppStrings.routePausedTitle), findsOneWidget);
+        expect(find.text(AppStrings.routeSyncBlockedBanner), findsNothing);
+        // The snackbar offered the appeal too; this test takes the other
+        // road, so it is put away (it would sit over the form's button).
+        expect(find.text(AppStrings.releasedStopsSnackbar), findsOneWidget);
+        ScaffoldMessenger.of(
+          tester.element(find.byType(RouteScreen)),
+        ).removeCurrentSnackBar();
+        await settle(tester);
+
+        await openAppeals(tester);
+        expect(find.text(AppStrings.appealsLocalTitle), findsOneWidget);
+        await tester.tap(entryButton(AppStrings.releasedStopAppealButton));
+        await settle(tester);
+        expect(find.byType(AppealFormScreen), findsOneWidget);
+        await tester.tap(find.text(AppStrings.appealReasonNoSignal));
+        await settle(tester);
+        await tester.tap(
+          find.widgetWithText(FilledButton, AppStrings.appealSubmit),
+        );
+        await settle(tester);
+        await tester.tap(
+          find.widgetWithText(FilledButton, AppStrings.appealWarningConfirm),
+        );
+        await settle(tester);
+
+        final filing = fixture.appealApi.filed.single;
+        expect(filing.routeStopId, _stop1);
+        expect(
+          filing.claimedExecutedAt!.millisecondsSinceEpoch,
+          fixture.executionApi.scannedAtArgs.single.millisecondsSinceEpoch,
+        );
+        await expectStop1GoneAndAllSynced(fixture, execution);
+        // Back on /recursos, the device entry is gone.
+        expect(find.byType(AppealFormScreen), findsNothing);
+        expect(find.text(AppStrings.appealsLocalTitle), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'the end of the day closes the route and the release can no longer be '
+      'appealed: from /recursos the worker discards the parked stop',
+      (tester) async {
+        final fixture = await _Fixture.create();
+        addTearDown(fixture.dispose);
+        final execution = await workStop1Offline(fixture, photo: true);
+        fixture.releaseEveryLiveStop(
+          reason: 'END_OF_DAY',
+          appealable: false,
+          routeStatus: 'DONE',
+          stop1Execution: execution,
+        );
+
+        await syncTheClosedDay(tester, fixture);
+
+        expect(fixture.callLog, ['checkIn:$_stop1']);
+        expect(
+          (await fixture.store.blockedForRoute(_routeId)).single.releasedStopId,
+          _stop1,
+        );
+        // The photo and the check-out are held behind the parked check-in.
+        expect(await fixture.store.unsyncedForRoute(_routeId), hasLength(2));
+        expect(find.text(AppStrings.routeNoMorePoints), findsOneWidget);
+        expect(find.text(AppStrings.releasedStopsSnackbar), findsNothing);
+        // The device stop alone badges the entry.
+        expect(find.widgetWithText(Badge, '1'), findsOneWidget);
+
+        await openAppeals(tester);
+        expect(find.text(AppStrings.releasedStopNotAppealable), findsOneWidget);
+        expect(
+          entryButton(AppStrings.releasedStopAppealButton),
+          findsNothing,
+        );
+        await tester.tap(entryButton(AppStrings.releasedStopDiscardButton));
+        await settle(tester);
+        await tester.tap(
+          find.widgetWithText(
+            FilledButton,
+            AppStrings.releasedStopDiscardButton,
+          ),
+        );
+        await settle(tester);
+
+        await expectStop1GoneAndAllSynced(fixture, execution);
+        expect(find.text(AppStrings.appealsLocalTitle), findsNothing);
+        expect(fixture.appealApi.attempts, isEmpty);
+      },
+    );
+  });
 }
 
 const _routeId = 'r1';
@@ -394,26 +594,51 @@ DioException _dio({required int status}) {
   );
 }
 
-/// The 409 a write on a released stop gets (backend `stop_released_conflict`).
-DioException _stopReleased(String stop) {
-  final options = RequestOptions(path: '/check-outs');
-  return DioException(
-    requestOptions: options,
-    type: DioExceptionType.badResponse,
-    response: Response<dynamic>(
+/// What the server released, as every fake of it sees it: the route shows
+/// these stops RELEASED, and every later write on them — the evidence of
+/// their executions too — gets 409 STOP_RELEASED.
+class _ServerReleases {
+  final Map<String, ({String reason, bool appealable})> byStop = {};
+  final Map<String, String> stopOfExecution = {};
+
+  /// Releases [stop]; [executionId] is its execution, when the device has
+  /// evidence for it.
+  void release(
+    String stop, {
+    required String reason,
+    required bool appealable,
+    String? executionId,
+  }) {
+    byStop[stop] = (reason: reason, appealable: appealable);
+    if (executionId != null) stopOfExecution[executionId] = stop;
+  }
+
+  String? reasonFor(String stop) => byStop[stop]?.reason;
+
+  /// The 409 a write on [stop] gets (backend `stop_released_conflict`), or
+  /// null while the stop is live.
+  DioException? conflictFor(String? stop) {
+    final release = byStop[stop];
+    if (stop == null || release == null) return null;
+    final options = RequestOptions(path: '/check-outs');
+    return DioException(
       requestOptions: options,
-      statusCode: 409,
-      data: {
-        'detail': {
-          'code': 'STOP_RELEASED',
-          'detail': 'Route stop "$stop" was released back to the pool.',
-          'route_stop_id': stop,
-          'release_reason': 'LOCATION_SILENCE',
-          'appealable': true,
+      type: DioExceptionType.badResponse,
+      response: Response<dynamic>(
+        requestOptions: options,
+        statusCode: 409,
+        data: {
+          'detail': {
+            'code': 'STOP_RELEASED',
+            'detail': 'Route stop "$stop" was released back to the pool.',
+            'route_stop_id': stop,
+            'release_reason': release.reason,
+            'appealable': release.appealable,
+          },
         },
-      },
-    ),
-  );
+      ),
+    );
+  }
 }
 
 /// Everything the test drives: a real [ProviderContainer] with a real
@@ -427,6 +652,7 @@ class _Fixture {
     this.routeApi,
     this.connectivity,
     this.appealApi,
+    this.server,
     this.callLog,
   );
 
@@ -436,13 +662,15 @@ class _Fixture {
   final _RecordingRouteRepository routeApi;
   final _FakeConnectivity connectivity;
   final RecordingAppealApi appealApi;
+  final _ServerReleases server;
   final List<String> callLog;
 
   static Future<_Fixture> create() async {
     final callLog = <String>[];
-    final executionApi = _RecordingExecutionApi(callLog);
-    final evidenceApi = _RecordingEvidenceApi(callLog);
-    final routeApi = _RecordingRouteRepository(callLog);
+    final server = _ServerReleases();
+    final executionApi = _RecordingExecutionApi(callLog, server);
+    final evidenceApi = _RecordingEvidenceApi(callLog, server);
+    final routeApi = _RecordingRouteRepository(callLog, server);
     final connectivity = _FakeConnectivity();
     final appealApi = RecordingAppealApi();
     final db = inMemoryDatabase();
@@ -466,6 +694,7 @@ class _Fixture {
       routeApi,
       connectivity,
       appealApi,
+      server,
       callLog,
     );
   }
@@ -479,14 +708,24 @@ class _Fixture {
       container.read(releasedStopStoreProvider);
   AppDatabase get _db => container.read(appDatabaseProvider);
 
-  Widget app() => UncontrolledProviderScope(
-    container: container,
-    child: MaterialApp(
-      builder: (context, child) =>
-          SyncTriggers(child: child ?? const SizedBox.shrink()),
-      home: const RouteScreen(),
-    ),
-  );
+  /// The route screen as the app routes it, `/recursos` included.
+  Widget app() {
+    final router = GoRouter(
+      routes: [
+        GoRoute(path: '/', builder: (_, _) => const RouteScreen()),
+        GoRoute(path: '/recursos', builder: (_, _) => const AppealsScreen()),
+      ],
+    );
+    addTearDown(router.dispose);
+    return UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp.router(
+        routerConfig: router,
+        builder: (context, child) =>
+            SyncTriggers(child: child ?? const SizedBox.shrink()),
+      ),
+    );
+  }
 
   /// Drives the 5 field actions of the batch through the REAL
   /// [ExecutionRepository] while offline, capturing wall-clock time
@@ -559,14 +798,38 @@ class _Fixture {
     );
   }
 
-  /// The server releases stop 1 (LOCATION_SILENCE): its route shows it
-  /// RELEASED and every later write on it — [executionId]'s evidence too —
-  /// gets 409 STOP_RELEASED.
-  void releaseStop1({required String executionId}) {
-    routeApi.stop1Released = true;
-    executionApi.releasedStops.add(_stop1);
-    evidenceApi.releasedExecutions[executionId] = _stop1;
+  /// The server releases stop 1 alone (LOCATION_SILENCE, appealable), its
+  /// route staying IN_PROGRESS.
+  void releaseStop1({required String executionId}) => server.release(
+    _stop1,
+    reason: 'LOCATION_SILENCE',
+    appealable: true,
+    executionId: executionId,
+  );
+
+  /// What the server's release scan actually does (spec §7): every live
+  /// stop of the route goes back to the pool and the route becomes
+  /// [routeStatus] — PAUSED for silence or leaving campus, DONE at the end
+  /// of the day.
+  void releaseEveryLiveStop({
+    required String reason,
+    required bool appealable,
+    required String routeStatus,
+    String? stop1Execution,
+  }) {
+    server
+      ..release(
+        _stop1,
+        reason: reason,
+        appealable: appealable,
+        executionId: stop1Execution,
+      )
+      ..release(_stop2, reason: reason, appealable: appealable);
+    routeApi.routeStatus = routeStatus;
   }
+
+  /// The route's outbox status as the worker reports it to a new listener.
+  Future<RouteSyncStatus> syncStatus() => worker.statusFor(_routeId).first;
 
   /// Every outbox row of [stop], its evidence (of [executionId]) included.
   Future<List<String>> rowsOfStop(String stop, String executionId) async {
@@ -643,13 +906,11 @@ class _FakeConnectivity implements Connectivity {
 /// Records every dispatch and the timestamp arg it received; can be told to
 /// throw on the Nth `checkIn` call (hard-error variant).
 class _RecordingExecutionApi implements ExecutionApi {
-  _RecordingExecutionApi(this._log);
+  _RecordingExecutionApi(this._log, this._server);
 
   final List<String> _log;
+  final _ServerReleases _server;
   final List<DateTime> scannedAtArgs = [];
-
-  /// Stops the server released: every scan on them gets 409 STOP_RELEASED.
-  final Set<String> releasedStops = {};
   int _checkInCalls = 0;
   int? _failCheckInOnCall;
   DioException? _failWith;
@@ -674,7 +935,8 @@ class _RecordingExecutionApi implements ExecutionApi {
     _log.add('checkIn:$routeStopId');
     scannedAtArgs.add(scannedAt);
     if (_checkInCalls == _failCheckInOnCall) throw _failWith!;
-    if (releasedStops.contains(routeStopId)) throw _stopReleased(routeStopId!);
+    final conflict = _server.conflictFor(routeStopId);
+    if (conflict != null) throw conflict;
     return (
       result: CheckInResult(
         routeStopId: routeStopId!,
@@ -701,7 +963,8 @@ class _RecordingExecutionApi implements ExecutionApi {
   }) async {
     _log.add('checkOut:$routeStopId');
     scannedAtArgs.add(scannedAt);
-    if (releasedStops.contains(routeStopId)) throw _stopReleased(routeStopId!);
+    final conflict = _server.conflictFor(routeStopId);
+    if (conflict != null) throw conflict;
     return (
       result: CheckOutResult(
         routeStopId: routeStopId!,
@@ -727,13 +990,11 @@ class _RecordingExecutionApi implements ExecutionApi {
 }
 
 class _RecordingEvidenceApi implements EvidenceApi {
-  _RecordingEvidenceApi(this._log);
+  _RecordingEvidenceApi(this._log, this._server);
 
   final List<String> _log;
+  final _ServerReleases _server;
   final List<DateTime> capturedAtArgs = [];
-
-  /// Executions whose stop the server released, to that stop.
-  final Map<String, String> releasedExecutions = {};
 
   @override
   Future<DateTime?> uploadPhoto({
@@ -745,8 +1006,10 @@ class _RecordingEvidenceApi implements EvidenceApi {
   }) async {
     _log.add('uploadPhoto');
     capturedAtArgs.add(capturedAt);
-    final releasedStop = releasedExecutions[executionId];
-    if (releasedStop != null) throw _stopReleased(releasedStop);
+    final conflict = _server.conflictFor(
+      _server.stopOfExecution[executionId],
+    );
+    if (conflict != null) throw conflict;
     return null;
   }
 
@@ -772,16 +1035,17 @@ class _RecordingEvidenceApi implements EvidenceApi {
 /// check-outs and the next batch is asked for, batch 2 (one new stop) from
 /// then on. Asked earlier, it hands batch 1 back unchanged, like B3.
 class _RecordingRouteRepository implements RouteRepository {
-  _RecordingRouteRepository(this._log);
+  _RecordingRouteRepository(this._log, this._server);
 
   final List<String> _log;
+  final _ServerReleases _server;
   int nextBatchCalls = 0;
   int batchesHandedOut = 0;
 
-  /// The server released stop 1 for location silence.
-  bool stop1Released = false;
+  /// PAUSED or DONE once a release scan closed the route.
+  String routeStatus = 'IN_PROGRESS';
 
-  String get _stop1Status => stop1Released
+  String _statusOf(String stop) => _server.byStop.containsKey(stop)
       ? 'RELEASED'
       : batchesHandedOut == 0
       ? 'PENDING'
@@ -791,7 +1055,7 @@ class _RecordingRouteRepository implements RouteRepository {
     id: _routeId,
     fieldWorkerName: 'João',
     routeDate: DateTime(2026, 9, 3),
-    status: 'IN_PROGRESS',
+    status: routeStatus,
     startedAt: DateTime.utc(2026, 9, 3, 8),
     currentBatch: batchesHandedOut == 0 ? 1 : 2,
     stops: [
@@ -799,8 +1063,8 @@ class _RecordingRouteRepository implements RouteRepository {
         id: _stop1,
         orderIndex: 1,
         batchNumber: 1,
-        status: _stop1Status,
-        releaseReason: stop1Released ? 'LOCATION_SILENCE' : null,
+        status: _statusOf(_stop1),
+        releaseReason: _server.reasonFor(_stop1),
         servicePointName: 'Sala 101',
         latitude: -7.23,
         longitude: -35.88,
@@ -809,7 +1073,8 @@ class _RecordingRouteRepository implements RouteRepository {
         id: _stop2,
         orderIndex: 2,
         batchNumber: 1,
-        status: batchesHandedOut == 0 ? 'PENDING' : 'DONE',
+        status: _statusOf(_stop2),
+        releaseReason: _server.reasonFor(_stop2),
         servicePointName: 'Sala 102',
         latitude: -7.24,
         longitude: -35.89,
@@ -852,8 +1117,9 @@ class _RecordingRouteRepository implements RouteRepository {
   }) async {
     _log.add('nextBatch');
     nextBatchCalls++;
-    final stop1Closed = stop1Released || _log.contains('checkOut:$_stop1');
-    final batchDone = stop1Closed && _log.contains('checkOut:$_stop2');
+    bool closed(String stop) =>
+        _server.byStop.containsKey(stop) || _log.contains('checkOut:$stop');
+    final batchDone = closed(_stop1) && closed(_stop2);
     if (batchDone) batchesHandedOut++;
     return AllocationResult(route: _route(), poolEmpty: false);
   }

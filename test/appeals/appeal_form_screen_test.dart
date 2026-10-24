@@ -11,11 +11,35 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
+import 'package:route_monitor/sync/sync_providers.dart';
 
 import '../support/in_memory_database.dart';
 import 'fake_appeal_api.dart';
 
 final _checkInAt = DateTime.utc(2026, 10, 21, 13, 5);
+
+/// The Drift store whose first `discardStop` fails, like a storage error
+/// right after the appeal was filed.
+class _FlakyDiscardStore implements ReleasedStopStore {
+  _FlakyDiscardStore(this._store);
+
+  final DriftReleasedStopStore _store;
+  int discardAttempts = 0;
+
+  @override
+  Future<void> discardStop(String routeStopId) {
+    discardAttempts++;
+    if (discardAttempts == 1) throw StateError('disk I/O error');
+    return _store.discardStop(routeStopId);
+  }
+
+  @override
+  Future<ReleasedStopNotice?> noticeFor(String routeStopId) =>
+      _store.noticeFor(routeStopId);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 void main() {
   late AppDatabase db;
@@ -73,10 +97,12 @@ void main() {
   }
 
   /// The form, pushed over a host page so a successful send can pop back.
-  Widget app() => ProviderScope(
+  Widget app({ReleasedStopStore? releasedStops}) => ProviderScope(
     overrides: [
       appDatabaseProvider.overrideWithValue(db),
       appealApiProvider.overrideWithValue(api),
+      if (releasedStops != null)
+        releasedStopStoreProvider.overrideWithValue(releasedStops),
     ],
     child: MaterialApp(
       home: Builder(
@@ -98,8 +124,11 @@ void main() {
     ),
   );
 
-  Future<void> openForm(WidgetTester tester) async {
-    await tester.pumpWidget(app());
+  Future<void> openForm(
+    WidgetTester tester, {
+    ReleasedStopStore? releasedStops,
+  }) async {
+    await tester.pumpWidget(app(releasedStops: releasedStops));
     await tester.tap(find.text('abrir'));
     await tester.pumpAndSettle();
   }
@@ -110,6 +139,12 @@ void main() {
     await tester.tap(
       find.widgetWithText(FilledButton, AppStrings.appealSubmit),
     );
+    await tester.pumpAndSettle();
+  }
+
+  /// The failure snackbar sits over the send button until it times out.
+  Future<void> letSnackBarGo(WidgetTester tester) async {
+    await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
   }
 
@@ -268,6 +303,89 @@ void main() {
 
       expect(api.filed.single.claimedExecutedAt, isNull);
       expect(api.filed.single.note, isNull);
+    },
+  );
+
+  testWidgets(
+    'a retry after a network failure files the same appeal: the same '
+    'idempotency key, so the server never records it twice',
+    (tester) async {
+      await parkedReleasedStop();
+      api.fileError = DioException(
+        requestOptions: RequestOptions(path: '/appeals'),
+      );
+      await openForm(tester);
+      await sendWith(tester, AppStrings.appealReasonNoSignal);
+      await confirmWarning(tester);
+      expect(find.text(AppStrings.appealSendError), findsOneWidget);
+
+      api.fileError = null;
+      await letSnackBarGo(tester);
+      await tester.tap(
+        find.widgetWithText(FilledButton, AppStrings.appealSubmit),
+      );
+      await tester.pumpAndSettle();
+      await confirmWarning(tester);
+
+      expect(api.attempts, hasLength(2));
+      expect(
+        api.attempts.last.idempotencyKey,
+        api.attempts.first.idempotencyKey,
+      );
+      expect(api.filed, hasLength(1));
+      expect(await released.noticeFor('s1'), isNull);
+    },
+  );
+
+  testWidgets(
+    'a refusal body that does not decode (an Error, not an Exception) still '
+    'brings the button back',
+    (tester) async {
+      api.fileError = TypeError();
+      await openForm(tester);
+
+      await sendWith(tester, AppStrings.appealReasonOther);
+      await confirmWarning(tester);
+
+      expect(find.text(AppStrings.appealSendError), findsOneWidget);
+      final submit = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, AppStrings.appealSubmit),
+      );
+      expect(submit.onPressed, isNotNull);
+    },
+  );
+
+  testWidgets(
+    'a cleanup that fails after the appeal was filed says it was filed, not '
+    'that sending failed — and sending again replays it and clears the stop',
+    (tester) async {
+      await parkedReleasedStop();
+      final flaky = _FlakyDiscardStore(released);
+      await openForm(tester, releasedStops: flaky);
+
+      await sendWith(tester, AppStrings.appealReasonNoSignal);
+      await confirmWarning(tester);
+
+      expect(find.text(AppStrings.appealSentCleanupFailed), findsOneWidget);
+      expect(find.text(AppStrings.appealSendError), findsNothing);
+      expect(find.byType(AppealFormScreen), findsOneWidget);
+      expect(await released.noticeFor('s1'), isNotNull);
+
+      await letSnackBarGo(tester);
+      await tester.tap(
+        find.widgetWithText(FilledButton, AppStrings.appealSubmit),
+      );
+      await tester.pumpAndSettle();
+      await confirmWarning(tester);
+
+      expect(
+        api.filed.map((filing) => filing.idempotencyKey).toSet(),
+        hasLength(1),
+      );
+      expect(flaky.discardAttempts, 2);
+      expect(await released.noticeFor('s1'), isNull);
+      expect(await outbox.blockedForRoute('r1'), isEmpty);
+      expect(find.text('abrir'), findsOneWidget);
     },
   );
 }

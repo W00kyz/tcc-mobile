@@ -132,21 +132,25 @@ void main() {
     );
   });
 
-  test('appealableNotices lists only the appealable ones', () async {
-    await released.record(
+  test('allNotices lists every recorded stop, oldest first', () async {
+    var clock = DateTime.utc(2026, 10, 20, 9);
+    final store = DriftReleasedStopStore(db, now: () => clock);
+    await store.record(
       routeStopId: 's1',
       releaseReason: 'LEFT_CAMPUS',
       appealable: true,
     );
-    await released.record(
+    clock = DateTime.utc(2026, 10, 21, 9);
+    await store.record(
       routeStopId: 's2',
       releaseReason: 'IMPEDIMENT',
       appealable: false,
     );
 
-    final notices = await released.appealableNotices();
+    final notices = await store.allNotices();
 
-    expect(notices.map((n) => n.routeStopId), ['s1']);
+    expect(notices.map((n) => n.routeStopId), ['s1', 's2']);
+    expect(notices.map((n) => n.appealable), [true, false]);
   });
 
   group('discardStop', () {

@@ -136,6 +136,13 @@ class _AppealFormScreenState extends ConsumerState<AppealFormScreen> {
     if (reason == null || !await _confirmLocalDataLoss()) return;
     if (!mounted) return;
     setState(() => _sending = true);
+    final leavingMessage = await _file(reason);
+    if (leavingMessage != null) await _finish(leavingMessage);
+  }
+
+  /// Files the appeal. Returns the message to leave with once the appeal is
+  /// on record, or null after telling the worker why it is not.
+  Future<String?> _file(String reason) async {
     final note = _noteController.text.trim();
     try {
       await ref
@@ -147,16 +154,22 @@ class _AppealFormScreenState extends ConsumerState<AppealFormScreen> {
             claimedExecutedAt: _claimedAt,
             idempotencyKey: _idempotencyKey,
           );
-      await _finish(AppStrings.appealSent);
+      return AppStrings.appealSent;
     } on NotAppealableException catch (refusal) {
       final message = AppStrings.appealRefusal(refusal.reasonCode);
       // The stop already has an appeal on record: the parked data is moot.
-      if (refusal.reasonCode == 'ALREADY_APPEALED') return _finish(message);
-      // Any other refusal keeps the data: the worker may discard it from the
-      // blocked list.
+      if (refusal.reasonCode == 'ALREADY_APPEALED') return message;
+      // Any other refusal keeps the data: the worker may discard it from
+      // `/recursos` or the blocked list.
       _fail(message);
-    } on Exception {
+      return null;
+      // Deliberately broad: a network failure, or a refusal body that does
+      // not decode (a TypeError from the casts in DioAppealApi) — either way
+      // the button must come back for a retry.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
       _fail(AppStrings.appealSendError);
+      return null;
     }
   }
 
@@ -183,8 +196,19 @@ class _AppealFormScreenState extends ConsumerState<AppealFormScreen> {
   }
 
   /// The appeal is on record: clear the stop from the device and go back.
+  /// A failed cleanup must not read as a failed appeal: the worker is told
+  /// it was filed, and "Enviar recurso" again replays it — idempotent on the
+  /// same key — and retries the cleanup.
   Future<void> _finish(String message) async {
-    await discardReleasedStop(ref, widget.routeStopId);
+    if (!mounted) return;
+    try {
+      await discardReleasedStop(ref, widget.routeStopId);
+      // Deliberately broad: any storage failure means the same thing here.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      _fail(AppStrings.appealSentCleanupFailed);
+      return;
+    }
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     Navigator.of(context).pop(true);

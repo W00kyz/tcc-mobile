@@ -9,8 +9,9 @@ typedef AppealFiling = ({
   String idempotencyKey,
 });
 
-/// Serves [eligibleStops] and [myAppeals], records every filing, and throws
-/// [fileError] on `file` when set.
+/// Serves [eligibleStops] and [myAppeals], records every filing attempt —
+/// before failing it with [fileError], when set — and counts the eligible
+/// fetches.
 class RecordingAppealApi implements AppealApi {
   RecordingAppealApi({
     this.eligibleStops = const [],
@@ -19,11 +20,24 @@ class RecordingAppealApi implements AppealApi {
 
   List<AppealableStop> eligibleStops;
   List<FiledAppeal> myAppeals;
-  Exception? fileError;
+
+  /// Thrown by `file` after recording the attempt: an [Exception] such as a
+  /// `DioException`, or an [Error] such as the `TypeError` of a refusal body
+  /// that does not decode.
+  Object? fileError;
+
+  /// Every attempt, failed ones included.
+  final List<AppealFiling> attempts = [];
+
+  /// The attempts the server took.
   final List<AppealFiling> filed = [];
+  int eligibleCalls = 0;
 
   @override
-  Future<List<AppealableStop>> eligible() async => eligibleStops;
+  Future<List<AppealableStop>> eligible() async {
+    eligibleCalls++;
+    return eligibleStops;
+  }
 
   @override
   Future<List<FiledAppeal>> mine() async => myAppeals;
@@ -36,14 +50,18 @@ class RecordingAppealApi implements AppealApi {
     required DateTime? claimedExecutedAt,
     required String idempotencyKey,
   }) async {
-    final error = fileError;
-    if (error != null) throw error;
-    filed.add((
+    final filing = (
       routeStopId: routeStopId,
       reason: reason,
       note: note,
       claimedExecutedAt: claimedExecutedAt,
       idempotencyKey: idempotencyKey,
-    ));
+    );
+    attempts.add(filing);
+    final error = fileError;
+    // A test double throws whatever failure the case needs.
+    // ignore: only_throw_errors
+    if (error != null) throw error;
+    filed.add(filing);
   }
 }

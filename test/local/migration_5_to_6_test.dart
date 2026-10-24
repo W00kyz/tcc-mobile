@@ -119,7 +119,7 @@ void main() {
   test('5 to 6 adds the released-stops table, empty', () async {
     final store = DriftReleasedStopStore(db);
 
-    expect(await store.appealableNotices(), isEmpty);
+    expect(await store.allNotices(), isEmpty);
     await store.record(
       routeStopId: 's1',
       releaseReason: 'LOCATION_SILENCE',

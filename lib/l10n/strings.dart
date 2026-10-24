@@ -138,8 +138,10 @@ abstract final class AppStrings {
   static const String routeNextBatchOffline =
       'Conecte-se para receber mais pontos';
 
-  /// A released stop of the current batch: `Liberado · <motivo>`.
-  static String routeStopReleased(String reason) => 'Liberado · $reason';
+  /// A released stop of the current batch: `Liberado · <motivo>`, or just
+  /// `Liberado` when the server sent no reason.
+  static String routeStopReleased(String? reason) =>
+      reason == null ? 'Liberado' : 'Liberado · $reason';
 
   /// `Lote <n> · <x> ponto(s) feito(s) hoje`.
   static String routeBatchHeader(int batch, int doneToday) =>
@@ -212,21 +214,26 @@ abstract final class AppStrings {
   static String blockedSyncRowLabel(String kind, String reference) =>
       '$kind — $reference';
 
-  // --- blocked sync screen · released stops (alocação automática §7.5) ---
-  static const String blockedSyncAppealButton = 'Recorrer';
-  static const String blockedSyncDiscardButton = 'Descartar';
-  static const String blockedSyncDiscardTitle = 'Descartar dados deste ponto?';
-  static const String blockedSyncDiscardBody =
+  // --- released stops with local data: blocked sync screen and /recursos
+  // (alocação automática §7.5) ---
+  static const String releasedStopAppealButton = 'Recorrer';
+  static const String releasedStopDiscardButton = 'Descartar';
+  static const String releasedStopDiscardTitle = 'Descartar dados deste ponto?';
+  static const String releasedStopDiscardBody =
       'As fotos, respostas e registros feitos offline neste ponto serão '
       'apagados do aparelho.';
-  static const String blockedSyncDiscarded = 'Dados do ponto descartados.';
+  static const String releasedStopDiscarded = 'Dados do ponto descartados.';
 
   /// The heading of a stop whose late writes the server refused.
-  static String blockedSyncReleasedStop(String reference) =>
+  static String releasedStopTitle(String reference) =>
       'Ponto liberado — $reference';
 
   /// Why the server released that stop.
-  static String blockedSyncReleasedReason(String reason) => 'Motivo: $reason';
+  static String releasedStopReason(String reason) => 'Motivo: $reason';
+
+  /// Under a released stop the worker can no longer appeal.
+  static const String releasedStopNotAppealable =
+      'Não aceita recurso — você pode descartar os dados.';
 
   // --- room picker ---
   static const String roomPickerPrompt =
@@ -244,6 +251,8 @@ abstract final class AppStrings {
   // --- appeals (alocação automática §7.5) ---
   static const String appealsTooltip = 'Recursos';
   static const String appealsAppBarTitle = 'Recursos';
+  static const String appealsLocalTitle =
+      'Pontos liberados com dados neste aparelho';
   static const String appealsEligibleTitle =
       'Pontos liberados que você pode contestar';
   static const String appealsEligibleEmpty = 'Nenhum ponto para contestar.';
@@ -295,6 +304,9 @@ abstract final class AppStrings {
       'o recurso e serão apagadas do aparelho.';
   static const String appealWarningConfirm = 'Enviar';
   static const String appealSent = 'Recurso enviado.';
+  static const String appealSentCleanupFailed =
+      'O recurso foi enviado, mas os dados deste ponto não puderam ser '
+      'apagados do aparelho. Toque em "Enviar recurso" de novo.';
   static const String appealSendError =
       'Não foi possível enviar o recurso. Verifique a conexão e tente '
       'novamente.';

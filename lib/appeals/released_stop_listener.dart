@@ -8,6 +8,7 @@ import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/appeals/appeals_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/route_providers.dart' show myDayProvider;
+import 'package:route_monitor/routing/route_repository.dart' show MyDay;
 import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 
@@ -15,7 +16,8 @@ import 'package:route_monitor/sync/sync_providers.dart';
 /// 2026-10-20-alocacao-automatica §7.5). Each refreshes the appeals badge;
 /// an appealable one shows "Estes pontos foram liberados — você pode
 /// recorrer." with "Recorrer", which opens the pre-filled appeal — or the
-/// appeals list when several stops wait for one.
+/// appeals list when several stops wait for one. A reload of the day also
+/// refreshes the badge: the server may have released points meanwhile.
 ///
 ///     Scaffold(body: ReleasedStopListener(child: body))
 class ReleasedStopListener extends ConsumerWidget {
@@ -25,31 +27,48 @@ class ReleasedStopListener extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.listen<StopRelease?>(stopReleaseAnnouncementsProvider, (_, release) {
-      if (release == null) return;
-      ref.invalidate(appealEligibleProvider);
-      if (!release.appealable) return;
-      // One snackbar for the batch of releases a sync pass finds, not a
-      // queue of identical ones.
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: const Text(AppStrings.releasedStopsSnackbar),
-            action: SnackBarAction(
-              label: AppStrings.releasedStopsSnackbarAction,
-              onPressed: () => unawaited(_openAppeal(context, ref)),
-            ),
-          ),
-        );
-    });
+    ref
+      ..listen<AsyncValue<MyDay>>(myDayProvider, (previous, next) {
+        // A reload settling — not one still in flight (refreshing data
+        // reads as AsyncData too), nor the first load: the badge fetched
+        // its own lists when it was built.
+        final reloaded = previous?.hasValue == true && !next.isLoading;
+        if (reloaded && next.hasValue) _refresh(ref);
+      })
+      ..listen<StopRelease?>(stopReleaseAnnouncementsProvider, (_, release) {
+        if (release == null) return;
+        _refresh(ref);
+        if (release.appealable) _offerAppeal(context, ref);
+      });
     return child;
   }
 
+  static void _refresh(WidgetRef ref) => ref
+    ..invalidate(appealEligibleProvider)
+    ..invalidate(localReleasedNoticesProvider);
+
+  void _offerAppeal(BuildContext context, WidgetRef ref) {
+    // One snackbar for the batch of releases a sync pass finds, not a
+    // queue of identical ones.
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: const Text(AppStrings.releasedStopsSnackbar),
+          action: SnackBarAction(
+            label: AppStrings.releasedStopsSnackbarAction,
+            onPressed: () => unawaited(_openAppeal(context, ref)),
+          ),
+        ),
+      );
+  }
+
   Future<void> _openAppeal(BuildContext context, WidgetRef ref) async {
-    final notices = await ref
-        .read(releasedStopStoreProvider)
-        .appealableNotices();
+    final notices = [
+      for (final notice
+          in await ref.read(releasedStopStoreProvider).allNotices())
+        if (notice.appealable) notice,
+    ];
     if (!context.mounted) return;
     final navigator = Navigator.of(context);
     if (notices.length != 1) {

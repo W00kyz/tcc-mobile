@@ -726,19 +726,22 @@ class _ReleasedStopTile extends StatelessWidget {
   final RouteStopSummary stop;
 
   @override
-  Widget build(BuildContext context) => ListTile(
-    enabled: false,
-    leading: CircleAvatar(
-      radius: 14,
-      child: Text('${stop.orderIndex}', style: const TextStyle(fontSize: 12)),
-    ),
-    title: Text(stop.servicePointName),
-    subtitle: Text(
-      AppStrings.routeStopReleased(
-        AppStrings.releaseReasonLabel(stop.releaseReason ?? ''),
+  Widget build(BuildContext context) {
+    final reason = stop.releaseReason;
+    return ListTile(
+      enabled: false,
+      leading: CircleAvatar(
+        radius: 14,
+        child: Text('${stop.orderIndex}', style: const TextStyle(fontSize: 12)),
       ),
-    ),
-  );
+      title: Text(stop.servicePointName),
+      subtitle: Text(
+        AppStrings.routeStopReleased(
+          reason == null ? null : AppStrings.releaseReasonLabel(reason),
+        ),
+      ),
+    );
+  }
 }
 
 /// Resolves [routeStopId]'s open `execution_id` (Ruling 17) and, only when

@@ -71,17 +71,6 @@ class _RecordingSyncWorker implements SyncWorker {
   Future<void> dispose() async {}
 }
 
-/// Counts `GET /appeals/eligible` calls.
-class _CountingAppealApi extends RecordingAppealApi {
-  int eligibleCalls = 0;
-
-  @override
-  Future<List<AppealableStop>> eligible() {
-    eligibleCalls++;
-    return super.eligible();
-  }
-}
-
 void main() {
   late FakeConnectivity connectivity;
   late _RecordingSyncWorker worker;
@@ -224,7 +213,7 @@ void main() {
     'AppLifecycleState.resumed also refreshes the appeals badge (spec §7.5 — '
     'points may have been released while the app was away)',
     (tester) async {
-      final appealApi = _CountingAppealApi();
+      final appealApi = RecordingAppealApi();
       final container = await pumpWithContainer(
         tester,
         routeRepository: FakeRouteRepository(),

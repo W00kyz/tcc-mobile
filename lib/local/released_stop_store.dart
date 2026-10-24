@@ -51,8 +51,10 @@ abstract class ReleasedStopStore {
 
   Future<ReleasedStopNotice?> noticeFor(String routeStopId);
 
-  /// The recorded stops the worker may appeal, oldest first.
-  Future<List<ReleasedStopNotice>> appealableNotices();
+  /// Every recorded stop, oldest first — past days' included: a notice
+  /// lives until its appeal is sent or the worker discards it, whatever
+  /// became of its route.
+  Future<List<ReleasedStopNotice>> allNotices();
 
   /// Deletes everything this device holds for [routeStopId]: its outbox rows
   /// of every state (check-in/out with their answers, impediments, the
@@ -138,12 +140,10 @@ class DriftReleasedStopStore implements ReleasedStopStore {
   }
 
   @override
-  Future<List<ReleasedStopNotice>> appealableNotices() async {
-    final rows =
-        await (_db.select(_db.releasedStops)
-              ..where((r) => r.appealable.equals(true))
-              ..orderBy([(r) => OrderingTerm.asc(r.createdAt)]))
-            .get();
+  Future<List<ReleasedStopNotice>> allNotices() async {
+    final rows = await (_db.select(
+      _db.releasedStops,
+    )..orderBy([(r) => OrderingTerm.asc(r.createdAt)])).get();
     return rows.map(_toNotice).toList();
   }
 

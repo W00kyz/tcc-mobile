@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:route_monitor/appeals/appeal_form_screen.dart';
 import 'package:route_monitor/appeals/appeal_providers.dart';
+import 'package:route_monitor/appeals/released_stop_entry.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
-import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 
 /// The manual-attention list for one route's hard-blocked outbox rows (spec
@@ -18,6 +17,8 @@ import 'package:route_monitor/sync/sync_providers.dart';
 /// never with "Tentar de novo" — the replay would get the same 409. The
 /// worker appeals ("Recorrer", when the server said they may) or discards
 /// the stop's local data ("Descartar"), so no release leaves them stuck.
+/// The same entries are on `/recursos`, reachable whatever the route's
+/// state — this screen is only reachable from an IN_PROGRESS route.
 class BlockedSyncScreen extends ConsumerWidget {
   const BlockedSyncScreen({required this.routeId, super.key});
 
@@ -77,7 +78,7 @@ class _BlockedRowTile extends ConsumerWidget {
   );
 }
 
-/// One released stop and the actions that clear its parked rows.
+/// The parked rows of one released stop, as a [ReleasedStopEntry].
 class _ReleasedStopTile extends ConsumerWidget {
   const _ReleasedStopTile(this.routeStopId);
 
@@ -89,71 +90,11 @@ class _ReleasedStopTile extends ConsumerWidget {
         .watch(releasedStopNoticeProvider(routeStopId))
         .asData
         ?.value;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        ListTile(
-          title: Text(AppStrings.blockedSyncReleasedStop(routeStopId)),
-          subtitle: notice == null
-              ? null
-              : Text(
-                  AppStrings.blockedSyncReleasedReason(
-                    AppStrings.releaseReasonLabel(notice.releaseReason),
-                  ),
-                ),
-        ),
-        Wrap(
-          spacing: 8,
-          children: [
-            if (notice != null && notice.appealable)
-              TextButton(
-                onPressed: () => _appeal(context, notice),
-                child: const Text(AppStrings.blockedSyncAppealButton),
-              ),
-            TextButton(
-              onPressed: () => _discard(context, ref),
-              child: const Text(AppStrings.blockedSyncDiscardButton),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  /// The appeal form clears the stop itself once the appeal is on record.
-  Future<void> _appeal(BuildContext context, ReleasedStopNotice notice) =>
-      Navigator.of(context).push(
-        MaterialPageRoute<bool>(
-          builder: (_) => AppealFormScreen(
-            routeStopId: notice.routeStopId,
-            releaseReason: notice.releaseReason,
-          ),
-        ),
-      );
-
-  Future<void> _discard(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text(AppStrings.blockedSyncDiscardTitle),
-        content: const Text(AppStrings.blockedSyncDiscardBody),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text(AppStrings.commonCancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text(AppStrings.blockedSyncDiscardButton),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    await discardReleasedStop(ref, routeStopId);
-    messenger.showSnackBar(
-      const SnackBar(content: Text(AppStrings.blockedSyncDiscarded)),
+    return ReleasedStopEntry(
+      routeStopId: routeStopId,
+      title: AppStrings.releasedStopTitle(routeStopId),
+      releaseReason: notice?.releaseReason,
+      canAppeal: notice?.appealable ?? false,
     );
   }
 }

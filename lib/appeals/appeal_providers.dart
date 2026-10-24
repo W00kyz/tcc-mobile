@@ -18,11 +18,19 @@ final appealApiProvider = Provider<AppealApi>((ref) {
   return DioAppealApi(dio);
 });
 
-/// "Pontos liberados que você pode contestar" — also the route screen's
-/// badge count. Invalidated when a release is announced, on resume and
-/// reconnect, and after an appeal or a discard.
+/// "Pontos liberados que você pode contestar" — with
+/// [localReleasedNoticesProvider], the route screen's badge count.
+/// Invalidated when a release is announced, when the day reloads, on resume
+/// and reconnect, and after an appeal or a discard.
 final appealEligibleProvider = FutureProvider<List<AppealableStop>>(
   (ref) => ref.watch(appealApiProvider).eligible(),
+);
+
+/// Every released stop this device still holds data for, past days'
+/// included — what `/recursos` lets the worker appeal or discard whatever
+/// the route's state. Invalidated like [appealEligibleProvider].
+final localReleasedNoticesProvider = FutureProvider<List<ReleasedStopNotice>>(
+  (ref) => ref.watch(releasedStopStoreProvider).allNotices(),
 );
 
 /// "Meus recursos" with their decisions.
@@ -39,8 +47,9 @@ releasedStopNoticeProvider = FutureProvider.family<ReleasedStopNotice?, String>(
 
 /// Deletes everything the device holds for the released [routeStopId]
 /// ([ReleasedStopStore.discardStop]) and refreshes every view of it: the
-/// blocked list, the stop chips, the sync banner, the appeal lists. Run once
-/// the appeal is on record, or when the worker gives up on the stop.
+/// blocked list, the stop chips, the sync banner, the appeal lists and the
+/// device's notices. Run once the appeal is on record, or when the worker
+/// gives up on the stop.
 ///
 ///     await discardReleasedStop(ref, notice.routeStopId);
 Future<void> discardReleasedStop(WidgetRef ref, String routeStopId) async {
@@ -54,5 +63,6 @@ Future<void> discardReleasedStop(WidgetRef ref, String routeStopId) async {
     // else would tell the banner the parked rows are gone.
     ..invalidate(routeSyncStatusProvider)
     ..invalidate(appealEligibleProvider)
+    ..invalidate(localReleasedNoticesProvider)
     ..invalidate(myAppealsProvider);
 }
