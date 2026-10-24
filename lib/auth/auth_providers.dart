@@ -49,7 +49,9 @@ class SessionNotifier extends Notifier<Session?> {
   /// A fresh access token for the current session, or null when there is
   /// none to be had (signed out, offline, or the refresh token was refused —
   /// the last one also signs the user out). Also brings the worker standing
-  /// up to date, so the router re-evaluates the approval gate ("Atualizar").
+  /// up to date, so the router re-evaluates the approval gate ("Atualizar"),
+  /// and whether a privacy notice published since login is owed (the consent
+  /// gate).
   /// Concurrent callers share one request. Every Dio built by
   /// [buildSessionDio] calls this on a 401.
   Future<String?> refreshAccessToken() {
@@ -69,6 +71,7 @@ class SessionNotifier extends Notifier<Session?> {
         current.copyWith(
           accessToken: refreshed.accessToken,
           workerStanding: refreshed.workerStanding,
+          consentRequired: refreshed.consentRequired,
         ),
       );
       return refreshed.accessToken;
@@ -98,6 +101,19 @@ class SessionNotifier extends Notifier<Session?> {
     }
     await refreshAccessToken();
     _standingAfterRefusal = state?.workerStanding;
+  }
+
+  /// A location call was refused with 403 `CONSENT_REQUIRED`: a privacy
+  /// notice was published after this login. Flags the session so the router's
+  /// consent gate shows it — the position trigger stops reporting meanwhile.
+  ///
+  /// WARNING: a no-op when the session already owes consent. The route
+  /// watchers re-fetch on every session change, so a new session object per
+  /// 403 would mean 403, re-fetch, 403, forever.
+  Future<void> requireConsent() async {
+    final current = state;
+    if (current == null || current.consentRequired) return;
+    await _store(current.copyWith(consentRequired: true));
   }
 
   /// Drops the stored session on "Sair" — clears the secure storage so no
@@ -140,7 +156,8 @@ final sessionProvider = NotifierProvider<SessionNotifier, Session?>(
 /// that expires mid-route (15 minutes, JWT_ACCESS_TOKEN_MINUTES) is renewed
 /// instead of failing every request — and, worse, blocking the outbox. A 403
 /// `WORKER_NOT_APPROVED` refreshes the worker standing, which sends the worker
-/// to the waiting screen.
+/// to the waiting screen; a 403 `CONSENT_REQUIRED` sends them to the consent
+/// screen.
 Dio buildSessionDio(Ref ref) {
   final session = ref.watch(sessionProvider);
   final notifier = ref.read(sessionProvider.notifier);
@@ -149,6 +166,7 @@ Dio buildSessionDio(Ref ref) {
     accessToken: session?.accessToken,
     onUnauthorized: notifier.refreshAccessToken,
     onWorkerNotApproved: notifier.refreshWorkerStanding,
+    onConsentRequired: notifier.requireConsent,
   );
 }
 
@@ -171,6 +189,7 @@ Dio buildUserScopedSessionDio(Ref ref, {required String baseUrl}) {
         ref.mounted ? ref.read(sessionProvider)?.accessToken : null,
     onUnauthorized: notifier.refreshAccessToken,
     onWorkerNotApproved: notifier.refreshWorkerStanding,
+    onConsentRequired: notifier.requireConsent,
   );
 }
 

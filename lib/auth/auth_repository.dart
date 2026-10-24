@@ -93,14 +93,18 @@ class Session {
 
 /// A refresh's answer: the new access token and the worker standing as of
 /// now, so an approval made after login reaches the app without a new login.
+/// [consentRequired] likewise brings a privacy notice published after login;
+/// null when the server did not say (the session keeps what it had).
 class RefreshedAccess {
   const RefreshedAccess({
     required this.accessToken,
     this.workerStanding = const WorkerStanding(),
+    this.consentRequired,
   });
 
   final String accessToken;
   final WorkerStanding workerStanding;
+  final bool? consentRequired;
 }
 
 /// A contractor company a worker can join at sign-up.
@@ -216,6 +220,7 @@ class DioAuthRepository implements AuthRepository {
       return RefreshedAccess(
         accessToken: body['access_token'] as String,
         workerStanding: WorkerStanding.fromJson(body),
+        consentRequired: body['consent_required'] as bool?,
       );
     } on DioException catch (error) {
       if (error.response?.statusCode == 401) {

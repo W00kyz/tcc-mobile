@@ -143,6 +143,33 @@ void workerStandingTests() {
     expect(refreshed.workerStanding.active, isFalse);
   });
 
+  test('refresh reports whether a new privacy notice is owed', () async {
+    // A notice published while the worker was logged in reaches them here.
+    Future<bool?> consentAfterRefresh(Map<String, Object?> body) async {
+      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
+        ..httpClientAdapter = _FakeAdapter(statusCode: 200, body: body);
+      final refreshed = await DioAuthRepository(dio).refreshAccessToken('r');
+      return refreshed.consentRequired;
+    }
+
+    expect(
+      await consentAfterRefresh({
+        'access_token': 'a',
+        'consent_required': true,
+      }),
+      isTrue,
+    );
+    expect(
+      await consentAfterRefresh({
+        'access_token': 'a',
+        'consent_required': false,
+      }),
+      isFalse,
+    );
+    // An older server says nothing: the session keeps what it had.
+    expect(await consentAfterRefresh({'access_token': 'a'}), isNull);
+  });
+
   test('only an approved, active worker may work', () {
     const pending = WorkerStanding(
       status: WorkerStatus.pendingApproval,

@@ -20,11 +20,13 @@ class _ScriptedAuthRepository implements AuthRepository {
     this.refreshResult,
     this.refuse = false,
     this.standing = const WorkerStanding(),
+    this.consentRequired,
   });
 
   final String? refreshResult;
   final bool refuse;
   final WorkerStanding standing;
+  final bool? consentRequired;
   int refreshCalls = 0;
 
   @override
@@ -39,7 +41,11 @@ class _ScriptedAuthRepository implements AuthRepository {
     if (result == null) {
       throw DioException(requestOptions: RequestOptions(path: '/auth/refresh'));
     }
-    return RefreshedAccess(accessToken: result, workerStanding: standing);
+    return RefreshedAccess(
+      accessToken: result,
+      workerStanding: standing,
+      consentRequired: consentRequired,
+    );
   }
 
   @override
@@ -75,15 +81,20 @@ Future<ProviderContainer> _container(
   return container;
 }
 
-/// The backend refusing a worker who is no longer (or not yet) approved.
+/// The backend refusing a worker who is no longer (or not yet) approved —
+/// or, with [code], for another reason.
 class _WorkerNotApprovedAdapter implements HttpClientAdapter {
+  _WorkerNotApprovedAdapter([this.code = 'WORKER_NOT_APPROVED']);
+
+  final String code;
+
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async => ResponseBody.fromString(
-    '{"detail":{"code":"WORKER_NOT_APPROVED","detail":"not approved"}}',
+    '{"detail":{"code":"$code","detail":"refused"}}',
     403,
     headers: {
       Headers.contentTypeHeader: [Headers.jsonContentType],
@@ -96,6 +107,7 @@ class _WorkerNotApprovedAdapter implements HttpClientAdapter {
 
 void main() {
   group('403 WORKER_NOT_APPROVED', workerNotApprovedTests);
+  group('403 CONSENT_REQUIRED', consentRequiredTests);
 
   test('restores the persisted session on start (offline restart)', () async {
     final storage = InMemorySessionStorage();
@@ -158,6 +170,48 @@ void main() {
       WorkerStatus.approved,
     );
   });
+
+  test('a refresh stores whether a new privacy notice is owed', () async {
+    // Logged in before the notice changed: the next refresh says so and the
+    // router's consent gate takes over.
+    final storage = InMemorySessionStorage();
+    await storage.saveSession(_stored);
+    final container = await _container(
+      storage,
+      _ScriptedAuthRepository(
+        refreshResult: 'new-access',
+        consentRequired: true,
+      ),
+    );
+
+    await container.read(sessionProvider.notifier).refreshAccessToken();
+
+    expect(container.read(sessionProvider)?.consentRequired, isTrue);
+    expect((await storage.readSession())?.consentRequired, isTrue);
+  });
+
+  test(
+    'a refresh from a server that says nothing keeps the consent flag',
+    () async {
+      final storage = InMemorySessionStorage();
+      await storage.saveSession(
+        const Session(
+          accessToken: 'old-access',
+          refreshToken: 'refresh',
+          role: 'FIELD_WORKER',
+          consentRequired: true,
+        ),
+      );
+      final container = await _container(
+        storage,
+        _ScriptedAuthRepository(refreshResult: 'new-access'),
+      );
+
+      await container.read(sessionProvider.notifier).refreshAccessToken();
+
+      expect(container.read(sessionProvider)?.consentRequired, isTrue);
+    },
+  );
 
   test('concurrent refreshes share one request', () async {
     final storage = InMemorySessionStorage();
@@ -294,4 +348,56 @@ void workerNotApprovedTests() {
       expect(repository.refreshCalls, 1);
     },
   );
+}
+
+void consentRequiredTests() {
+  Future<(ProviderContainer, InMemorySessionStorage, Dio)> owingConsent({
+    bool alreadyFlagged = false,
+  }) async {
+    final storage = InMemorySessionStorage();
+    await storage.saveSession(
+      Session(
+        accessToken: 'old-access',
+        refreshToken: 'refresh',
+        role: 'FIELD_WORKER',
+        consentRequired: alreadyFlagged,
+      ),
+    );
+    final container = await _container(storage, _ScriptedAuthRepository());
+    final dio = buildDio(
+      baseUrl: 'http://test',
+      onConsentRequired: container
+          .read(sessionProvider.notifier)
+          .requireConsent,
+    )..httpClientAdapter = _WorkerNotApprovedAdapter('CONSENT_REQUIRED');
+    return (container, storage, dio);
+  }
+
+  test('sends a logged-in worker to the consent gate', () async {
+    // A new notice was published mid-session: "Iniciar rota" is refused and
+    // the router must show the notice instead of a generic failure.
+    final (container, storage, dio) = await owingConsent();
+
+    await expectLater(
+      dio.post<void>('/routes/start'),
+      throwsA(isA<DioException>()),
+    );
+
+    expect(container.read(sessionProvider)?.consentRequired, isTrue);
+    expect((await storage.readSession())?.consentRequired, isTrue);
+  });
+
+  test('a session already owing consent is left as it is', () async {
+    // Watchers re-fetch on every session change: a new session object for
+    // every 403 would mean 403, re-fetch, 403, forever.
+    final (container, _, dio) = await owingConsent(alreadyFlagged: true);
+    final before = container.read(sessionProvider);
+
+    await expectLater(
+      dio.post<void>('/routes/start'),
+      throwsA(isA<DioException>()),
+    );
+
+    expect(identical(container.read(sessionProvider), before), isTrue);
+  });
 }

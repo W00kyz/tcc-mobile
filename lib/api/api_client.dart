@@ -9,6 +9,9 @@ typedef AccessTokenReader = String? Function();
 /// Learns why the backend refused a worker (pending, rejected, deactivated).
 typedef WorkerNotApprovedHandler = Future<void> Function();
 
+/// Learns the worker owes consent to a privacy notice published since login.
+typedef ConsentRequiredHandler = Future<void> Function();
+
 /// The machine code of an API error — `{"detail": {"code": ...}}`, the shape
 /// the backend uses for every refusal the app reacts to — or null.
 String? apiErrorCode(DioException error) {
@@ -34,6 +37,10 @@ String? apiErrorCode(DioException error) {
 /// reported (and awaited) before the error reaches the caller, so the router
 /// can send the worker to the waiting screen.
 ///
+/// With [onConsentRequired], a 403 `CONSENT_REQUIRED` (the location gate of
+/// "Iniciar rota", next batch and positions) is reported the same way, so the
+/// router can show the new privacy notice to a worker who logged in before it.
+///
 ///     final dio = buildDio(baseUrl: url, accessToken: token,
 ///                          onUnauthorized: notifier.refreshAccessToken);
 Dio buildDio({
@@ -42,6 +49,7 @@ Dio buildDio({
   AccessTokenReader? readAccessToken,
   AccessTokenRefresher? onUnauthorized,
   WorkerNotApprovedHandler? onWorkerNotApproved,
+  ConsentRequiredHandler? onConsentRequired,
 }) {
   final dio = Dio(
     BaseOptions(
@@ -58,7 +66,12 @@ Dio buildDio({
     dio.interceptors.add(_RefreshOnUnauthorized(dio, onUnauthorized));
   }
   if (onWorkerNotApproved != null) {
-    dio.interceptors.add(_ReportWorkerNotApproved(onWorkerNotApproved));
+    dio.interceptors.add(
+      _Report403Code('WORKER_NOT_APPROVED', onWorkerNotApproved),
+    );
+  }
+  if (onConsentRequired != null) {
+    dio.interceptors.add(_Report403Code('CONSENT_REQUIRED', onConsentRequired));
   }
   return dio;
 }
@@ -80,18 +93,20 @@ class _BearerAtRequestTime extends Interceptor {
   }
 }
 
-class _ReportWorkerNotApproved extends Interceptor {
-  _ReportWorkerNotApproved(this._report);
+/// Reports (and awaits) a 403 carrying [_code] before the error reaches the
+/// caller.
+class _Report403Code extends Interceptor {
+  _Report403Code(this._code, this._report);
 
-  final WorkerNotApprovedHandler _report;
+  final String _code;
+  final Future<void> Function() _report;
 
   @override
   Future<void> onError(
     DioException err,
     ErrorInterceptorHandler handler,
   ) async {
-    if (err.response?.statusCode == 403 &&
-        apiErrorCode(err) == 'WORKER_NOT_APPROVED') {
+    if (err.response?.statusCode == 403 && apiErrorCode(err) == _code) {
       await _report();
     }
     handler.next(err);

@@ -7,6 +7,7 @@ import 'package:route_monitor/api/api_client.dart';
 void main() {
   group('refresh on 401', refreshInterceptorTests);
   group('worker not approved', workerNotApprovedTests);
+  group('consent required', consentRequiredTests);
 
   test('buildDio sets the base URL', () {
     final dio = buildDio(baseUrl: 'http://localhost:8000');
@@ -221,6 +222,54 @@ void workerNotApprovedTests() {
 
     await expectLater(
       dio.get<void>('/routes/me'),
+      throwsA(isA<DioException>()),
+    );
+    expect(reports, 0);
+  });
+}
+
+void consentRequiredTests() {
+  test('a 403 CONSENT_REQUIRED is reported, then surfaced', () async {
+    var reports = 0;
+    final dio =
+        buildDio(
+            baseUrl: 'http://localhost:8000',
+            accessToken: 'token',
+            onConsentRequired: () async => reports++,
+          )
+          ..httpClientAdapter = _FixedAdapter(
+            403,
+            '{"detail":{"code":"CONSENT_REQUIRED","detail":"consent owed"}}',
+          );
+
+    await expectLater(
+      dio.post<void>('/routes/start'),
+      throwsA(
+        isA<DioException>().having(
+          (error) => error.response?.statusCode,
+          'status',
+          403,
+        ),
+      ),
+    );
+    expect(reports, 1);
+  });
+
+  test('a 403 WORKER_NOT_APPROVED is not taken for consent', () async {
+    var reports = 0;
+    final dio =
+        buildDio(
+            baseUrl: 'http://localhost:8000',
+            accessToken: 'token',
+            onConsentRequired: () async => reports++,
+          )
+          ..httpClientAdapter = _FixedAdapter(
+            403,
+            '{"detail":{"code":"WORKER_NOT_APPROVED","detail":"not approved"}}',
+          );
+
+    await expectLater(
+      dio.post<void>('/routes/start'),
       throwsA(isA<DioException>()),
     );
     expect(reports, 0);
