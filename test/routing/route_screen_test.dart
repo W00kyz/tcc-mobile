@@ -207,6 +207,7 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
   }) async => (
     result: CheckOutResult(
       routeStopId: routeStopId ?? 's1',
@@ -1783,6 +1784,164 @@ void main() {
       expect(repository.fetchCount, 2);
     },
   );
+
+  group('a stop that requires evidence', () {
+    RouteSummary requiringRoute() => _routeWith(
+      startedAt: DateTime(2026, 8, 25, 8),
+      stops: const [
+        RouteStopSummary(
+          id: 's1',
+          orderIndex: 1,
+          batchNumber: 1,
+          status: 'IN_PROGRESS',
+          servicePointName: 'Sala 101',
+          latitude: -7.21,
+          longitude: -35.91,
+          requiresEvidence: true,
+        ),
+      ],
+    );
+
+    /// A photo still waiting in the outbox for `exec-1`.
+    Future<void> enqueuePhoto(_InMemoryLocalWriteStore store, String id) =>
+        store.enqueue(
+          id: id,
+          kind: PendingOpKind.evidencePhoto,
+          routeId: 'r1',
+          payload: {
+            'execution_id': 'exec-1',
+            'bytes_b64': base64Encode(_onePixelPng),
+            'sha256': 'abc',
+            'captured_at': DateTime.utc(2026, 8, 25, 9).toIso8601String(),
+            'idempotency_key': id,
+          },
+        );
+
+    Finder concluir() =>
+        find.widgetWithText(TextButton, AppStrings.routeConcludeButton);
+
+    Future<_InMemoryLocalWriteStore> pumpWith(
+      WidgetTester tester, {
+      required int pendingPhotos,
+      EvidenceApi? evidenceApi,
+    }) async {
+      final store = _InMemoryLocalWriteStore();
+      for (var i = 0; i < pendingPhotos; i++) {
+        await enqueuePhoto(store, 'p$i');
+      }
+      await tester.pumpWidget(
+        _screenWith(
+          _repositoryWith(requiringRoute()),
+          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
+          executionApi: _FakeExecutionApi(),
+          evidenceApi: evidenceApi,
+          localWriteStore: store,
+        ),
+      );
+      await tester.pumpAndSettle();
+      return store;
+    }
+
+    testWidgets('with 1 photo shows the hint and a disabled "Concluir"', (
+      tester,
+    ) async {
+      await pumpWith(tester, pendingPhotos: 1);
+
+      expect(find.text(AppStrings.evidenceMissingHint(1)), findsOneWidget);
+      expect(find.text('Tire pelo menos 2 fotos (faltam 1)'), findsOneWidget);
+      expect(tester.widget<TextButton>(concluir()).onPressed, isNull);
+    });
+
+    testWidgets('counts a pending photo together with a synced one', (
+      tester,
+    ) async {
+      await pumpWith(
+        tester,
+        pendingPhotos: 1,
+        evidenceApi: _FakeEvidenceApi(
+          syncedItems: [
+            EvidenceItem(
+              id: 'e1',
+              kind: 'PHOTO',
+              capturedAt: DateTime.utc(2026, 8, 25, 8, 30),
+              createdAt: DateTime.utc(2026, 8, 25, 8, 30),
+            ),
+          ],
+        ),
+      );
+
+      expect(find.textContaining('Tire pelo menos'), findsNothing);
+      expect(tester.widget<TextButton>(concluir()).onPressed, isNotNull);
+    });
+
+    testWidgets('disables "Adicionar foto" at the 10-photo cap', (
+      tester,
+    ) async {
+      await pumpWith(tester, pendingPhotos: 10);
+
+      final addPhoto = find.widgetWithText(
+        TextButton,
+        AppStrings.routeAddPhotoButton,
+      );
+      expect(tester.widget<TextButton>(addPhoto).onPressed, isNull);
+    });
+
+    testWidgets('"Concluir" asks for complaints first and "Cancelar" '
+        'enqueues nothing', (tester) async {
+      final store = await pumpWith(tester, pendingPhotos: 2);
+
+      await tester.tap(concluir());
+      await tester.pumpAndSettle();
+      expect(find.text(AppStrings.complaintsDialogTitle), findsOneWidget);
+      expect(find.byType(ScanScreen), findsNothing);
+
+      await tester.tap(find.text(AppStrings.commonCancel));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ScanScreen), findsNothing);
+      final kinds = (await store.unsyncedForRoute('r1')).map((r) => r.kind);
+      expect(kinds, isNot(contains(PendingOpKind.checkOut)));
+    });
+
+    testWidgets('"Continuar" scans and enqueues the check-out with the '
+        'typed text', (tester) async {
+      final store = await pumpWith(tester, pendingPhotos: 2);
+
+      await tester.tap(concluir());
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Falta papel');
+      await tester.tap(find.text(AppStrings.complaintsContinue));
+      await tester.pumpAndSettle();
+      expect(find.byType(ScanScreen), findsOneWidget);
+      Navigator.of(tester.element(find.byType(ScanScreen))).pop('v1.floor.1.s');
+      await tester.pumpAndSettle();
+
+      final checkOut = (await store.unsyncedForRoute(
+        'r1',
+      )).singleWhere((r) => r.kind == PendingOpKind.checkOut);
+      expect(checkOut.payload['complaints_suggestions'], 'Falta papel');
+    });
+  });
+
+  testWidgets('a stop without the flag concludes with no dialog', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _screenWith(
+        _repositoryWith(inProgressStopRoute()),
+        executionApi: _FakeExecutionApi(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.complaintsDialogTitle), findsNothing);
+    expect(find.byType(ScanScreen), findsOneWidget);
+  });
 
   testWidgets(
     'hides the evidence buttons for an IN_PROGRESS stop with no '

@@ -291,6 +291,32 @@ void main() {
     expect(syncWorker.syncedRoutes, ['route-A']);
   });
 
+  test('checkOut writes complaints_suggestions into the payload only when '
+      'given', () async {
+    await repository.checkOut(
+      routeId: 'route-A',
+      routeStopId: 'stop-1',
+      qrPayload: 'q',
+      checkoutIdempotencyKey: 'with',
+      complaintsSuggestions: 'x',
+    );
+    await repository.checkOut(
+      routeId: 'route-A',
+      routeStopId: 'stop-2',
+      qrPayload: 'q',
+      checkoutIdempotencyKey: 'without',
+    );
+
+    final rows = {
+      for (final row in await store.unsyncedForRoute('route-A')) row.id: row,
+    };
+    expect(rows['with']!.payload['complaints_suggestions'], 'x');
+    expect(
+      rows['without']!.payload.containsKey('complaints_suggestions'),
+      isFalse,
+    );
+  });
+
   test('checkOut reuses a caller-supplied checkoutIdempotencyKey', () async {
     await repository.checkOut(
       routeId: 'route-A',

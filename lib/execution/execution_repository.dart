@@ -90,6 +90,7 @@ class ExecutionRepository {
     double? latitude,
     double? longitude,
     String? checkoutIdempotencyKey,
+    String? complaintsSuggestions,
   }) async {
     final key = checkoutIdempotencyKey ?? _uuid.v4();
     final executionId = _uuid.v4();
@@ -107,6 +108,7 @@ class ExecutionRepository {
         'scanned_at': scannedAt.toIso8601String(),
         'checkout_idempotency_key': key,
         'route_stop_id': routeStopId,
+        'complaints_suggestions': ?complaintsSuggestions,
       },
     );
     // Ruling 5 counterpart to checkIn's upsert above; Ruling 3: the row is

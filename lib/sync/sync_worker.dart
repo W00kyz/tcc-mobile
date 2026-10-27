@@ -382,6 +382,7 @@ class SyncWorker {
       longitude: (payload['longitude'] as num?)?.toDouble(),
       routeStopId: payload['route_stop_id'] as String?,
       clientClockOffsetSeconds: await _syncMeta.getClockOffsetSeconds(),
+      complaintsSuggestions: payload['complaints_suggestions'] as String?,
       // LEGACY: a row queued by an old build may still carry form fields in
       // its payload; they are deliberately not read, so the server never
       // receives them (forms were removed).

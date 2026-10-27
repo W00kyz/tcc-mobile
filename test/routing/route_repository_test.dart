@@ -160,6 +160,23 @@ void main() {
       expect(stop.serviceTypeId, 'st1');
       expect(stop.serviceTypeName, 'Limpeza');
     });
+    test(
+      'requires_evidence is read from the stop, false when absent',
+      () async {
+        final route = _routePayload();
+        final stops = (route['stops'] as List<dynamic>)
+            .cast<Map<String, dynamic>>();
+        stops[2]['requires_evidence'] = true;
+        final repository = DioRouteRepository(
+          _dioAnswering(200, _myDayPayload(route: route)),
+        );
+
+        final parsed = (await repository.fetchMyDay()).route!.stops;
+
+        expect(parsed[2].requiresEvidence, isTrue);
+        expect(parsed[0].requiresEvidence, isFalse);
+      },
+    );
   });
 
   group('current batch', () {

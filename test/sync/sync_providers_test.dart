@@ -271,6 +271,7 @@ class _AcceptingExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
   }) => throw UnimplementedError();
 
   @override

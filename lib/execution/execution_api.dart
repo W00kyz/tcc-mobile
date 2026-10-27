@@ -96,6 +96,7 @@ abstract class ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
   });
 
   /// Signals an impossibility to execute (spec RF16-RF17): `scope='STOP'` with
@@ -186,6 +187,7 @@ class DioExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
   }) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
@@ -202,6 +204,7 @@ class DioExecutionApi implements ExecutionApi {
           'checkout_idempotency_key': checkoutIdempotencyKey,
           'route_stop_id': routeStopId,
           'client_clock_offset_seconds': clientClockOffsetSeconds,
+          'complaints_suggestions': ?complaintsSuggestions,
         },
       );
       final body = response.data!;

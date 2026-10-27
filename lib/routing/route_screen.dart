@@ -7,6 +7,7 @@ import 'package:route_monitor/appeals/appeals_screen.dart';
 import 'package:route_monitor/appeals/released_stop_listener.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
+import 'package:route_monitor/execution/evidence_requirement.dart';
 import 'package:route_monitor/execution/evidence_thumbnail.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/impediment_dialog.dart';
@@ -22,6 +23,8 @@ import 'package:route_monitor/monitoring/notifications_screen.dart';
 import 'package:route_monitor/monitoring/silence_banner.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
+import 'package:route_monitor/routing/complaints_dialog.dart';
+import 'package:route_monitor/routing/evidence_requirement_hint.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -208,15 +211,26 @@ class RouteScreen extends ConsumerWidget {
         ref.watch(stopSyncChipProvider((route.id, stop.id))).asData?.value ??
         StopSyncChip.none;
     final inProgress = effectiveStatus == 'IN_PROGRESS';
+    final canConclude =
+        inProgress &&
+        canConcludeWithEvidence(
+          requiresEvidence: stop.requiresEvidence,
+          photoCount: _photoCount(ref, route.id, progress?.executionId),
+        );
     return _StopTile(
       stop: stop,
       effectiveStatus: effectiveStatus,
       syncChip: syncChip,
-      onConcluir: inProgress
+      showConcluir: inProgress,
+      onConcluir: canConclude
           ? () => _checkOut(context, ref, route, stop)
           : null,
       evidenceSection: inProgress
-          ? _StopEvidenceSection(routeId: route.id, routeStopId: stop.id)
+          ? _StopEvidenceSection(
+              routeId: route.id,
+              routeStopId: stop.id,
+              requiresEvidence: stop.requiresEvidence,
+            )
           : null,
       // PENDING too, not just IN_PROGRESS: a worker who can't even reach a
       // stop (access blocked → can't scan the QR → can't check in) must still
@@ -229,6 +243,18 @@ class RouteScreen extends ConsumerWidget {
           ? () => _signalImpossibility(context, ref, route, stop)
           : null,
     );
+  }
+
+  /// The photos (pending and synced alike) on the stop's open execution, or
+  /// `null` while loading, on error, or with no execution to count against:
+  /// "Concluir" stays closed then (never release before knowing).
+  int? _photoCount(WidgetRef ref, String routeId, String? executionId) {
+    if (executionId == null) return null;
+    final items = ref
+        .watch(stopEvidenceProvider((routeId, executionId)))
+        .asData
+        ?.value;
+    return items?.where((item) => item.kind == 'PHOTO').length;
   }
 
   /// Opens [ImpedimentDialog] for a `PENDING` or `IN_PROGRESS` stop and, on a
@@ -342,6 +368,16 @@ class RouteScreen extends ConsumerWidget {
     RouteSummary route,
     RouteStopSummary stop,
   ) async {
+    // Before the QR, so the worker never scans and only then finds one more
+    // step (spec 2026-10-26-exige-evidencias §6.4). Cancelling abandons the
+    // check-out: nothing is enqueued.
+    String? complaints;
+    if (stop.requiresEvidence) {
+      final answer = await showComplaintsDialog(context);
+      if (answer == null || !context.mounted) return;
+      complaints = answer.text;
+    }
+    if (!context.mounted) return;
     final scan = await _scanAndLocate(context, ref);
     if (scan == null || !context.mounted) return;
 
@@ -358,6 +394,7 @@ class RouteScreen extends ConsumerWidget {
           latitude: scan.coordinates?.latitude,
           longitude: scan.coordinates?.longitude,
           checkoutIdempotencyKey: _uuid.v4(),
+          complaintsSuggestions: complaints,
         );
     // A local check-out flips the stop to DONE now (spec Ruling 5); this
     // invalidate re-reads myDayProvider so the server view catches up too
@@ -567,6 +604,7 @@ class _StopTile extends StatelessWidget {
     required this.stop,
     required this.effectiveStatus,
     this.syncChip = StopSyncChip.none,
+    this.showConcluir = false,
     this.onConcluir,
     this.evidenceSection,
     this.signalImpossibilityAction,
@@ -582,8 +620,13 @@ class _StopTile extends StatelessWidget {
   /// row, surfaced as a small inline chip next to the stop name.
   final StopSyncChip syncChip;
 
-  /// The "Concluir" (check-out) action for this stop, or null to hide the
-  /// button. RouteScreen passes a callback only for an `IN_PROGRESS` stop —
+  /// Whether the "Concluir" button is shown at all (an `IN_PROGRESS` stop);
+  /// it is disabled while [onConcluir] is null.
+  final bool showConcluir;
+
+  /// The "Concluir" (check-out) action for this stop, or null to disable the
+  /// button. RouteScreen passes a callback only for an `IN_PROGRESS` stop
+  /// that may conclude (an evidence stop needs its photos first) —
   /// this widget stays a plain StatelessWidget with no WidgetRef of its own,
   /// leaving the execution-repository/room-picker wiring to RouteScreen.
   final VoidCallback? onConcluir;
@@ -634,7 +677,7 @@ class _StopTile extends StatelessWidget {
             ],
           ),
           subtitle: leg == null ? null : Text(AppStrings.routeLeg(leg)),
-          trailing: onConcluir == null
+          trailing: !showConcluir
               ? null
               : TextButton(
                   onPressed: onConcluir,
@@ -699,10 +742,12 @@ class _StopEvidenceSection extends ConsumerWidget {
   const _StopEvidenceSection({
     required this.routeId,
     required this.routeStopId,
+    required this.requiresEvidence,
   });
 
   final String routeId;
   final String routeStopId;
+  final bool requiresEvidence;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -713,7 +758,11 @@ class _StopEvidenceSection extends ConsumerWidget {
       data: (entry) =>
           entry == null || entry.status != StopLocalStatus.inProgress
           ? const SizedBox.shrink()
-          : _EvidenceSection(routeId: routeId, executionId: entry.executionId),
+          : _EvidenceSection(
+              routeId: routeId,
+              executionId: entry.executionId,
+              requiresEvidence: requiresEvidence,
+            ),
       loading: () => const SizedBox.shrink(),
       error: (_, _) => const SizedBox.shrink(),
     );
@@ -723,15 +772,23 @@ class _StopEvidenceSection extends ConsumerWidget {
 /// The "Adicionar foto"/"Adicionar observação" buttons and the evidence list
 /// for one stop's open execution.
 class _EvidenceSection extends ConsumerWidget {
-  const _EvidenceSection({required this.routeId, required this.executionId});
+  const _EvidenceSection({
+    required this.routeId,
+    required this.executionId,
+    required this.requiresEvidence,
+  });
 
   final String routeId;
   final String executionId;
+  final bool requiresEvidence;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final query = (routeId, executionId);
     final itemsAsync = ref.watch(stopEvidenceProvider(query));
+    final photoCount = itemsAsync.asData?.value
+        .where((item) => item.kind == 'PHOTO')
+        .length;
 
     return Padding(
       padding: const EdgeInsets.only(left: 56, right: 16, bottom: 8),
@@ -742,7 +799,15 @@ class _EvidenceSection extends ConsumerWidget {
             spacing: 8,
             children: [
               TextButton.icon(
-                onPressed: () => _addPhoto(context, ref, query),
+                // Capped only on a stop that requires evidence; an unknown
+                // count (loading) does not lock the camera.
+                onPressed:
+                    canAddEvidencePhoto(
+                      requiresEvidence: requiresEvidence,
+                      photoCount: photoCount ?? 0,
+                    )
+                    ? () => _addPhoto(context, ref, query)
+                    : null,
                 icon: const Icon(Icons.add_a_photo),
                 label: const Text(AppStrings.routeAddPhotoButton),
               ),
@@ -753,6 +818,8 @@ class _EvidenceSection extends ConsumerWidget {
               ),
             ],
           ),
+          if (requiresEvidence && photoCount != null)
+            EvidenceRequirementHint(missing: missingEvidencePhotos(photoCount)),
           itemsAsync.when(
             data: (items) =>
                 items.isEmpty ? const SizedBox.shrink() : _EvidenceList(items),

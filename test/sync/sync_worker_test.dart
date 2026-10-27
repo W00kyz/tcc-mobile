@@ -95,6 +95,7 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
   }) async {
     log.add('checkOut:$checkoutIdempotencyKey');
     final error = checkOutError;
@@ -584,6 +585,38 @@ void main() {
     expect(body.containsKey('answers'), isFalse);
     expect(body['checkout_idempotency_key'], 'c');
   });
+
+  test(
+    'a checkOut row with complaints_suggestions sends it to the API',
+    () async {
+      final sent = <RequestOptions>[];
+      final h = _Harness(
+        api: DioExecutionApi(
+          _capturingDio(onRequest: sent.add, body: _checkOutResponse),
+        ),
+      );
+      h.store
+        ..seed(
+          'c',
+          kind: PendingOpKind.checkOut,
+          createdAt: 1,
+          payload: {
+            ..._FakeLocalWriteStore._defaultPayload('c'),
+            'complaints_suggestions': 'Falta papel',
+          },
+        )
+        ..seed('d', kind: PendingOpKind.checkOut, createdAt: 2);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(sent, hasLength(2));
+      expect((sent[0].data as Map)['complaints_suggestions'], 'Falta papel');
+      expect(
+        (sent[1].data as Map).containsKey('complaints_suggestions'),
+        isFalse,
+      );
+    },
+  );
 
   test(
     'a soft error defers the row and stops the queue, then recovers',

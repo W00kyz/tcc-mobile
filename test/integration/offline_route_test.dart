@@ -958,6 +958,7 @@ class _RecordingExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
   }) async {
     _log.add('checkOut:$routeStopId');
     scannedAtArgs.add(scannedAt);

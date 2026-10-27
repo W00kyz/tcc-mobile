@@ -22,6 +22,7 @@ class RouteStopSummary {
     this.legGeometry,
     this.serviceTypeId,
     this.serviceTypeName,
+    this.requiresEvidence = false,
   });
 
   factory RouteStopSummary.fromJson(Map<String, dynamic> json) =>
@@ -47,6 +48,7 @@ class RouteStopSummary {
             .toList(),
         serviceTypeId: json['service_type_id'] as String?,
         serviceTypeName: json['service_type_name'] as String?,
+        requiresEvidence: json['requires_evidence'] as bool? ?? false,
       );
 
   final String id;
@@ -75,6 +77,10 @@ class RouteStopSummary {
   /// surfaced in the UI) — null for a stop with none.
   final String? serviceTypeId;
   final String? serviceTypeName;
+
+  /// Copied onto the stop at allocation: it needs at least 2 photos before
+  /// "Concluir" and asks for complaints/suggestions on the way out.
+  final bool requiresEvidence;
 }
 
 class RouteSummary {

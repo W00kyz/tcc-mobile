@@ -184,6 +184,16 @@ abstract final class AppStrings {
   static const String routeNoteAddError =
       'Não foi possível adicionar a observação.';
 
+  // --- route screen · evidence requirement ---
+  /// `Tire pelo menos 2 fotos (faltam N)`.
+  static String evidenceMissingHint(int missing) =>
+      'Tire pelo menos 2 fotos (faltam $missing)';
+
+  // --- complaints and suggestions dialog ---
+  static const String complaintsDialogTitle =
+      'Reclamações e Sugestões (opcional)';
+  static const String complaintsContinue = 'Continuar';
+
   // --- map screen ---
   static const String mapAppBarTitle = 'Trajeto da rota';
   static const String mapApproximateLegLabel = 'trajeto aproximado';
