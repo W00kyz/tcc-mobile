@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/monitoring/location_mode.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/ongoing_notification.dart';
 import 'package:route_monitor/monitoring/position_reporter.dart';
+import 'package:route_monitor/monitoring/position_source.dart';
 import 'package:route_monitor/routing/location_service.dart';
 
 void main() {
@@ -12,18 +14,26 @@ void main() {
   late _RecordingMonitoringApi api;
   late _FakeTimer timer;
   late _FakeOngoingNotification notification;
+  late _FakePositionSource positions;
+  late List<DateTime> sent;
+  final sentAt = DateTime.utc(2026, 10, 20, 9, 15);
 
   setUp(() {
     location = _FakeLocationService();
     api = _RecordingMonitoringApi();
     timer = _FakeTimer();
     notification = _FakeOngoingNotification();
+    positions = _FakePositionSource();
+    sent = [];
   });
 
   PositionReporter build() => PositionReporter(
     location: location,
+    positionSource: positions,
     api: api,
     notification: notification,
+    onPositionSent: sent.add,
+    now: () => sentAt,
     createTimer: timer.create,
   );
 
@@ -209,6 +219,127 @@ void main() {
     expect(timer.cancelled, isTrue);
     expect(notification.hides, greaterThanOrEqualTo(1));
   });
+
+  test('foregroundOnly ticks on the interval the server sent', () {
+    build().start('r1', interval: const Duration(seconds: 90));
+
+    expect(timer.lastInterval, const Duration(seconds: 90));
+    expect(positions.watchedInterval, isNull);
+  });
+
+  test('a successful foreground send records when it was sent', () async {
+    build().start('r1');
+
+    await timer.tick();
+    expect(sent, [sentAt]);
+    expect(api.calls.single.reportedAt, sentAt);
+
+    api.error = StateError('no signal');
+    await timer.tick();
+    expect(sent, [sentAt]);
+  });
+
+  group('background mode', () {
+    PositionReporter startBackground() => build()
+      ..start(
+        'r1',
+        mode: LocationMode.background,
+        interval: const Duration(seconds: 30),
+      );
+
+    test('posts each fix of the position stream, no timer', () async {
+      startBackground();
+
+      expect(positions.watchedInterval, const Duration(seconds: 30));
+      expect(timer.createdCount, 0);
+
+      await positions.emit(
+        const Coordinates(latitude: -7.21, longitude: -35.9),
+      );
+      await positions.emit(
+        const Coordinates(latitude: -7.21, longitude: -35.9),
+      );
+
+      // Every fix, even parked: the stream already keeps the GPS awake, and a
+      // skipped fix would only bring the silence release closer.
+      expect(api.calls.map((call) => call.latitude), [-7.21, -7.21]);
+      expect(api.calls.first.routeId, 'r1');
+      expect(sent, [sentAt, sentAt]);
+    });
+
+    test('the service notification replaces the in-app ongoing one', () {
+      startBackground();
+
+      expect(notification.shows, 0);
+    });
+
+    test('a failed send is swallowed and records nothing', () async {
+      startBackground();
+      api.error = StateError('no signal');
+
+      await positions.emit(
+        const Coordinates(latitude: -7.21, longitude: -35.9),
+      );
+
+      expect(sent, isEmpty);
+      expect(positions.cancelled, isFalse);
+    });
+
+    test('a stream error is swallowed — the stream keeps going', () async {
+      startBackground();
+
+      await positions.fail(StateError('GPS off'));
+      await positions.emit(
+        const Coordinates(latitude: -7.21, longitude: -35.9),
+      );
+
+      expect(api.calls, hasLength(1));
+    });
+
+    test('a 409 stops the stream', () async {
+      startBackground();
+      api.error = DioException(
+        requestOptions: RequestOptions(path: '/worker-positions'),
+        response: Response<void>(
+          requestOptions: RequestOptions(path: '/worker-positions'),
+          statusCode: 409,
+        ),
+      );
+
+      await positions.emit(
+        const Coordinates(latitude: -7.21, longitude: -35.9),
+      );
+
+      expect(positions.cancelled, isTrue);
+    });
+
+    test('stop() cancels the stream', () {
+      startBackground().stop();
+
+      expect(positions.cancelled, isTrue);
+    });
+
+    test('a stream that ends lets the next start subscribe again', () async {
+      final reporter = startBackground();
+
+      await positions.close();
+      reporter.start(
+        'r1',
+        mode: LocationMode.background,
+        interval: const Duration(seconds: 30),
+      );
+
+      expect(positions.watchCount, 2);
+    });
+
+    test('switching mode on the same route restarts the loop', () {
+      startBackground().start('r1');
+
+      expect(positions.cancelled, isTrue);
+      expect(timer.createdCount, 1);
+      expect(notification.shows, 1);
+    });
+  });
 }
 
 /// Records `show`/`hide` calls so a test can assert the persistent
@@ -251,10 +382,12 @@ class _ReportCall {
     required this.routeId,
     required this.latitude,
     required this.longitude,
+    required this.reportedAt,
   });
   final String routeId;
   final double latitude;
   final double longitude;
+  final DateTime reportedAt;
 }
 
 class _RecordingMonitoringApi implements MonitoringApi {
@@ -274,7 +407,12 @@ class _RecordingMonitoringApi implements MonitoringApi {
     // ignore: only_throw_errors — a fake replaying whatever the test injects.
     if (error != null) throw error!;
     calls.add(
-      _ReportCall(routeId: routeId, latitude: latitude, longitude: longitude),
+      _ReportCall(
+        routeId: routeId,
+        latitude: latitude,
+        longitude: longitude,
+        reportedAt: reportedAt,
+      ),
     );
   }
 
@@ -298,9 +436,11 @@ class _FakeTimer {
   void Function(Timer)? tickCallback;
   int createdCount = 0;
   bool cancelled = false;
+  Duration? lastInterval;
 
   Timer create(Duration interval, void Function(Timer) onTick) {
     createdCount++;
+    lastInterval = interval;
     cancelled = false;
     tickCallback = onTick;
     return _NoopTimer(
@@ -331,4 +471,40 @@ class _NoopTimer implements Timer {
 
   @override
   int get tick => 0;
+}
+
+/// Hands the reporter a stream the test drives fix by fix, standing in for
+/// the Android foreground-service stream.
+class _FakePositionSource implements PositionSource {
+  StreamController<Coordinates> _fixes = StreamController<Coordinates>();
+  Duration? watchedInterval;
+  bool cancelled = false;
+  int watchCount = 0;
+
+  @override
+  Stream<Coordinates> watch({required Duration interval}) {
+    watchedInterval = interval;
+    watchCount++;
+    if (_fixes.hasListener || _fixes.isClosed) {
+      _fixes = StreamController<Coordinates>();
+    }
+    _fixes.onCancel = () => cancelled = true;
+    return _fixes.stream;
+  }
+
+  /// The platform stream ending by itself (e.g. after a permission error).
+  Future<void> close() async {
+    await _fixes.close();
+    await Future<void>.delayed(Duration.zero);
+  }
+
+  Future<void> emit(Coordinates fix) async {
+    _fixes.add(fix);
+    await Future<void>.delayed(Duration.zero);
+  }
+
+  Future<void> fail(Object error) async {
+    _fixes.addError(error);
+    await Future<void>.delayed(Duration.zero);
+  }
 }

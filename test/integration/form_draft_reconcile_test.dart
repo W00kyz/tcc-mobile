@@ -61,7 +61,7 @@ void main() {
       // live check-in transition mid-test) — the family providers this
       // screen watches (`stopProgressForProvider`,
       // `formDraftCompleteProvider`) are plain `FutureProvider`s with no
-      // dependency wiring back to `myRoutesProvider`, so nothing here
+      // dependency wiring back to `myDayProvider`, so nothing here
       // relies on invalidating them mid-run.
       final executionId = await fixture.repo.checkIn(
         routeId: _routeId,
@@ -77,7 +77,7 @@ void main() {
       );
 
       // ---- Warm + mount, route starts already IN_PROGRESS with stop 1 -----
-      await fixture.container.read(myRoutesProvider.future);
+      await fixture.container.read(myDayProvider.future);
       await tester.pumpWidget(fixture.app());
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
@@ -112,7 +112,7 @@ void main() {
       // is unchanged, q2's prompt (and hash) changed, q3 unchanged, q4 is a
       // brand-new required TEXT question -----------------------------------
       fixture.routeApi.form = _formV2;
-      fixture.container.invalidate(myRoutesProvider);
+      fixture.container.invalidate(myDayProvider);
       // Gives `FormReconciliationTrigger`'s `unawaited` loop (mounted in
       // fixture.app()) real wall-clock time to re-fetch, diff and write the
       // reconciled draft — matching offline_route_test.dart's cadence for a
@@ -430,42 +430,58 @@ class _FakeConnectivity implements Connectivity {
 
 /// A [RouteRepository] with one route, one stop, and a mutable [form] —
 /// tests flip it mid-run to simulate a new PUBLISHED form version landing on
-/// the stop's service type, then re-fetch via `myRoutesProvider`.
+/// the stop's service type, then re-fetch via `myDayProvider`.
 class _MutableFormRouteRepository implements RouteRepository {
   FormSchema? form = _formV1;
 
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => [
-    RouteSummary(
-      id: _routeId,
-      fieldWorkerName: 'João',
-      routeDate: DateTime(2026, 9, 3),
-      routeType: 'REGULAR',
-      status: 'IN_PROGRESS',
-      startedAt: DateTime.utc(2026, 9, 3, 8),
-      stops: [
-        RouteStopSummary(
-          id: _stop1,
-          orderIndex: 1,
-          status: 'PENDING',
-          servicePointName: 'Sala 101',
-          latitude: -7.23,
-          longitude: -35.88,
-          serviceTypeId: 'svc-cleaning',
-          serviceTypeName: 'Limpeza',
-          form: form,
-        ),
-      ],
-    ),
-  ];
+  RouteSummary _route() => RouteSummary(
+    id: _routeId,
+    fieldWorkerName: 'João',
+    routeDate: DateTime(2026, 9, 3),
+    status: 'IN_PROGRESS',
+    startedAt: DateTime.utc(2026, 9, 3, 8),
+    currentBatch: 1,
+    stops: [
+      RouteStopSummary(
+        id: _stop1,
+        orderIndex: 1,
+        batchNumber: 1,
+        status: 'PENDING',
+        servicePointName: 'Sala 101',
+        latitude: -7.23,
+        longitude: -35.88,
+        serviceTypeId: 'svc-cleaning',
+        serviceTypeName: 'Limpeza',
+        form: form,
+      ),
+    ],
+  );
 
   @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async => (await fetchMyRoutes()).first;
+  Future<MyDay> fetchMyDay() async => MyDay(
+    serviceDay: true,
+    route: _route(),
+    positionIntervalSeconds: 60,
+    silenceWarningMinutes: 30,
+    silenceReleaseMinutes: 45,
+  );
+
+  // The server's answer while the batch still has an open stop: the batch,
+  // unchanged (this test is about the form, not about allocation).
+  @override
+  Future<AllocationResult> startOrResume({
+    required double lat,
+    required double lng,
+    required DateTime capturedAt,
+  }) async => AllocationResult(route: _route(), poolEmpty: false);
+
+  @override
+  Future<AllocationResult> nextBatch(
+    String routeId, {
+    required double lat,
+    required double lng,
+    required DateTime capturedAt,
+  }) async => AllocationResult(route: _route(), poolEmpty: false);
 }
 
 /// Records every `checkOut` call's `formVersionId`/`answers` args — the

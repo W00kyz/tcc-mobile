@@ -42,18 +42,70 @@ abstract final class AppStrings {
       'Se o e-mail estiver cadastrado, você receberá um link em instantes.';
   static const String forgotPasswordError =
       'Não foi possível enviar o link. Verifique a conexão e tente novamente.';
+  static const String loginCreateAccount = 'Criar conta';
+
+  // --- self-registration (alocação automática §9) ---
+  static const String registrationTitle = 'Criar conta';
+  static const String registrationNameLabel = 'Nome';
+  static const String registrationEmailLabel = 'E-mail';
+  static const String registrationPasswordLabel = 'Senha';
+  static const String registrationCompanyLabel = 'Empresa';
+  static const String registrationNameRequired = 'Informe seu nome.';
+  static const String registrationEmailInvalid = 'Informe um e-mail válido.';
+  static const String registrationPasswordTooShort =
+      'A senha precisa ter pelo menos 8 caracteres.';
+  static const String registrationPasswordTooLong =
+      'A senha pode ter no máximo 128 caracteres.';
+  static const String registrationCompanyRequired = 'Escolha sua empresa.';
+  static const String registrationAcceptNotice = 'Li e aceito';
+  static const String registrationSubmit = 'Enviar cadastro';
+  static const String registrationSubmitting = 'Enviando…';
+  static const String registrationSent =
+      'Cadastro enviado. Aguarde a aprovação do gestor.';
+  static const String registrationEmailTaken =
+      'Este e-mail já está cadastrado.';
+  static const String registrationNoticeOutdated =
+      'O aviso de privacidade foi atualizado. Leia e aceite a nova versão.';
+  static const String registrationError =
+      'Não foi possível enviar o cadastro. Verifique a conexão e tente '
+      'novamente.';
+  static const String registrationInvalidData =
+      'Verifique os dados informados.';
+  static const String registrationCompanyGone =
+      'A empresa escolhida não está mais disponível. Escolha novamente.';
+  static const String registrationServerError =
+      'O servidor não conseguiu registrar o cadastro. Tente novamente mais '
+      'tarde.';
+  static const String registrationLoadError =
+      'Não foi possível carregar as empresas e o aviso de privacidade.';
+  static const String registrationRetry = 'Tentar novamente';
+
+  /// The `Versão <n>` label under the privacy notice title.
+  static String registrationNoticeVersion(int version) => 'Versão $version';
+
+  // --- approval gate (alocação automática §9) ---
+  static const String approvalPendingMessage =
+      'Seu cadastro está aguardando aprovação do gestor.';
+  static const String approvalRejectedMessage =
+      'Seu cadastro não foi aprovado.';
+  static const String approvalDeactivatedMessage =
+      'Seu cadastro foi desativado pelo gestor.';
+  static const String approvalRefreshButton = 'Atualizar';
+  static const String approvalExitButton = 'Sair';
+  static const String approvalStillPending =
+      'Seu cadastro ainda aguarda aprovação.';
+  static const String approvalNetworkError =
+      'Sem conexão com o servidor. Tente novamente quando houver sinal.';
+
+  /// The manager's reason under a rejection.
+  static String approvalRejectionReason(String reason) => 'Motivo: $reason';
 
   // --- route screen ---
   static const String routeAppBarTitle = 'Rota de hoje';
   static const String routeLoadError = 'Não foi possível carregar sua rota.';
-  static const String routeEmpty = 'Nenhuma rota atribuída para hoje.';
   static const String routeViewMapButton = 'Ver no mapa';
   static const String routeStartButton = 'Iniciar rota';
   static const String routeCheckInButton = 'Fazer check-in';
-  static const String routeStartedHeader = 'Rota iniciada';
-  static const String routeNotStartedHeader = 'Rota não iniciada';
-  static const String routeOccasionalChip = 'EVENTUAL';
-  static const String routeStopReassignedChip = 'Reatribuído';
   static const String formMediaTakePhoto = 'Tirar foto';
   static const String formMediaRemove = 'Remover foto';
   static const String formMediaLimit = 'Limite de 10 fotos por pergunta.';
@@ -72,6 +124,44 @@ abstract final class AppStrings {
   static const String routeLocationUnavailableCheckIn =
       'Não foi possível obter sua localização; check-in seguirá sem GPS.';
 
+  // --- route screen · batches (spec 2026-10-20-alocacao-automatica §6.4) ---
+  static const String routeNotServiceDay = 'Hoje não é dia de serviço.';
+  static const String routeStartOffline =
+      'Conecte-se à internet para iniciar a rota.';
+  static const String routeOutsideCampus =
+      'Você precisa estar no campus para iniciar.';
+  static const String routeWorkdayOver = 'O expediente de hoje já terminou.';
+  static const String routeNoMorePoints = 'Não há mais pontos agora.';
+  static const String routeCheckAgainButton = 'Verificar de novo';
+  static const String routeStartFailed =
+      'Não foi possível iniciar a rota. Tente novamente.';
+  static const String routePausedTitle = 'Seus pontos foram liberados';
+  static const String routeNextBatchOffline =
+      'Conecte-se para receber mais pontos';
+
+  /// A released stop of the current batch: `Liberado · <motivo>`, or just
+  /// `Liberado` when the server sent no reason.
+  static String routeStopReleased(String? reason) =>
+      reason == null ? 'Liberado' : 'Liberado · $reason';
+
+  /// `Lote <n> · <x> ponto(s) feito(s) hoje`.
+  static String routeBatchHeader(int batch, int doneToday) =>
+      'Lote $batch · $doneToday '
+      '${doneToday == 1 ? 'ponto feito' : 'pontos feitos'} hoje';
+
+  /// Why a paused route's points went back to the pool.
+  static String routePausedReason(String reason) => 'Motivo: $reason';
+
+  /// A stop's `release_reason` code in words (same labels as the dashboard).
+  static String releaseReasonLabel(String code) => switch (code) {
+    'IMPEDIMENT' => 'Impedimento',
+    'ROUTE_REMAINDER' => 'Resto da rota impedido',
+    'LEFT_CAMPUS' => 'Saiu do campus',
+    'LOCATION_SILENCE' => 'Sem localização',
+    'END_OF_DAY' => 'Fim do expediente',
+    _ => code,
+  };
+
   // --- route screen · sync banner ---
   static const String routeSyncBlockedBanner =
       'Sincronização bloqueada — toque para ver';
@@ -86,9 +176,6 @@ abstract final class AppStrings {
 
   /// The travel-from-previous leg line, e.g. `a 120 m · 2 min`.
   static String routeLeg(String leg) => 'a $leg';
-
-  /// The arrival-window subtitle, e.g. `Janela: 08:00–08:30`.
-  static String routeWindow(String window) => 'Janela: $window';
 
   // --- route screen · evidence ---
   static const String routeAddPhotoButton = 'Adicionar foto';
@@ -122,26 +209,124 @@ abstract final class AppStrings {
   static const String blockedSyncKindCheckOut = 'Check-out';
   static const String blockedSyncKindPhoto = 'Foto';
   static const String blockedSyncKindNote = 'Observação';
-  static const String blockedSyncKindStartRoute = 'Início de rota';
   static const String blockedSyncKindImpediment = 'Impedimento';
 
   /// A `<kind> — <reference>` outbox-row label.
   static String blockedSyncRowLabel(String kind, String reference) =>
       '$kind — $reference';
 
+  // --- released stops with local data: blocked sync screen and /recursos
+  // (alocação automática §7.5) ---
+  static const String releasedStopAppealButton = 'Recorrer';
+  static const String releasedStopDiscardButton = 'Descartar';
+  static const String releasedStopDiscardTitle = 'Descartar dados deste ponto?';
+  static const String releasedStopDiscardBody =
+      'As fotos, respostas e registros feitos offline neste ponto serão '
+      'apagados do aparelho.';
+  static const String releasedStopDiscarded = 'Dados do ponto descartados.';
+
+  /// The heading of a stop whose late writes the server refused.
+  static String releasedStopTitle(String reference) =>
+      'Ponto liberado — $reference';
+
+  /// Why the server released that stop.
+  static String releasedStopReason(String reason) => 'Motivo: $reason';
+
+  /// Under a released stop the worker can no longer appeal.
+  static const String releasedStopNotAppealable =
+      'Não aceita recurso — você pode descartar os dados.';
+
   // --- room picker ---
   static const String roomPickerPrompt =
       'Vários pontos correspondem — escolha o certo:';
 
-  // --- impediment dialog ---
-  static const String impedimentDialogTitle = 'Sinalizar impossibilidade';
+  // --- impediment dialog (alocação automática §7.1) ---
+  static const String impedimentDialogTitle = 'Não consigo fazer este ponto';
   static const String impedimentNoteHint = 'Observação (opcional)';
-  static const String impedimentRemainderSwitch =
-      'Sinalizar para o resto da rota também';
+  static const String impedimentRemainderSwitch = 'Não consigo continuar hoje';
   static const String impedimentReasonAccessBlocked = 'Acesso bloqueado';
   static const String impedimentReasonSiteRefusal = 'Recusa do local';
   static const String impedimentReasonHealthIssue = 'Problema de saúde';
   static const String impedimentReasonOther = 'Outro';
+
+  // --- appeals (alocação automática §7.5) ---
+  static const String appealsTooltip = 'Recursos';
+  static const String appealsAppBarTitle = 'Recursos';
+  static const String appealsLocalTitle =
+      'Pontos liberados com dados neste aparelho';
+  static const String appealsEligibleTitle =
+      'Pontos liberados que você pode contestar';
+  static const String appealsEligibleEmpty = 'Nenhum ponto para contestar.';
+  static const String appealsMineTitle = 'Meus recursos';
+  static const String appealsMineEmpty = 'Você ainda não enviou recursos.';
+  static const String appealsLoadError =
+      'Não foi possível carregar os recursos.';
+  static const String releasedStopsSnackbar =
+      'Estes pontos foram liberados — você pode recorrer.';
+  static const String releasedStopsSnackbarAction = 'Recorrer';
+
+  /// The details line of a contestable point.
+  static String appealEligibleDetails({
+    required String building,
+    required String floor,
+    required String reason,
+    required String deadline,
+  }) => '$building · $floor\nMotivo: $reason · Prazo: $deadline';
+
+  /// The details line of a filed appeal: `<prédio> · enviado em <quando>`.
+  static String appealFiledDetails(String building, String filedAt) =>
+      '$building · enviado em $filedAt';
+
+  /// An appeal's `status` in words.
+  static String appealStatusLabel(String status) => switch (status) {
+    'PENDING' => 'Em análise',
+    'ACCEPTED' => 'Aceito',
+    'REJECTED' => 'Recusado',
+    _ => status,
+  };
+
+  /// Who decided an appeal and, when they wrote one, their note.
+  static String appealReview(String reviewer, String? note) =>
+      note == null ? 'Por $reviewer' : '$reviewer: $note';
+
+  // --- appeal form (alocação automática §7.5) ---
+  static const String appealFormTitle = 'Recorrer';
+  static const String appealReasonLabel = 'Motivo';
+  static const String appealReasonNoSignal = 'Fiquei sem sinal';
+  static const String appealReasonLeftBriefly = 'Saí rapidamente do campus';
+  static const String appealReasonAppClosed = 'O app fechou ou descarregou';
+  static const String appealReasonOther = 'Outro';
+  static const String appealNoteHint = 'Observação (opcional)';
+  static const String appealClaimedTimeLabel = 'Horário declarado';
+  static const String appealClaimedTimeNone = 'Não informado';
+  static const String appealSubmit = 'Enviar recurso';
+  static const String appealLocalDataWarning =
+      'As fotos e respostas feitas offline neste ponto não serão enviadas com '
+      'o recurso e serão apagadas do aparelho.';
+  static const String appealWarningConfirm = 'Enviar';
+  static const String appealSent = 'Recurso enviado.';
+  static const String appealSentCleanupFailed =
+      'O recurso foi enviado, mas os dados deste ponto não puderam ser '
+      'apagados do aparelho. Toque em "Enviar recurso" de novo.';
+  static const String appealSendError =
+      'Não foi possível enviar o recurso. Verifique a conexão e tente '
+      'novamente.';
+
+  /// `Motivo da liberação: <motivo>`.
+  static String appealReleaseReason(String reason) =>
+      'Motivo da liberação: $reason';
+
+  /// Why the server refused an appeal (409 `NOT_APPEALABLE` `reason_code`).
+  static String appealRefusal(String reasonCode) => switch (reasonCode) {
+    'NOT_OWNER' => 'Este ponto não é seu.',
+    'NOT_RELEASED' => 'Este ponto não está liberado.',
+    'REASON_NOT_APPEALABLE' =>
+      'Pontos liberados por impedimento não aceitam recurso.',
+    'ALREADY_CHECKED_OUT' => 'A conclusão deste ponto já foi registrada.',
+    'WINDOW_EXPIRED' => 'O prazo para recorrer deste ponto terminou.',
+    'ALREADY_APPEALED' => 'Você já recorreu deste ponto.',
+    _ => appealSendError,
+  };
 
   // --- form screen ---
   static const String formAppBarTitle = 'Formulário';
@@ -163,9 +348,8 @@ abstract final class AppStrings {
       'Não foi possível carregar as notificações.';
   static const String notificationsEmpty = 'Nenhuma notificação.';
   static const String notificationKindAlert = 'Alerta';
-  static const String notificationKindRouteAssigned = 'Nova rota';
-  static const String notificationKindRouteModified = 'Rota alterada';
-  static const String notificationKindStopReassigned = 'Ponto reatribuído';
+  static const String notificationKindImpedimentReported = 'Impossibilidade';
+  static const String notificationKindAppealFiled = 'Recurso';
 
   /// `<kind> · <timestamp>` metadata line under a notification.
   static String notificationMeta(String kind, String timestamp) =>
@@ -237,4 +421,35 @@ abstract final class AppStrings {
   static const String locationPurposeRationale =
       'A localização é usada apenas para confirmar a presença nos pontos da '
       'rota e não é compartilhada fora da Prefeitura Universitária.';
+
+  // --- location in two modes and the silence warning (alocação §7.3) ---
+  /// The fixed notification of the background-location foreground service.
+  static const String routeInProgressTitle = 'Rota em andamento';
+  static const String routeInProgressText = collectionNotificationBody;
+  static const String locationAlwaysRationale =
+      'Para não perder seus pontos com a tela bloqueada, permita a '
+      'localização o tempo todo durante a rota.';
+  static const String locationForegroundOnlyNote =
+      'Sem essa permissão, abra o app de tempos em tempos durante a rota.';
+  static const String locationPromptContinue = 'Continuar';
+  static const String locationPromptUnderstood = 'Entendi';
+  static const String silenceNotificationTitle = 'Localização não enviada';
+  static const String silenceNotificationChannelName = 'Aviso de localização';
+  static const String silenceNotificationChannelDescription =
+      'Avisa quando a localização não é enviada há algum tempo durante a '
+      'rota.';
+
+  /// The silence warning: [silent] minutes without a sent position, the
+  /// points released in [untilRelease] minutes — or, with none left, the
+  /// [silenceWarningPastRelease] copy.
+  static String silenceWarning(int silent, int untilRelease) =>
+      untilRelease <= 0
+      ? silenceWarningPastRelease(silent)
+      : 'Sem enviar sua localização há $silent min. Seus pontos serão '
+            'liberados em $untilRelease min. Abra o app ou procure sinal.';
+
+  /// The warning once the release window has run out.
+  static String silenceWarningPastRelease(int silent) =>
+      'Sem enviar sua localização há $silent min. Seus pontos podem ter '
+      'sido liberados. Abra o app ou procure sinal.';
 }

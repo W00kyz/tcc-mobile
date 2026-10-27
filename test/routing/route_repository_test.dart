@@ -6,243 +6,152 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_snapshot_cache.dart';
 
+Map<String, dynamic> _stopPayload({
+  required String id,
+  required int orderIndex,
+  int batchNumber = 2,
+  String status = 'PENDING',
+  String? releaseReason,
+}) => {
+  'id': id,
+  'order_index': orderIndex,
+  'batch_number': batchNumber,
+  'status': status,
+  'release_reason': releaseReason,
+  'service_point_id': 'sp-$id',
+  'service_point_name': 'Sala $id',
+  'floor_label': 'Térreo',
+  'building_name': 'CAA',
+  'latitude': -7.21,
+  'longitude': -35.91,
+  'distance_from_prev_m': null,
+  'duration_from_prev_s': null,
+  'leg_geometry': null,
+  'service_type_id': null,
+  'service_type_name': null,
+  'form': null,
+};
+
+/// A `RouteOut` in its second batch: batch 1 had one DONE stop and one stop
+/// released by an impediment; batch 2 is open.
 Map<String, dynamic> _routePayload() => {
   'id': 'r1',
+  'field_worker_id': 'fw1',
   'field_worker_name': 'João',
-  'route_date': '2026-08-25',
-  'route_type': 'REGULAR',
+  'route_date': '2026-10-20',
   'status': 'IN_PROGRESS',
-  'scheduled_start_at': null,
-  'started_at': '2026-08-25T08:15:00Z',
+  'started_at': '2026-10-20T11:15:00Z',
+  'routing_degraded': false,
+  'current_batch': 2,
   'stops': [
+    _stopPayload(id: 'a', orderIndex: 1, batchNumber: 1, status: 'DONE'),
+    _stopPayload(
+      id: 'b',
+      orderIndex: 2,
+      batchNumber: 1,
+      status: 'RELEASED',
+      releaseReason: 'IMPEDIMENT',
+    ),
     {
-      'id': 's1',
-      'order_index': 1,
-      'status': 'PENDING',
-      'service_point_name': 'Sala 101',
-      'latitude': -7.21,
-      'longitude': -35.91,
-      'expected_arrival_from': null,
-      'expected_arrival_to': null,
-      'distance_from_prev_m': null,
-      'duration_from_prev_s': null,
-      'leg_geometry': null,
-    },
-    {
-      'id': 's2',
-      'order_index': 2,
-      'status': 'PENDING',
-      'service_point_name': 'Sala 202',
-      'latitude': -7.22,
-      'longitude': -35.92,
-      'expected_arrival_from': '2026-08-25T09:00:00Z',
-      'expected_arrival_to': '2026-08-25T09:30:00Z',
+      ..._stopPayload(id: 'c', orderIndex: 3),
       'distance_from_prev_m': 1234.5,
       'duration_from_prev_s': 180.0,
       'leg_geometry': [
         [-35.91, -7.21],
-        [-35.915, -7.215],
         [-35.92, -7.22],
       ],
     },
+    _stopPayload(id: 'd', orderIndex: 4, status: 'IN_PROGRESS'),
   ],
 };
 
+Map<String, dynamic> _myDayPayload({Map<String, dynamic>? route}) => {
+  'service_day': true,
+  'route': route,
+  'position_report_interval_seconds': 60,
+  'location_silence_warning_minutes': 30,
+  'location_silence_release_minutes': 45,
+};
+
+Dio _dioAnswering(
+  int statusCode,
+  Object body, {
+  void Function(RequestOptions)? onRequest,
+}) =>
+    Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _FakeAdapter(
+        statusCode: statusCode,
+        body: body,
+        onRequest: onRequest,
+      );
+
+Dio _offlineDio() =>
+    Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _OfflineAdapter();
+
+Map<String, Object> _refusal(String code) => {
+  'detail': {'code': code, 'detail': 'refused'},
+};
+
+final _capturedAt = DateTime.utc(2026, 10, 20, 11, 15);
+
 void main() {
-  group('offline snapshot (RF35, RNF21)', () {
-    test('a successful fetch is saved and served back offline', () async {
-      final cache = InMemoryRouteSnapshotCache();
-      final online = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _FakeAdapter(
-          statusCode: 200,
-          body: [_routePayload()],
-        );
-      await DioRouteRepository(
-        online,
-        cache: cache,
-        userId: 'u1',
-      ).fetchMyRoutes();
+  group('fetchMyDay', () {
+    test('parses the day and its limits before any route exists', () async {
+      final repository = DioRouteRepository(
+        _dioAnswering(200, _myDayPayload()),
+      );
 
-      final offline = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _OfflineAdapter();
-      final routes = await DioRouteRepository(
-        offline,
-        cache: cache,
-        userId: 'u1',
-      ).fetchMyRoutes();
+      final day = await repository.fetchMyDay();
 
-      expect(routes.single.id, 'r1');
-      expect(routes.single.stops, hasLength(2));
+      expect(day.serviceDay, isTrue);
+      expect(day.route, isNull);
+      expect(day.positionIntervalSeconds, 60);
+      expect(day.silenceWarningMinutes, 30);
+      expect(day.silenceReleaseMinutes, 45);
     });
 
-    test("another user's snapshot is never served", () async {
-      final cache = InMemoryRouteSnapshotCache()
-        ..snapshots['u1'] = jsonEncode([_routePayload()]);
-      final offline = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _OfflineAdapter();
-
-      await expectLater(
-        DioRouteRepository(offline, cache: cache, userId: 'u2').fetchMyRoutes(),
-        throwsA(isA<DioException>()),
+    test('parses the route, its batch and every stop', () async {
+      final repository = DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: _routePayload())),
       );
+
+      final route = (await repository.fetchMyDay()).route!;
+
+      expect(route.id, 'r1');
+      expect(route.status, 'IN_PROGRESS');
+      expect(route.routeDate, DateTime.parse('2026-10-20'));
+      expect(route.currentBatch, 2);
+      expect(route.stops.map((s) => s.id), ['a', 'b', 'c', 'd']);
+      expect(route.stops[1].batchNumber, 1);
+      expect(route.stops[1].status, 'RELEASED');
+      expect(route.stops[1].releaseReason, 'IMPEDIMENT');
+      expect(route.stops[2].releaseReason, isNull);
+      expect(route.stops[2].distanceFromPrevM, 1234.5);
+      expect(route.stops[2].durationFromPrevS, 180.0);
+      expect(route.stops[2].legGeometry, [
+        [-35.91, -7.21],
+        [-35.92, -7.22],
+      ]);
     });
 
-    test('an HTTP error is a real answer, not a reason to use the cache', () {
-      final cache = InMemoryRouteSnapshotCache()
-        ..snapshots['u1'] = jsonEncode([_routePayload()]);
-      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _FakeAdapter(
-          statusCode: 500,
-          body: <String, Object>{},
-        );
-
-      expect(
-        DioRouteRepository(dio, cache: cache, userId: 'u1').fetchMyRoutes(),
-        throwsA(isA<DioException>()),
+    test('derives the done count over every batch of the day', () async {
+      final repository = DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: _routePayload())),
       );
+
+      final route = (await repository.fetchMyDay()).route!;
+
+      expect(route.doneToday, 1);
     });
-  });
 
-  test('fetchMyRoutes parses the stops in order', () async {
-    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-      ..httpClientAdapter = _FakeAdapter(
-        statusCode: 200,
-        body: [_routePayload()],
-      );
-    final repository = DioRouteRepository(dio);
-
-    final routes = await repository.fetchMyRoutes();
-
-    expect(routes, hasLength(1));
-    expect(routes.first.stops.first.servicePointName, 'Sala 101');
-  });
-
-  test('fetchMyRoutes parses the route type, status and date', () async {
-    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-      ..httpClientAdapter = _FakeAdapter(
-        statusCode: 200,
-        body: [_routePayload()],
-      );
-    final repository = DioRouteRepository(dio);
-
-    final route = (await repository.fetchMyRoutes()).first;
-
-    expect(route.routeType, 'REGULAR');
-    expect(route.status, 'IN_PROGRESS');
-    expect(route.routeDate, DateTime.parse('2026-08-25'));
-  });
-
-  test('fetchMyRoutes parses the leg geometry and null legs', () async {
-    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-      ..httpClientAdapter = _FakeAdapter(
-        statusCode: 200,
-        body: [_routePayload()],
-      );
-    final repository = DioRouteRepository(dio);
-
-    final stops = (await repository.fetchMyRoutes()).first.stops;
-
-    expect(stops[0].legGeometry, isNull);
-    expect(stops[1].legGeometry, isA<List<List<double>>>());
-    expect(stops[1].legGeometry, [
-      [-35.91, -7.21],
-      [-35.915, -7.215],
-      [-35.92, -7.22],
-    ]);
-  });
-
-  test(
-    'fetchMyRoutes parses the arrival window, coordinates and leg cost',
-    () async {
-      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _FakeAdapter(
-          statusCode: 200,
-          body: [_routePayload()],
-        );
-      final repository = DioRouteRepository(dio);
-
-      final stops = (await repository.fetchMyRoutes()).first.stops;
-
-      expect(stops[0].expectedArrivalFrom, isNull);
-      expect(stops[1].latitude, -7.22);
-      expect(stops[1].longitude, -35.92);
-      expect(
-        stops[1].expectedArrivalFrom,
-        DateTime.parse('2026-08-25T09:00:00Z'),
-      );
-      expect(
-        stops[1].expectedArrivalTo,
-        DateTime.parse('2026-08-25T09:30:00Z'),
-      );
-      expect(stops[1].distanceFromPrevM, 1234.5);
-      expect(stops[1].durationFromPrevS, 180.0);
-    },
-  );
-
-  test(
-    'fetchMyRoutes parses an IN_PROGRESS stop status the same way as '
-    'PENDING/DONE — plain string pass-through, no enum mapping (Task 20)',
-    () async {
-      final payload = _routePayload();
-      final stopsJson = (payload['stops'] as List<dynamic>)
+    test("parses a stop's service type and form when present", () async {
+      final route = _routePayload();
+      final stops = (route['stops'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
-      stopsJson[0]['status'] = 'IN_PROGRESS';
-      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _FakeAdapter(
-          statusCode: 200,
-          body: [payload],
-        );
-      final repository = DioRouteRepository(dio);
-
-      final stops = (await repository.fetchMyRoutes()).first.stops;
-
-      expect(stops[0].status, 'IN_PROGRESS');
-    },
-  );
-
-  test(
-    'fetchMyRoutes forwards the date filter as a YYYY-MM-DD query',
-    () async {
-      late RequestOptions capturedRequest;
-      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _FakeAdapter(
-          statusCode: 200,
-          body: <dynamic>[],
-          onRequest: (options) => capturedRequest = options,
-        );
-      final repository = DioRouteRepository(dio);
-
-      await repository.fetchMyRoutes(date: DateTime(2026, 9, 2));
-
-      expect(capturedRequest.path, '/routes/me');
-      expect(capturedRequest.uri.queryParameters['date'], '2026-09-02');
-    },
-  );
-
-  test('fetchMyRoutes omits the date query when no date is given', () async {
-    late RequestOptions capturedRequest;
-    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-      ..httpClientAdapter = _FakeAdapter(
-        statusCode: 200,
-        body: <dynamic>[],
-        onRequest: (options) => capturedRequest = options,
-      );
-    final repository = DioRouteRepository(dio);
-
-    await repository.fetchMyRoutes();
-
-    expect(capturedRequest.uri.queryParameters.containsKey('date'), isFalse);
-  });
-
-  test(
-    "fetchMyRoutes parses a stop's service type and form when present",
-    () async {
-      final payload = _routePayload();
-      final stopsJson = (payload['stops'] as List<dynamic>)
-          .cast<Map<String, dynamic>>();
-      stopsJson[0]['service_type_id'] = 'st1';
-      stopsJson[0]['service_type_name'] = 'Limpeza';
-      stopsJson[0]['form'] = {
+      stops[2]['service_type_id'] = 'st1';
+      stops[2]['service_type_name'] = 'Limpeza';
+      stops[2]['form'] = {
         'form_version_id': 'v1',
         'questions': [
           {
@@ -256,122 +165,232 @@ void main() {
           },
         ],
       };
-      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _FakeAdapter(
-          statusCode: 200,
-          body: [payload],
-        );
-      final repository = DioRouteRepository(dio);
+      final repository = DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: route)),
+      );
 
-      final stops = (await repository.fetchMyRoutes()).first.stops;
+      final stop = (await repository.fetchMyDay()).route!.stops[2];
 
-      expect(stops[0].serviceTypeId, 'st1');
-      expect(stops[0].serviceTypeName, 'Limpeza');
-      expect(stops[0].form, isNotNull);
-      expect(stops[0].form!.formVersionId, 'v1');
-      expect(stops[0].form!.questions, hasLength(1));
-      expect(stops[0].form!.questions.single.stableKey, 'k1');
-    },
-  );
-
-  test(
-    'fetchMyRoutes leaves service type and form null when the stop carries '
-    'neither',
-    () async {
-      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _FakeAdapter(
-          statusCode: 200,
-          body: [_routePayload()],
-        );
-      final repository = DioRouteRepository(dio);
-
-      final stops = (await repository.fetchMyRoutes()).first.stops;
-
-      expect(stops[0].serviceTypeId, isNull);
-      expect(stops[0].serviceTypeName, isNull);
-      expect(stops[0].form, isNull);
-    },
-  );
-
-  test('fetchMyRoutes parses a reassigned stop flag when set', () async {
-    final payload = _routePayload();
-    final stopsJson = (payload['stops'] as List<dynamic>)
-        .cast<Map<String, dynamic>>();
-    stopsJson[0]['reassigned'] = true;
-    stopsJson[1]['reassigned'] = false;
-    final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-      ..httpClientAdapter = _FakeAdapter(statusCode: 200, body: [payload]);
-    final repository = DioRouteRepository(dio);
-
-    final stops = (await repository.fetchMyRoutes()).first.stops;
-
-    expect(stops[0].reassigned, isTrue);
-    expect(stops[1].reassigned, isFalse);
+      expect(stop.serviceTypeId, 'st1');
+      expect(stop.serviceTypeName, 'Limpeza');
+      expect(stop.form!.formVersionId, 'v1');
+      expect(stop.form!.questions.single.stableKey, 'k1');
+    });
   });
 
-  test(
-    'fetchMyRoutes defaults reassigned to false when the key is absent',
-    () async {
-      final dio = Dio(BaseOptions(baseUrl: 'http://test'))
-        ..httpClientAdapter = _FakeAdapter(
-          statusCode: 200,
-          body: [_routePayload()],
-        );
-      final repository = DioRouteRepository(dio);
+  group('current batch', () {
+    RouteSummary route() => RouteSummary.fromJson(_routePayload());
 
-      final stops = (await repository.fetchMyRoutes()).first.stops;
-
-      expect(stops[0].reassigned, isFalse);
-    },
-  );
-
-  test('startRoute posts the captured position', () async {
-    final dio = Dio(BaseOptions(baseUrl: 'http://test'));
-    late RequestOptions capturedRequest;
-    dio.httpClientAdapter = _FakeAdapter(
-      statusCode: 200,
-      body: _routePayload(),
-      onRequest: (options) => capturedRequest = options,
-    );
-    final repository = DioRouteRepository(dio);
-
-    await repository.startRoute(
-      routeId: 'r1',
-      latitude: -7.2,
-      longitude: -35.9,
-      startedAt: DateTime.utc(2026, 8, 25, 8, 15),
-    );
-
-    expect(capturedRequest.path, '/routes/r1/start');
-    expect((capturedRequest.data as Map)['latitude'], -7.2);
-  });
-
-  test(
-    'startRoute sends the caller-supplied started_at, not DateTime.now',
-    () async {
-      final dio = Dio(BaseOptions(baseUrl: 'http://test'));
-      late RequestOptions capturedRequest;
-      dio.httpClientAdapter = _FakeAdapter(
-        statusCode: 200,
-        body: _routePayload(),
-        onRequest: (options) => capturedRequest = options,
+    test('lists only the current batch, without released stops', () {
+      final payload = _routePayload();
+      (payload['stops'] as List<dynamic>).add(
+        _stopPayload(
+          id: 'e',
+          orderIndex: 5,
+          status: 'RELEASED',
+          releaseReason: 'LEFT_CAMPUS',
+        ),
       );
-      final repository = DioRouteRepository(dio);
-      final startedAt = DateTime.utc(2026, 8, 25, 8, 15);
 
-      await repository.startRoute(
-        routeId: 'r1',
-        latitude: -7.2,
-        longitude: -35.9,
-        startedAt: startedAt,
-      );
+      final stops = RouteSummary.fromJson(payload).currentBatchStops;
+
+      expect(stops.map((s) => s.id), ['c', 'd']);
+    });
+
+    test('is open while a stop is neither done nor released', () {
+      expect(route().currentBatchClosed(doneLocally: const {'c'}), isFalse);
+    });
+
+    test('closes once every stop is done here or on the server', () {
+      expect(route().currentBatchClosed(doneLocally: const {'c', 'd'}), isTrue);
+    });
+
+    test('a stop released by the server counts as closed', () {
+      final payload = _routePayload();
+      final stops = (payload['stops'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      stops[2]['status'] = 'RELEASED';
+      stops[3]['status'] = 'DONE';
+
+      expect(RouteSummary.fromJson(payload).currentBatchClosed(), isTrue);
+    });
+
+    test('the latest release reason explains a paused route', () {
+      final payload = _routePayload();
+      final stops = (payload['stops'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      stops[3]['status'] = 'RELEASED';
+      stops[3]['release_reason'] = 'LOCATION_SILENCE';
 
       expect(
-        (capturedRequest.data as Map)['started_at'],
-        startedAt.toIso8601String(),
+        RouteSummary.fromJson(payload).latestReleaseReason,
+        'LOCATION_SILENCE',
       );
-    },
-  );
+    });
+  });
+
+  group('offline snapshot (RF35, RNF21)', () {
+    test('a successful fetch is saved and served back offline', () async {
+      final cache = InMemoryRouteSnapshotCache();
+      await DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: _routePayload())),
+        cache: cache,
+        userId: 'u1',
+      ).fetchMyDay();
+
+      final day = await DioRouteRepository(
+        _offlineDio(),
+        cache: cache,
+        userId: 'u1',
+      ).fetchMyDay();
+
+      expect(day.route!.id, 'r1');
+      expect(day.route!.stops, hasLength(4));
+    });
+
+    test("another user's snapshot is never served", () async {
+      final cache = InMemoryRouteSnapshotCache()
+        ..snapshots['u1'] = jsonEncode(_myDayPayload(route: _routePayload()));
+
+      await expectLater(
+        DioRouteRepository(
+          _offlineDio(),
+          cache: cache,
+          userId: 'u2',
+        ).fetchMyDay(),
+        throwsA(isA<OfflineException>()),
+      );
+    });
+
+    test('an HTTP error is a real answer, not a reason to use the cache', () {
+      final cache = InMemoryRouteSnapshotCache()
+        ..snapshots['u1'] = jsonEncode(_myDayPayload(route: _routePayload()));
+
+      expect(
+        DioRouteRepository(
+          _dioAnswering(500, <String, Object>{}),
+          cache: cache,
+          userId: 'u1',
+        ).fetchMyDay(),
+        throwsA(isA<DioException>()),
+      );
+    });
+  });
+
+  group('startOrResume', () {
+    test('posts the position and parses the allocation', () async {
+      late RequestOptions request;
+      final repository = DioRouteRepository(
+        _dioAnswering(
+          200,
+          {'route': _routePayload(), 'pool_empty': false},
+          onRequest: (options) => request = options,
+        ),
+      );
+
+      final result = await repository.startOrResume(
+        lat: -7.215,
+        lng: -35.91,
+        capturedAt: _capturedAt,
+      );
+
+      expect(request.path, '/routes/start');
+      expect(request.data, {
+        'latitude': -7.215,
+        'longitude': -35.91,
+        'captured_at': '2026-10-20T11:15:00.000Z',
+      });
+      expect(result.poolEmpty, isFalse);
+      expect(result.route.currentBatch, 2);
+    });
+
+    test('maps each 409 code to its typed refusal', () async {
+      final cases = <String, TypeMatcher<Object>>{
+        'NOT_A_SERVICE_DAY': isA<NotAServiceDayException>(),
+        'WORKDAY_OVER': isA<WorkdayOverException>(),
+        'OUTSIDE_CAMPUS': isA<OutsideCampusException>(),
+        'ROUTE_DONE': isA<RouteDoneException>(),
+      };
+      for (final MapEntry(key: code, value: matcher) in cases.entries) {
+        final repository = DioRouteRepository(
+          _dioAnswering(409, _refusal(code)),
+        );
+        await expectLater(
+          repository.startOrResume(lat: 0, lng: 0, capturedAt: _capturedAt),
+          throwsA(matcher),
+          reason: code,
+        );
+      }
+    });
+
+    test('no HTTP response at all is an OfflineException', () {
+      expect(
+        DioRouteRepository(
+          _offlineDio(),
+        ).startOrResume(lat: 0, lng: 0, capturedAt: _capturedAt),
+        throwsA(isA<OfflineException>()),
+      );
+    });
+
+    test('a 403 without a machine code reaches the caller unchanged', () {
+      expect(
+        DioRouteRepository(
+          _dioAnswering(403, {'detail': 'Accept the privacy notice first.'}),
+        ).startOrResume(lat: 0, lng: 0, capturedAt: _capturedAt),
+        throwsA(
+          isA<DioException>().having(
+            (e) => e.response?.statusCode,
+            'status',
+            403,
+          ),
+        ),
+      );
+    });
+  });
+
+  group('nextBatch', () {
+    test('posts to the route and reads an empty pool', () async {
+      late RequestOptions request;
+      final payload = {..._routePayload(), 'status': 'DONE'};
+      final repository = DioRouteRepository(
+        _dioAnswering(
+          200,
+          {'route': payload, 'pool_empty': true},
+          onRequest: (options) => request = options,
+        ),
+      );
+
+      final result = await repository.nextBatch(
+        'r1',
+        lat: -7.215,
+        lng: -35.91,
+        capturedAt: _capturedAt,
+      );
+
+      expect(request.path, '/routes/r1/next-batch');
+      expect((request.data as Map)['captured_at'], '2026-10-20T11:15:00.000Z');
+      expect(result.poolEmpty, isTrue);
+      expect(result.route.status, 'DONE');
+    });
+
+    test('a retry after a lost empty-pool answer is a RouteDoneException', () {
+      expect(
+        DioRouteRepository(
+          _dioAnswering(409, _refusal('ROUTE_DONE')),
+        ).nextBatch('r1', lat: 0, lng: 0, capturedAt: _capturedAt),
+        throwsA(isA<RouteDoneException>()),
+      );
+    });
+
+    test('no HTTP response at all is an OfflineException', () {
+      expect(
+        DioRouteRepository(
+          _offlineDio(),
+        ).nextBatch('r1', lat: 0, lng: 0, capturedAt: _capturedAt),
+        throwsA(isA<OfflineException>()),
+      );
+    });
+  });
 }
 
 /// Every request fails before any HTTP response — the device is offline.
@@ -396,7 +415,7 @@ class _FakeAdapter implements HttpClientAdapter {
   _FakeAdapter({required this.statusCode, required this.body, this.onRequest});
 
   final int statusCode;
-  final dynamic body;
+  final Object body;
   final void Function(RequestOptions)? onRequest;
 
   @override

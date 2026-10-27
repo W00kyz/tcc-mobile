@@ -5,7 +5,6 @@ import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/forms/form_draft_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
-import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:uuid/uuid.dart';
 
@@ -21,14 +20,12 @@ class ExecutionRepository {
   ExecutionRepository(
     this._store,
     this._stopProgress,
-    this._syncMeta,
     this._syncWorker,
     this._formDraftStore,
   );
 
   final LocalWriteStore _store;
   final StopProgressStore _stopProgress;
-  final SyncMetaStore _syncMeta;
   final SyncWorker _syncWorker;
   final FormDraftStore _formDraftStore;
   static const _uuid = Uuid();
@@ -82,39 +79,6 @@ class ExecutionRepository {
     }
     unawaited(_syncWorker.syncRoute(routeId));
     return executionId;
-  }
-
-  /// Starts [routeId] through the outbox — same drift-first shape as
-  /// [checkIn]: a `pending` [PendingOpKind.startRoute] row plus a local
-  /// optimistic marker, then a non-blocking [SyncWorker] kick. Never touches
-  /// the network. `started_at` is captured here, at tap time, so a late sync
-  /// still records when the field worker actually started (spec Ruling 8).
-  /// `start` gets no idempotency key — there is no picker retry — and the
-  /// worker treats the backend's 409 "already started" as success.
-  Future<void> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-  }) async {
-    final startedAt = DateTime.now().toUtc();
-    final key = _uuid.v4();
-    await _store.enqueue(
-      id: key,
-      kind: PendingOpKind.startRoute,
-      routeId: routeId,
-      payload: {
-        'route_id': routeId,
-        'latitude': latitude,
-        'longitude': longitude,
-        // A String, never a DateTime — LocalWriteStore.enqueue jsonEncodes
-        // this map, which throws on a raw DateTime value.
-        'started_at': startedAt.toIso8601String(),
-      },
-    );
-    // Ruling 5: the route reads as "iniciada" on device now, not after the
-    // 200 — RouteScreen watches this marker alongside the server value.
-    await _syncMeta.setRouteStartedAt(routeId, startedAt);
-    unawaited(_syncWorker.syncRoute(routeId));
   }
 
   /// Check-out is always per-stop (Ruling 16 — the UI already knows which
@@ -196,15 +160,16 @@ class ExecutionRepository {
   }
 
   /// Signals an impossibility to execute through the outbox — same drift-first
-  /// shape as [startRoute]: a `pending` [PendingOpKind.impediment] row plus a
+  /// shape as [checkIn]: a `pending` [PendingOpKind.impediment] row plus a
   /// non-blocking [SyncWorker] kick, never touching the network. `reported_at`
   /// is captured here, at tap time, so a late sync still records when the
   /// field worker actually raised it (spec RF16-RF17).
   ///
   /// Unlike [checkIn], this makes NO optimistic local state change: signalling
-  /// does not change the stop's status on device. The reassignment (done by
-  /// the manager) is what eventually removes or re-homes the stop, and the app
-  /// learns that via the next route sync.
+  /// does not change the stop's status on device. The server releases the
+  /// stop back to the pool once the row reaches it (spec
+  /// 2026-10-20-alocacao-automatica §7.1), and the app shows it released on
+  /// the day reload that follows the sync.
   ///
   /// [routeStopId] is null when [scope] is `ROUTE_REMAINDER` (the whole
   /// remainder of the route), populated when [scope] is `STOP`.

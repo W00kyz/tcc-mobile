@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/appeals/appeal_api.dart';
+import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -12,29 +14,9 @@ import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
+import '../appeals/fake_appeal_api.dart';
 import '../support/fake_connectivity.dart';
-
-/// Records how many times `fetchMyRoutes` runs — `myRoutesProvider`
-/// invalidation only shows up as a re-fetch the next time something reads
-/// the provider (Riverpod invalidation is lazy), so the tests below re-read
-/// `myRoutesProvider.future` after the trigger fires.
-class _FakeRouteRepository implements RouteRepository {
-  int fetchCount = 0;
-
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async {
-    fetchCount++;
-    return const [];
-  }
-
-  @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async => throw UnimplementedError('not exercised in this test');
-}
+import '../support/fake_route_repository.dart';
 
 /// Counts how often the notification endpoints are hit — invalidation of the
 /// monitoring providers only shows up as a re-fetch the next time something
@@ -113,12 +95,13 @@ void main() {
   }
 
   /// Same as [pump] but hands back the `ProviderContainer` behind the tree,
-  /// so a test can `read(myRoutesProvider.future)` directly — invalidation
+  /// so a test can `read(myDayProvider.future)` directly — invalidation
   /// alone is silent until something re-reads the provider.
   Future<ProviderContainer> pumpWithContainer(
     WidgetTester tester, {
     required RouteRepository routeRepository,
     MonitoringApi? monitoringApi,
+    AppealApi? appealApi,
   }) async {
     final container = ProviderContainer(
       overrides: [
@@ -127,6 +110,7 @@ void main() {
         routeRepositoryProvider.overrideWithValue(routeRepository),
         if (monitoringApi != null)
           monitoringApiProvider.overrideWithValue(monitoringApi),
+        if (appealApi != null) appealApiProvider.overrideWithValue(appealApi),
       ],
     );
     addTearDown(container.dispose);
@@ -158,42 +142,42 @@ void main() {
   });
 
   testWidgets(
-    'regained connectivity also invalidates myRoutesProvider, so the next '
+    'regained connectivity also invalidates myDayProvider, so the next '
     'read re-fetches (Task 14 — feeds formReconciliationProvider)',
     (tester) async {
-      final routeRepository = _FakeRouteRepository();
+      final routeRepository = FakeRouteRepository();
       final container = await pumpWithContainer(
         tester,
         routeRepository: routeRepository,
       );
-      await container.read(myRoutesProvider.future);
+      await container.read(myDayProvider.future);
       expect(routeRepository.fetchCount, 1);
 
       connectivity.goOnline();
       await tester.pump();
 
-      expect(await container.read(myRoutesProvider.future), isEmpty);
+      expect((await container.read(myDayProvider.future)).route, isNull);
       expect(routeRepository.fetchCount, 2);
     },
   );
 
   testWidgets(
     'AppLifecycleState.resumed while online also invalidates '
-    'myRoutesProvider',
+    'myDayProvider',
     (tester) async {
       connectivity.isOnlineValue = true;
-      final routeRepository = _FakeRouteRepository();
+      final routeRepository = FakeRouteRepository();
       final container = await pumpWithContainer(
         tester,
         routeRepository: routeRepository,
       );
-      await container.read(myRoutesProvider.future);
+      await container.read(myDayProvider.future);
       expect(routeRepository.fetchCount, 1);
 
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
 
-      expect(await container.read(myRoutesProvider.future), isEmpty);
+      expect((await container.read(myDayProvider.future)).route, isNull);
       expect(routeRepository.fetchCount, 2);
     },
   );
@@ -203,7 +187,7 @@ void main() {
     '(RF49 — a route assigned mid-shift must bump the bell badge)',
     (tester) async {
       connectivity.isOnlineValue = true;
-      final routeRepository = _FakeRouteRepository();
+      final routeRepository = FakeRouteRepository();
       final monitoringApi = _FakeMonitoringApi();
       final container = await pumpWithContainer(
         tester,
@@ -226,17 +210,36 @@ void main() {
   );
 
   testWidgets(
-    'AppLifecycleState.resumed while offline does NOT invalidate '
-    'myRoutesProvider — myRoutesProvider has no cache-on-error, so '
-    'invalidating it offline would blank a previously-successful route list '
-    'with a generic error (Important-1)',
+    'AppLifecycleState.resumed also refreshes the appeals badge (spec §7.5 — '
+    'points may have been released while the app was away)',
     (tester) async {
-      final routeRepository = _FakeRouteRepository();
+      final appealApi = RecordingAppealApi();
+      final container = await pumpWithContainer(
+        tester,
+        routeRepository: FakeRouteRepository(),
+        appealApi: appealApi,
+      );
+      await container.read(appealEligibleProvider.future);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await container.read(appealEligibleProvider.future);
+
+      expect(appealApi.eligibleCalls, 2);
+    },
+  );
+
+  testWidgets(
+    'AppLifecycleState.resumed while offline does NOT invalidate '
+    'myDayProvider — a re-fetch offline with no device snapshot would blank '
+    'a previously-successful day with a generic error (Important-1)',
+    (tester) async {
+      final routeRepository = FakeRouteRepository();
       final container = await pumpWithContainer(
         tester,
         routeRepository: routeRepository,
       );
-      await container.read(myRoutesProvider.future);
+      await container.read(myDayProvider.future);
       expect(routeRepository.fetchCount, 1);
 
       connectivity.goOffline();
@@ -244,8 +247,8 @@ void main() {
       await tester.pump();
 
       // Still the same, previously-fetched (successful) value — no
-      // re-fetch attempted, so no `AsyncError` blanking the route list.
-      expect(await container.read(myRoutesProvider.future), isEmpty);
+      // re-fetch attempted, so no `AsyncError` blanking the day.
+      expect((await container.read(myDayProvider.future)).route, isNull);
       expect(routeRepository.fetchCount, 1);
     },
   );

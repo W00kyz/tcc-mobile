@@ -5,7 +5,7 @@ void main() {
   test('fromJson parses a full unread notification', () {
     final note = AppNotification.fromJson({
       'id': 'n1',
-      'kind': 'ROUTE_MODIFIED',
+      'kind': 'IMPEDIMENT_REPORTED',
       'title': 'Rota alterada',
       'body': 'Um ponto foi adicionado à sua rota.',
       'created_at': '2026-09-07T09:00:00Z',
@@ -13,7 +13,7 @@ void main() {
     });
 
     expect(note.id, 'n1');
-    expect(note.kind, 'ROUTE_MODIFIED');
+    expect(note.kind, 'IMPEDIMENT_REPORTED');
     expect(note.title, 'Rota alterada');
     expect(note.body, 'Um ponto foi adicionado à sua rota.');
     expect(note.createdAt, DateTime.utc(2026, 9, 7, 9));

@@ -16,9 +16,26 @@ class ConsentStatus {
   final int? noticeVersion;
 }
 
+/// The privacy notice in force: what the sign-up screen shows and whose
+/// [version] the sign-up sends back as accepted.
+class PrivacyNotice {
+  const PrivacyNotice({
+    required this.version,
+    required this.title,
+    required this.body,
+  });
+
+  final int version;
+  final String title;
+  final String body;
+}
+
 abstract class ConsentRepository {
   Future<ConsentStatus> status();
   Future<void> accept();
+
+  /// The current notice, readable before any account exists (sign-up).
+  Future<PrivacyNotice> currentNotice();
 }
 
 class DioConsentRepository implements ConsentRepository {
@@ -44,5 +61,18 @@ class DioConsentRepository implements ConsentRepository {
   @override
   Future<void> accept() async {
     await _dio.post<void>('/auth/consent');
+  }
+
+  @override
+  Future<PrivacyNotice> currentNotice() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '/public/privacy-notice',
+    );
+    final body = response.data!;
+    return PrivacyNotice(
+      version: body['version'] as int,
+      title: body['title'] as String,
+      body: body['body_markdown'] as String,
+    );
   }
 }

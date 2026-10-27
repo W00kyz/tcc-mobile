@@ -1,6 +1,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The app talks to the backend over HTTP. Flutter only injects INTERNET in the
+         debug/profile manifests, so a release build would otherwise depend on a
+         transitive library (mobile_scanner's ML Kit) declaring it. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Alocação automática §7.3: with the worker's "always" permission, the
+         route keeps reporting with the screen locked, from Geolocator's
+         location foreground service (fixed "Rota em andamento" notice). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- The service's enableWakeLock: fixes keep coming with the CPU asleep. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Etapa 11 (RNF11): the persistent "location collection active" notice,
          posted via flutter_local_notifications. Required on Android 13+ (API 33). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -30,6 +43,13 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Alocação automática §7.3: fires the scheduled silence warning
+             (flutter_local_notifications zonedSchedule, inexact — so no
+             SCHEDULE_EXACT_ALARM). No boot receiver: the warning only matters
+             within the release window, which a reboot outlives. -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

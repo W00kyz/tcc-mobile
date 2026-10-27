@@ -3,7 +3,7 @@ import 'package:route_monitor/local/app_database.dart';
 /// The last `/routes/me` body the server returned, kept on the device so the
 /// day's route still opens without network (RF35, RNF21) — after the app was
 /// killed in a basement, or on a pull-to-refresh with no signal. Raw JSON on
-/// purpose: it is re-parsed by the same `RouteSummary.fromJson` as a live
+/// purpose: it is re-parsed by the same `MyDay.fromJson` as a live
 /// response, so the two paths cannot drift apart.
 abstract class RouteSnapshotCache {
   Future<String?> load(String userId);

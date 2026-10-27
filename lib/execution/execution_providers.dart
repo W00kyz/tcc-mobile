@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show QueryExecutor;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show FutureProviderFamily;
 
@@ -14,11 +15,18 @@ import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 
+/// Where [appDatabaseProvider] keeps its data: null for the on-device SQLite
+/// file ([AppDatabase]'s default). A seam so a test runs the real provider
+/// over `NativeDatabase.memory()` — the file executor starts opening
+/// (path_provider, a background isolate) the moment it is built, and that
+/// outlived a unit test.
+final appDatabaseExecutorProvider = Provider<QueryExecutor?>((ref) => null);
+
 /// The on-device SQLite connection, as a true singleton — never construct a
 /// second [AppDatabase] for the same file (Task 16 review). Every provider
 /// that needs storage watches this one instead of building its own.
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase();
+  final db = AppDatabase(ref.watch(appDatabaseExecutorProvider));
   ref.onDispose(db.close);
   return db;
 });
@@ -44,13 +52,23 @@ final stopProgressStoreProvider = Provider<StopProgressStore>(
   (ref) => DriftStopProgressStore(ref.watch(appDatabaseProvider)),
 );
 
+// Scoped to the signed-in user, not to the session (like
+// `monitoringApiProvider`): the sync worker holds these for its whole life,
+// and a token refresh rebuilding it mid-drain left the running pass on a
+// disposed ref (`buildUserScopedSessionDio`).
 final executionApiProvider = Provider<ExecutionApi>((ref) {
-  final dio = buildSessionDio(ref);
+  final dio = buildUserScopedSessionDio(
+    ref,
+    baseUrl: ref.watch(apiBaseUrlProvider),
+  );
   return DioExecutionApi(dio);
 });
 
 final evidenceApiProvider = Provider<EvidenceApi>((ref) {
-  final dio = buildSessionDio(ref);
+  final dio = buildUserScopedSessionDio(
+    ref,
+    baseUrl: ref.watch(apiBaseUrlProvider),
+  );
   return DioEvidenceApi(dio);
 });
 
@@ -64,21 +82,10 @@ final executionRepositoryProvider = Provider<ExecutionRepository>(
   (ref) => ExecutionRepository(
     ref.watch(localWriteStoreProvider),
     ref.watch(stopProgressStoreProvider),
-    ref.watch(syncMetaStoreProvider),
     ref.watch(syncWorkerProvider),
     ref.watch(formDraftStoreProvider),
   ),
 );
-
-/// True once "Iniciar rota" has been tapped for `routeId` on this device —
-/// the optimistic marker RouteScreen reads so the route flips to "iniciada"
-/// before the outbox row syncs (spec Ruling 5).
-final FutureProviderFamily<bool, String> routeStartedLocallyProvider =
-    FutureProvider.family<bool, String>(
-      (ref, routeId) async =>
-          await ref.watch(syncMetaStoreProvider).getRouteStartedAt(routeId) !=
-          null,
-    );
 
 /// Null both for an untouched stop and for the Ruling 17 cold-start gap (a
 /// stop that turned `IN_PROGRESS` before `StopProgress` existed) — RouteScreen

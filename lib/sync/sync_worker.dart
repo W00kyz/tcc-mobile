@@ -1,15 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
-import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 
 /// How the worker reacts to a failed dispatch (spec Ruling 6).
@@ -31,11 +34,17 @@ enum SyncErrorClass {
   awaitingAuth,
 }
 
-/// Drains the local outbox ([LocalWriteStore]) to the backend, strictly FIFO
-/// per route (spec Ruling 6): rows for a route replay oldest-first, a soft
-/// failure defers the rest, a hard failure blocks the whole route's queue,
-/// and other routes are unaffected. On every successful dispatch it also
-/// records the server-vs-device clock offset (spec Ruling 7).
+/// Where one dispatch left its row.
+enum _Dispatched { synced, blocked, deferred }
+
+/// Drains the local outbox ([LocalWriteStore]) to the backend, FIFO per
+/// route (spec Ruling 6): rows for a route replay oldest-first, a soft
+/// failure defers the rest, a hard failure blocks that row and holds back
+/// only the rows that depend on it ([BlockedScope]: same stop, evidence of
+/// the same execution), and other routes are unaffected. On every
+/// successful dispatch it also records the server-vs-device clock offset
+/// (spec Ruling 7). A write that reaches the server after its stop was
+/// released is parked for the appeal flow ([ReleasedStopStore]).
 class SyncWorker {
   SyncWorker(
     this._store,
@@ -44,14 +53,22 @@ class SyncWorker {
     this._connectivity,
     this._executionApi,
     this._evidenceApi,
-    this._routeApi, {
+    this._releasedStops, {
     DateTime Function() now = DateTime.now,
     math.Random? random,
+    void Function(DateTime scannedAt)? onScanDelivered,
+    void Function(StopRelease release)? onStopReleased,
     // A private field can't be an initializing formal with a public param
     // name, and `now` must stay public for callers to inject a fake clock.
     // ignore: prefer_initializing_formals
   }) : _now = now,
-       _random = random ?? math.Random();
+       _random = random ?? math.Random(),
+       // Same reason as `now` above: the param name stays public.
+       // ignore: prefer_initializing_formals
+       _onScanDelivered = onScanDelivered,
+       // Same reason as `now` above: the param name stays public.
+       // ignore: prefer_initializing_formals
+       _onStopReleased = onStopReleased;
 
   final LocalWriteStore _store;
   final StopProgressStore _stopProgress;
@@ -59,36 +76,97 @@ class SyncWorker {
   final Connectivity _connectivity;
   final ExecutionApi _executionApi;
   final EvidenceApi _evidenceApi;
-  final RouteRepository _routeApi;
+  final ReleasedStopStore _releasedStops;
   final DateTime Function() _now;
   final math.Random _random;
 
-  /// Route ids with a drain pass in flight — the re-entrancy guard that keeps
+  /// A check-in or check-out the server now has, at its device scan time —
+  /// the moment the server's silence clock counts (spec
+  /// 2026-10-20-alocacao-automatica §7.3). Reported on delivery, never on
+  /// the local write: a scan queued offline has not reached that clock yet.
+  final void Function(DateTime scannedAt)? _onScanDelivered;
+
+  /// A stop seen released for the first time — the moment the app offers
+  /// the appeal (spec 2026-10-20-alocacao-automatica §7.5). Reported once per
+  /// stop, however many of its rows come back 409.
+  final void Function(StopRelease release)? _onStopReleased;
+
+  /// The drain pass in flight per route — the re-entrancy guard that keeps
   /// two triggers (foreground + regained connectivity) from interleaving.
-  final Set<String> _running = {};
+  final Map<String, Future<void>> _passes = {};
+
+  /// The one pass queued behind a running one, shared by every caller that
+  /// arrives while it runs.
+  final Map<String, Future<void>> _followUps = {};
 
   final Map<String, StreamController<RouteSyncStatus>> _statusControllers = {};
 
-  /// One FIFO pass over [routeId]'s due rows. No-op when a pass is already
-  /// running for this route or the device is offline.
+  /// One FIFO pass over [routeId]'s due rows; does nothing while the device
+  /// is offline. Called while a pass is running, it queues one more pass
+  /// behind it and completes with that one — the running pass read its rows
+  /// before a write enqueued meanwhile, so awaiting this means every row due
+  /// at call time was attempted (the next-batch pull relies on it: the
+  /// server must have the last check-out before it is asked for a batch).
+  ///
+  ///     await worker.syncRoute(routeId);
   Future<void> syncRoute(String routeId) async {
-    if (_running.contains(routeId)) return;
+    final running = _passes[routeId];
+    if (running == null) return _startPass(routeId);
+    return _followUps[routeId] ??= _passAfter(running, routeId);
+  }
+
+  Future<void> _passAfter(Future<void> running, String routeId) async {
+    try {
+      await running;
+    } finally {
+      // `remove` hands back this very follow-up, already being awaited.
+      unawaited(_followUps.remove(routeId));
+    }
+    // A caller may have started a fresh pass in between; it read the queue
+    // after the enqueue too, so join it rather than run two at once.
+    await (_passes[routeId] ?? _startPass(routeId));
+  }
+
+  Future<void> _startPass(String routeId) {
+    final pass = _drainAndRelease(routeId);
+    _passes[routeId] = pass;
+    return pass;
+  }
+
+  Future<void> _drainAndRelease(String routeId) async {
+    try {
+      await _drain(routeId);
+    } finally {
+      // `remove` hands back this very pass, already being awaited.
+      unawaited(_passes.remove(routeId));
+    }
+  }
+
+  Future<void> _drain(String routeId) async {
     if (!await _connectivity.isOnline) return;
-    _running.add(routeId);
     await _refresh(routeId, syncing: true);
     try {
+      // Ruling 6, scoped: a blocked row holds back what depends on it, on
+      // this pass and every later one — a check-out never reaches the server
+      // without its check-in — but never another stop of the route. "Tentar
+      // de novo" (`unblock`) resets it and its dependents move again.
+      final scope = BlockedScope(await _store.blockedForRoute(routeId));
       final rows = await _store.dueForRoute(
         routeId,
         now: _now().millisecondsSinceEpoch,
       );
       for (final row in rows) {
-        final advanced = await _dispatch(row);
-        // Stop on the first row that did not reach `synced`: the rest stay
-        // `pending` so a check-out never precedes its check-in.
-        if (!advanced) break;
+        if (scope.holds(row)) continue;
+        final outcome = await _dispatch(row);
+        if (outcome == _Dispatched.blocked) {
+          scope.add(row);
+          continue;
+        }
+        // A deferred row (soft failure, awaiting login) stops the pass: the
+        // network or the session is the problem, not this row.
+        if (outcome == _Dispatched.deferred) break;
       }
     } finally {
-      _running.remove(routeId);
       await _refresh(routeId);
     }
   }
@@ -126,32 +204,112 @@ class SyncWorker {
     _statusControllers.clear();
   }
 
-  /// Dispatches one row. Returns true when the row reached `synced` (the
-  /// queue may advance), false when it ended `failed`/`blocked`.
-  Future<bool> _dispatch(PendingOperationRow row) async {
+  /// Dispatches one row and says where it ended. A synced scan is reported
+  /// only once the row's state is final, so the report can never change it.
+  Future<_Dispatched> _dispatch(PendingOperationRow row) async {
+    final outcome = await _attempt(row);
+    if (outcome == _Dispatched.synced) _reportScanDelivered(row);
+    return outcome;
+  }
+
+  Future<_Dispatched> _attempt(PendingOperationRow row) async {
     try {
       final serverDate = await _perform(row);
       await _store.markSynced(row.id);
       await _recordOffset(serverDate);
-      return true;
+      return _Dispatched.synced;
       // Deliberately broad: _classify sorts every failure (DioException,
       // AmbiguousRoomException, or anything else) into soft/alreadyApplied/
       // hard — nothing may escape a drain pass unhandled.
       // ignore: avoid_catches_without_on_clauses
     } catch (error) {
+      final release = StopRelease.fromError(error);
+      if (release != null) return _park(row, release);
       final classification = _classify(error);
       if (classification == SyncErrorClass.alreadyApplied) {
+        // The server had it already — and counted its scan then.
         await _store.markSynced(row.id);
-        return true;
+        return _Dispatched.synced;
       }
-      if (classification == SyncErrorClass.awaitingAuth) return false;
+      if (classification == SyncErrorClass.awaitingAuth) {
+        return _Dispatched.deferred;
+      }
       final message = error.toString();
       if (classification == SyncErrorClass.hard) {
+        // Also a 403 WORKER_NOT_APPROVED (permanent; the approval gate owns
+        // the UI) — it holds back only its own stop.
         await _store.markBlocked(row.id, message);
-        return false;
+        return _Dispatched.blocked;
       }
       await _scheduleSoftRetry(row, message);
-      return false;
+      return _Dispatched.deferred;
+    }
+  }
+
+  /// A `409 STOP_RELEASED`: the row is blocked on the released stop with its
+  /// payload kept — replaying it would only get the same 409 — and holds
+  /// back just that stop ([BlockedScope]); the rest of the day keeps
+  /// flowing. The stop is recorded first, so a crash in between leaves the
+  /// row pending and the next pass parks it again, without a second notice.
+  Future<_Dispatched> _park(
+    PendingOperationRow row,
+    StopRelease release,
+  ) async {
+    final firstTime = await _releasedStops.record(
+      routeStopId: release.routeStopId,
+      releaseReason: release.releaseReason,
+      appealable: release.appealable,
+    );
+    await _store.markStopReleased(
+      row.id,
+      routeStopId: release.routeStopId,
+      error: release.toString(),
+    );
+    if (firstTime) _reportStopReleased(release);
+    return _Dispatched.blocked;
+  }
+
+  /// Best-effort, like [_reportScanDelivered]: the row is parked already.
+  void _reportStopReleased(StopRelease release) {
+    try {
+      _onStopReleased?.call(release);
+      // Deliberately broad, for the reason in _reportScanDelivered.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (error, stack) {
+      developer.log(
+        jsonEncode({
+          'event': 'stop_release_report_failed',
+          'route_stop_id': release.routeStopId,
+          'error': '$error',
+        }),
+        name: 'sync_worker',
+        stackTrace: stack,
+      );
+    }
+  }
+
+  /// Best-effort: the row is already synced, and a failing listener (e.g. a
+  /// disposed Riverpod ref) must neither un-sync it nor stop the pass.
+  void _reportScanDelivered(PendingOperationRow row) {
+    final isScan =
+        row.kind == PendingOpKind.checkIn || row.kind == PendingOpKind.checkOut;
+    if (!isScan) return;
+    try {
+      _onScanDelivered?.call(
+        DateTime.parse(row.payload['scanned_at'] as String),
+      );
+      // Deliberately broad, for the reason above.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (error, stack) {
+      developer.log(
+        jsonEncode({
+          'event': 'scan_delivery_report_failed',
+          'operation_id': row.id,
+          'error': '$error',
+        }),
+        name: 'sync_worker',
+        stackTrace: stack,
+      );
     }
   }
 
@@ -179,7 +337,6 @@ class SyncWorker {
     return switch (row.kind) {
       PendingOpKind.checkIn => _performCheckIn(payload),
       PendingOpKind.checkOut => _performCheckOut(payload),
-      PendingOpKind.startRoute => _performStartRoute(payload),
       PendingOpKind.impediment => _performImpediment(payload),
       PendingOpKind.evidencePhoto => _evidenceApi.uploadPhoto(
         executionId: payload['execution_id'] as String,
@@ -237,19 +394,6 @@ class SyncWorker {
     );
     await _stopProgress.markDone(response.result.routeStopId);
     return response.serverDate;
-  }
-
-  Future<DateTime?> _performStartRoute(Map<String, dynamic> payload) async {
-    await _routeApi.startRoute(
-      routeId: payload['route_id'] as String,
-      latitude: (payload['latitude'] as num).toDouble(),
-      longitude: (payload['longitude'] as num).toDouble(),
-      startedAt: DateTime.parse(payload['started_at'] as String),
-    );
-    // No serverDate to return: `start` carries a client-supplied
-    // `started_at` and the response body is a RouteSummary, not a bare
-    // instant. Check-in/out already measure the clock offset (Ruling 7).
-    return null;
   }
 
   Future<DateTime?> _performImpediment(Map<String, dynamic> payload) async {

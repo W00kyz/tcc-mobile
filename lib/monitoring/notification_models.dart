@@ -30,8 +30,9 @@ class AppNotification {
 
   final String id;
 
-  /// One of `ALERT`, `ROUTE_ASSIGNED`, `ROUTE_MODIFIED`, `STOP_REASSIGNED` —
-  /// rendered as a pt-BR chip by `NotificationsScreen`.
+  /// One of `ALERT`, `IMPEDIMENT_REPORTED`, `APPEAL_FILED` (what the backend
+  /// emits since the automatic allocation) — rendered as a pt-BR chip by
+  /// `NotificationsScreen`.
   final String kind;
   final String title;
   final String body;

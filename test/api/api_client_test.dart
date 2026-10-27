@@ -6,6 +6,8 @@ import 'package:route_monitor/api/api_client.dart';
 
 void main() {
   group('refresh on 401', refreshInterceptorTests);
+  group('worker not approved', workerNotApprovedTests);
+  group('consent required', consentRequiredTests);
 
   test('buildDio sets the base URL', () {
     final dio = buildDio(baseUrl: 'http://localhost:8000');
@@ -20,6 +22,41 @@ void main() {
     );
 
     expect(dio.options.headers['Authorization'], 'Bearer a-test-token');
+  });
+
+  test(
+    'readAccessToken: each request carries the token current then',
+    () async {
+      var token = 'first';
+      final adapter = _TokenCheckingAdapter('second');
+      final dio = buildDio(
+        baseUrl: 'http://localhost:8000',
+        readAccessToken: () => token,
+      )..httpClientAdapter = adapter;
+
+      await expectLater(
+        dio.get<void>('/routes/me'),
+        throwsA(isA<DioException>()),
+      );
+      token = 'second';
+      await dio.get<void>('/routes/me');
+
+      expect(adapter.seenAuthorization, ['Bearer first', 'Bearer second']);
+    },
+  );
+
+  test('readAccessToken: the 401 retry keeps the refreshed token', () async {
+    final adapter = _TokenCheckingAdapter('fresh');
+    final dio = buildDio(
+      baseUrl: 'http://localhost:8000',
+      // A session that has not caught up yet still answers the old token.
+      readAccessToken: () => 'expired',
+      onUnauthorized: () async => 'fresh',
+    )..httpClientAdapter = adapter;
+
+    await dio.get<void>('/routes/me');
+
+    expect(adapter.seenAuthorization, ['Bearer expired', 'Bearer fresh']);
   });
 
   test('buildDio omits the Authorization header without a token', () {
@@ -116,5 +153,125 @@ void refreshInterceptorTests() {
       throwsA(isA<DioException>()),
     );
     expect(refreshCalls, 1);
+  });
+}
+
+/// Answers every request with [statusCode] and [body].
+class _FixedAdapter implements HttpClientAdapter {
+  _FixedAdapter(this.statusCode, this.body);
+
+  final int statusCode;
+  final String body;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => ResponseBody.fromString(
+    body,
+    statusCode,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
+
+  @override
+  void close({bool force = false}) {}
+}
+
+void workerNotApprovedTests() {
+  test('a 403 WORKER_NOT_APPROVED is reported, then surfaced', () async {
+    var reports = 0;
+    final dio =
+        buildDio(
+            baseUrl: 'http://localhost:8000',
+            accessToken: 'token',
+            onWorkerNotApproved: () async => reports++,
+          )
+          ..httpClientAdapter = _FixedAdapter(
+            403,
+            '{"detail":{"code":"WORKER_NOT_APPROVED","detail":"not approved"}}',
+          );
+
+    await expectLater(
+      dio.get<void>('/routes/me'),
+      throwsA(
+        isA<DioException>().having(
+          (error) => error.response?.statusCode,
+          'status',
+          403,
+        ),
+      ),
+    );
+    expect(reports, 1);
+  });
+
+  test('any other 403 is not reported', () async {
+    var reports = 0;
+    final dio =
+        buildDio(
+            baseUrl: 'http://localhost:8000',
+            accessToken: 'token',
+            onWorkerNotApproved: () async => reports++,
+          )
+          ..httpClientAdapter = _FixedAdapter(
+            403,
+            '{"detail":"Consent to the current privacy notice is required."}',
+          );
+
+    await expectLater(
+      dio.get<void>('/routes/me'),
+      throwsA(isA<DioException>()),
+    );
+    expect(reports, 0);
+  });
+}
+
+void consentRequiredTests() {
+  test('a 403 CONSENT_REQUIRED is reported, then surfaced', () async {
+    var reports = 0;
+    final dio =
+        buildDio(
+            baseUrl: 'http://localhost:8000',
+            accessToken: 'token',
+            onConsentRequired: () async => reports++,
+          )
+          ..httpClientAdapter = _FixedAdapter(
+            403,
+            '{"detail":{"code":"CONSENT_REQUIRED","detail":"consent owed"}}',
+          );
+
+    await expectLater(
+      dio.post<void>('/routes/start'),
+      throwsA(
+        isA<DioException>().having(
+          (error) => error.response?.statusCode,
+          'status',
+          403,
+        ),
+      ),
+    );
+    expect(reports, 1);
+  });
+
+  test('a 403 WORKER_NOT_APPROVED is not taken for consent', () async {
+    var reports = 0;
+    final dio =
+        buildDio(
+            baseUrl: 'http://localhost:8000',
+            accessToken: 'token',
+            onConsentRequired: () async => reports++,
+          )
+          ..httpClientAdapter = _FixedAdapter(
+            403,
+            '{"detail":{"code":"WORKER_NOT_APPROVED","detail":"not approved"}}',
+          );
+
+    await expectLater(
+      dio.post<void>('/routes/start'),
+      throwsA(isA<DioException>()),
+    );
+    expect(reports, 0);
   });
 }

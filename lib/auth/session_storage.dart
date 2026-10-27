@@ -6,7 +6,8 @@ import 'package:route_monitor/auth/auth_repository.dart';
 
 /// Abstract so tests never touch the platform keychain (docs/CLAUDE.base.md — Tests).
 ///
-/// Holds the whole [Session] (both tokens, role, consent flag), not just the
+/// Holds the whole [Session] (both tokens, role, consent flag, worker
+/// standing), not just the
 /// access token: Android may kill the app at any moment — opening the camera
 /// for an evidence photo is the classic case — and the worker must be able to
 /// reopen it and keep working without network (RF35, RNF21). Before this the
@@ -18,11 +19,12 @@ abstract class SessionStorage {
   Future<void> clear();
 }
 
-Map<String, Object> _sessionToJson(Session session) => {
+Map<String, Object?> _sessionToJson(Session session) => {
   'access_token': session.accessToken,
   'refresh_token': session.refreshToken,
   'role': session.role,
   'consent_required': session.consentRequired,
+  ...session.workerStanding.toJson(),
 };
 
 Session _sessionFromJson(Map<String, dynamic> json) => Session(
@@ -30,6 +32,7 @@ Session _sessionFromJson(Map<String, dynamic> json) => Session(
   refreshToken: json['refresh_token'] as String,
   role: json['role'] as String,
   consentRequired: json['consent_required'] as bool? ?? false,
+  workerStanding: WorkerStanding.fromJson(json),
 );
 
 class SecureSessionStorage implements SessionStorage {

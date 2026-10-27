@@ -1,3 +1,4 @@
+import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show ProviderException;
 import 'package:flutter_test/flutter_test.dart';
@@ -9,15 +10,20 @@ import 'package:route_monitor/local/app_database.dart';
 // executionApiProvider builds on top of env.dart's apiBaseUrlFromEnvironment
 // (see env_test.dart), which throws StateError under plain `flutter test`
 // because no --dart-define is passed. Riverpod wraps any error a provider's
-// body throws in a ProviderException, so that is the shape a container read
+// body throws in a ProviderException — once more for each provider it went
+// through (here `apiBaseUrlProvider`) — so that is the shape a container read
 // surfaces here, regardless of whether a session is present yet.
 final Matcher _throwsWrappedStateError = throwsA(
-  isA<ProviderException>().having(
-    (exception) => exception.exception,
-    'exception',
-    isA<StateError>(),
-  ),
+  isA<ProviderException>().having(_rootCause, 'root cause', isA<StateError>()),
 );
+
+Object _rootCause(ProviderException exception) {
+  var cause = exception.exception;
+  while (cause is ProviderException) {
+    cause = cause.exception;
+  }
+  return cause;
+}
 
 void main() {
   test(
@@ -77,10 +83,17 @@ void main() {
     'AppDatabase instance for the on-device file',
     () {
       // Task 16's review: never construct a second AppDatabase() for the
-      // same on-device SQLite file. This only reads the provider (Provider
-      // caches its result), it never runs a query, so it never touches the
-      // lazy executor's real platform channel.
-      final container = ProviderContainer();
+      // same on-device SQLite file. The real provider runs, over an
+      // in-memory executor: the file one starts opening (path_provider, a
+      // background isolate) the moment it is built, and that outlived the
+      // test — it failed now and then in the full suite.
+      final container = ProviderContainer(
+        overrides: [
+          appDatabaseExecutorProvider.overrideWithValue(
+            NativeDatabase.memory(),
+          ),
+        ],
+      );
       addTearDown(container.dispose);
 
       final first = container.read(appDatabaseProvider);

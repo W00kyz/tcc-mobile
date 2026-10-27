@@ -11,9 +11,11 @@ RouteStopSummary _stop({
   required double lat,
   required double lng,
   List<List<double>>? legGeometry,
+  int batch = 1,
 }) => RouteStopSummary(
   id: id,
   orderIndex: order,
+  batchNumber: batch,
   status: status,
   servicePointName: 'Ponto $id',
   latitude: lat,
@@ -25,9 +27,9 @@ RouteSummary _routeWith(List<RouteStopSummary> stops) => RouteSummary(
   id: 'r1',
   fieldWorkerName: 'João',
   routeDate: DateTime(2026, 8, 25),
-  routeType: 'REGULAR',
   status: 'IN_PROGRESS',
   startedAt: null,
+  currentBatch: 1,
   stops: stops,
 );
 
@@ -109,6 +111,41 @@ void main() {
     );
 
     expect(data.stops, hasLength(1));
+    expect(data.legs, isEmpty);
+  });
+
+  test('only the current batch is drawn, without released stops', () {
+    final data = buildRouteMapData(
+      RouteSummary(
+        id: 'r1',
+        fieldWorkerName: 'João',
+        routeDate: DateTime(2026, 8, 25),
+        status: 'IN_PROGRESS',
+        startedAt: null,
+        currentBatch: 2,
+        stops: [
+          _stop(id: 's1', order: 1, status: 'DONE', lat: -7.21, lng: -35.91),
+          _stop(
+            id: 's2',
+            order: 2,
+            status: 'RELEASED',
+            lat: -7.22,
+            lng: -35.92,
+            batch: 2,
+          ),
+          _stop(
+            id: 's3',
+            order: 3,
+            status: 'PENDING',
+            lat: -7.23,
+            lng: -35.93,
+            batch: 2,
+          ),
+        ],
+      ),
+    );
+
+    expect(data.stops.map((s) => s.order), [3]);
     expect(data.legs, isEmpty);
   });
 

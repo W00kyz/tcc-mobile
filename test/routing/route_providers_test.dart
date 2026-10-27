@@ -5,22 +5,8 @@ import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
-import 'package:route_monitor/routing/route_repository.dart';
 
-class _FakeRouteRepository implements RouteRepository {
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => const [];
-
-  @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async {
-    throw UnimplementedError('not exercised in this test');
-  }
-}
+import '../support/fake_route_repository.dart';
 
 // routeRepositoryProvider builds on top of env.dart's
 // apiBaseUrlFromEnvironment (see env_test.dart), which throws StateError
@@ -85,16 +71,16 @@ void main() {
     },
   );
 
-  test('myRoutesProvider delegates to routeRepositoryProvider', () async {
+  test('myDayProvider delegates to routeRepositoryProvider', () async {
+    final repository = FakeRouteRepository();
     final container = ProviderContainer(
-      overrides: [
-        routeRepositoryProvider.overrideWithValue(_FakeRouteRepository()),
-      ],
+      overrides: [routeRepositoryProvider.overrideWithValue(repository)],
     );
     addTearDown(container.dispose);
 
-    final routes = await container.read(myRoutesProvider.future);
+    final day = await container.read(myDayProvider.future);
 
-    expect(routes, isEmpty);
+    expect(day.route, isNull);
+    expect(repository.fetchCount, 1);
   });
 }

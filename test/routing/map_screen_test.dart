@@ -18,6 +18,7 @@ RouteStopSummary _stop({
 }) => RouteStopSummary(
   id: id,
   orderIndex: order,
+  batchNumber: 1,
   status: status,
   servicePointName: 'Ponto $id',
   latitude: lat,
@@ -29,9 +30,9 @@ RouteSummary _routeWith(List<RouteStopSummary> stops) => RouteSummary(
   id: 'r1',
   fieldWorkerName: 'João',
   routeDate: DateTime(2026, 8, 25),
-  routeType: 'REGULAR',
   status: 'IN_PROGRESS',
   startedAt: null,
+  currentBatch: 1,
   stops: stops,
 );
 

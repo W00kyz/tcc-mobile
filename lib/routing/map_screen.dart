@@ -5,9 +5,9 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
-/// Full-route trajectory view: the offline campus base map with every stop as
-/// a numbered pin and the OSRM legs (or straight approximations) between them.
-/// Reached from Task 15's "Ver no mapa" button.
+/// Current-batch trajectory view: the offline campus base map with each stop
+/// of the batch as a numbered pin and the OSRM legs (or straight
+/// approximations) between them. Reached from Task 15's "Ver no mapa" button.
 class MapScreen extends StatelessWidget {
   const MapScreen({required this.route, this.tileProviderOverride, super.key});
 

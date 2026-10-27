@@ -239,4 +239,33 @@ void main() {
       expect(routes.length, 2);
     },
   );
+
+  test(
+    'markStopReleased parks the row as blocked on its released stop, and '
+    'resetToPending un-parks it',
+    () async {
+      await store.enqueue(
+        id: 'photo-1',
+        kind: PendingOpKind.evidencePhoto,
+        payload: const {'execution_id': 'exec-1'},
+        routeId: 'route-A',
+      );
+
+      await store.markStopReleased(
+        'photo-1',
+        routeStopId: 'stop-1',
+        error: 'HTTP 409 STOP_RELEASED',
+      );
+
+      final parked = (await store.blockedForRoute('route-A')).single;
+      expect(parked.state, PendingOpState.blocked);
+      expect(parked.releasedStopId, 'stop-1');
+      expect(parked.lastError, 'HTTP 409 STOP_RELEASED');
+
+      await store.resetToPending('photo-1');
+
+      final reset = (await store.unsyncedForRoute('route-A')).single;
+      expect(reset.releasedStopId, isNull);
+    },
+  );
 }

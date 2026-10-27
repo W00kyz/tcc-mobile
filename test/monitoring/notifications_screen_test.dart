@@ -41,7 +41,7 @@ class _FakeMonitoringApi implements MonitoringApi {
 AppNotification _note({required String id, required bool unread}) =>
     AppNotification(
       id: id,
-      kind: 'ROUTE_ASSIGNED',
+      kind: 'ALERT',
       title: 'Título $id',
       body: 'Corpo $id',
       createdAt: DateTime.utc(2026, 9, 7, 9),
@@ -73,16 +73,28 @@ void main() {
     expect(readTitle.style?.fontWeight, FontWeight.normal);
   });
 
-  testWidgets('shows a pt-BR kind label', (tester) async {
-    final api = _FakeMonitoringApi([_note(id: 'n1', unread: true)]);
-    await tester.pumpWidget(_screen(api));
-    await tester.pumpAndSettle();
+  const kindLabels = {
+    'ALERT': 'Alerta',
+    'IMPEDIMENT_REPORTED': 'Impossibilidade',
+    'APPEAL_FILED': 'Recurso',
+  };
+  for (final MapEntry(key: kind, value: label) in kindLabels.entries) {
+    testWidgets('shows "$label" for a $kind notification', (tester) async {
+      final api = _FakeMonitoringApi([
+        AppNotification(
+          id: 'n1',
+          kind: kind,
+          title: 'Título',
+          body: 'Corpo',
+          createdAt: DateTime.utc(2026, 10, 20, 9),
+        ),
+      ]);
+      await tester.pumpWidget(_screen(api));
+      await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining(AppStrings.notificationKindRouteAssigned),
-      findsOneWidget,
-    );
-  });
+      expect(find.textContaining(label), findsOneWidget);
+    });
+  }
 
   testWidgets('tapping an unread notification marks it read and refetches', (
     tester,

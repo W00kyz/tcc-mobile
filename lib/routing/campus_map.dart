@@ -61,7 +61,8 @@ class RouteMapLeg {
   final bool approximate;
 }
 
-/// Pure transform from the API summary to what the map draws.
+/// Pure transform from the API summary to what the map draws: the current
+/// batch only — the stops the worker still acts on (spec §6.4).
 ///
 /// The OSRM leg geometry arrives as `[lng, lat]` pairs; every pair is flipped
 /// to `LatLng(lat, lng)`. A stop with no `legGeometry` gets a straight,
@@ -72,8 +73,9 @@ class RouteMapLeg {
 /// CampusMap(data: data);
 /// ```
 RouteMapData buildRouteMapData(RouteSummary route) {
+  final batchStops = route.currentBatchStops;
   final stops = [
-    for (final stop in route.stops)
+    for (final stop in batchStops)
       RouteMapStop(
         position: LatLng(stop.latitude, stop.longitude),
         order: stop.orderIndex,
@@ -82,9 +84,9 @@ RouteMapData buildRouteMapData(RouteSummary route) {
   ];
 
   final legs = <RouteMapLeg>[];
-  for (var i = 1; i < route.stops.length; i++) {
-    final previous = route.stops[i - 1];
-    final current = route.stops[i];
+  for (var i = 1; i < batchStops.length; i++) {
+    final previous = batchStops[i - 1];
+    final current = batchStops[i];
     final geometry = current.legGeometry;
     if (geometry != null && geometry.isNotEmpty) {
       legs.add(

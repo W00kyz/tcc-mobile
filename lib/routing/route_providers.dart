@@ -11,7 +11,7 @@ final locationServiceProvider = Provider<LocationService>(
   (ref) => GeolocatorLocationService(),
 );
 
-/// Where today's route list is kept for offline use (RF35, RNF21).
+/// Where the worker's day is kept for offline use (RF35, RNF21).
 final routeSnapshotCacheProvider = Provider<RouteSnapshotCache>(
   (ref) => DriftRouteSnapshotCache(ref.watch(appDatabaseProvider)),
 );
@@ -25,6 +25,8 @@ final routeRepositoryProvider = Provider<RouteRepository>((ref) {
   );
 });
 
-final myRoutesProvider = FutureProvider<List<RouteSummary>>((ref) {
-  return ref.watch(routeRepositoryProvider).fetchMyRoutes();
+/// `GET /routes/me`: today's route (if any) with its current batch.
+/// Invalidate it to re-read the day after any write that changes it.
+final myDayProvider = FutureProvider<MyDay>((ref) {
+  return ref.watch(routeRepositoryProvider).fetchMyDay();
 });

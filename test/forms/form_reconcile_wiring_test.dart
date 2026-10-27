@@ -9,6 +9,7 @@ import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
+import '../support/fake_route_repository.dart';
 import '../support/in_memory_database.dart';
 
 FormQuestion _question({
@@ -24,33 +25,18 @@ FormQuestion _question({
   contentHash: contentHash,
 );
 
-class _FakeRouteRepository implements RouteRepository {
-  _FakeRouteRepository(this.routes);
-  final List<RouteSummary> routes;
-
-  @override
-  Future<List<RouteSummary>> fetchMyRoutes({DateTime? date}) async => routes;
-
-  @override
-  Future<RouteSummary> startRoute({
-    required String routeId,
-    required double latitude,
-    required double longitude,
-    required DateTime startedAt,
-  }) async => throw UnimplementedError('not exercised in this test');
-}
-
 RouteSummary _routeWithForm(FormSchema form) => RouteSummary(
   id: 'route-A',
   fieldWorkerName: 'João',
   routeDate: DateTime.utc(2026, 9),
-  routeType: 'REGULAR',
   status: 'IN_PROGRESS',
   startedAt: DateTime.utc(2026, 9, 1, 8),
+  currentBatch: 1,
   stops: [
     RouteStopSummary(
       id: 'stop-1',
       orderIndex: 0,
+      batchNumber: 1,
       status: 'IN_PROGRESS',
       servicePointName: 'Sala 101',
       latitude: -7.2,
@@ -63,7 +49,7 @@ RouteSummary _routeWithForm(FormSchema form) => RouteSummary(
 void main() {
   test(
     'formReconciliationProvider reconciles a stale v1 draft to the '
-    'freshly-fetched v2 schema once myRoutesProvider resolves',
+    'freshly-fetched v2 schema once myDayProvider resolves',
     () async {
       final db = inMemoryDatabase();
       addTearDown(db.close);
@@ -86,7 +72,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           routeRepositoryProvider.overrideWithValue(
-            _FakeRouteRepository([_routeWithForm(v2)]),
+            FakeRouteRepository(myDayWith(_routeWithForm(v2))),
           ),
           stopProgressStoreProvider.overrideWithValue(stopProgress),
           formDraftStoreProvider.overrideWithValue(formDraftStore),
@@ -94,10 +80,10 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      // Resolve myRoutesProvider first, then watch the reconcile provider —
+      // Resolve myDayProvider first, then watch the reconcile provider —
       // it fires its fire-and-forget loop off an already-resolved AsyncData
       // rather than the initial AsyncLoading.
-      await container.read(myRoutesProvider.future);
+      await container.read(myDayProvider.future);
       container.read(formReconciliationProvider);
       await pumpEventQueue();
 
@@ -132,7 +118,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           routeRepositoryProvider.overrideWithValue(
-            _FakeRouteRepository([_routeWithForm(v1)]),
+            FakeRouteRepository(myDayWith(_routeWithForm(v1))),
           ),
           stopProgressStoreProvider.overrideWithValue(stopProgress),
           formDraftStoreProvider.overrideWithValue(formDraftStore),
@@ -140,7 +126,7 @@ void main() {
       );
       addTearDown(container.dispose);
 
-      await container.read(myRoutesProvider.future);
+      await container.read(myDayProvider.future);
       container.read(formReconciliationProvider);
       await pumpEventQueue();
 
@@ -180,7 +166,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           routeRepositoryProvider.overrideWithValue(
-            _FakeRouteRepository([_routeWithForm(v2)]),
+            FakeRouteRepository(myDayWith(_routeWithForm(v2))),
           ),
           stopProgressStoreProvider.overrideWithValue(stopProgress),
           formDraftStoreProvider.overrideWithValue(formDraftStore),
@@ -200,7 +186,7 @@ void main() {
       );
       expect(beforeComplete, isTrue);
 
-      await container.read(myRoutesProvider.future);
+      await container.read(myDayProvider.future);
       container.read(formReconciliationProvider);
       await pumpEventQueue();
 

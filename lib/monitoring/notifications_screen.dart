@@ -55,9 +55,8 @@ class NotificationsScreen extends ConsumerWidget {
 /// than hiding the row.
 String _kindLabel(String kind) => switch (kind) {
   'ALERT' => AppStrings.notificationKindAlert,
-  'ROUTE_ASSIGNED' => AppStrings.notificationKindRouteAssigned,
-  'ROUTE_MODIFIED' => AppStrings.notificationKindRouteModified,
-  'STOP_REASSIGNED' => AppStrings.notificationKindStopReassigned,
+  'IMPEDIMENT_REPORTED' => AppStrings.notificationKindImpedimentReported,
+  'APPEAL_FILED' => AppStrings.notificationKindAppealFiled,
   _ => kind,
 };
 

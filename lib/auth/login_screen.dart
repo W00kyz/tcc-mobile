@@ -69,62 +69,75 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text(
-                AppStrings.loginBrand,
-                style: TextStyle(letterSpacing: 1.2),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                AppStrings.loginTitle,
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                key: const Key('email-field'),
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: AppStrings.loginEmailLabel,
+        // Scrolls so the open keyboard never overflows the form on a small
+        // phone, now that "Criar conta" sits under it too.
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  AppStrings.loginBrand,
+                  style: TextStyle(letterSpacing: 1.2),
                 ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('password-field'),
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: AppStrings.loginPasswordLabel,
+                const SizedBox(height: 4),
+                const Text(
+                  AppStrings.loginTitle,
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
                 ),
-                obscureText: true,
-              ),
-              if (_errorMessage != null) ...[
+                const SizedBox(height: 24),
+                TextField(
+                  key: const Key('email-field'),
+                  controller: _emailController,
+                  decoration: const InputDecoration(
+                    labelText: AppStrings.loginEmailLabel,
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                ),
                 const SizedBox(height: 12),
-                Text(
-                  _errorMessage!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                TextField(
+                  key: const Key('password-field'),
+                  controller: _passwordController,
+                  decoration: const InputDecoration(
+                    labelText: AppStrings.loginPasswordLabel,
+                  ),
+                  obscureText: true,
+                ),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                FilledButton(
+                  key: const Key('login-button'),
+                  onPressed: _isSubmitting ? null : _submit,
+                  child: Text(
+                    _isSubmitting
+                        ? AppStrings.loginSubmitting
+                        : AppStrings.loginSubmitButton,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  key: const Key('forgot-password-button'),
+                  onPressed: _isSubmitting ? null : _forgotPassword,
+                  child: const Text(AppStrings.loginForgotPassword),
+                ),
+                TextButton(
+                  key: const Key('create-account-button'),
+                  onPressed: _isSubmitting
+                      ? null
+                      : () => context.push('/cadastro'),
+                  child: const Text(AppStrings.loginCreateAccount),
                 ),
               ],
-              const SizedBox(height: 24),
-              FilledButton(
-                key: const Key('login-button'),
-                onPressed: _isSubmitting ? null : _submit,
-                child: Text(
-                  _isSubmitting
-                      ? AppStrings.loginSubmitting
-                      : AppStrings.loginSubmitButton,
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                key: const Key('forgot-password-button'),
-                onPressed: _isSubmitting ? null : _forgotPassword,
-                child: const Text(AppStrings.loginForgotPassword),
-              ),
-            ],
+            ),
           ),
         ),
       ),

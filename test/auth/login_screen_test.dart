@@ -28,7 +28,20 @@ class _FakeAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<String> refreshAccessToken(String refreshToken) async => 'fresh';
+  Future<RefreshedAccess> refreshAccessToken(String refreshToken) async =>
+      const RefreshedAccess(accessToken: 'fresh');
+
+  @override
+  Future<List<CompanyOption>> publicCompanies() async => const [];
+
+  @override
+  Future<void> register({
+    required String name,
+    required String email,
+    required String password,
+    required String companyId,
+    required int noticeVersion,
+  }) async {}
 
   @override
   Future<void> requestPasswordReset(String email) async {
@@ -40,6 +53,31 @@ class _FakeAuthRepository implements AuthRepository {
 
 void main() {
   forgotPasswordTests();
+
+  testWidgets('"Criar conta" opens the sign-up screen', (tester) async {
+    final router = GoRouter(
+      routes: [
+        GoRoute(path: '/', builder: (_, _) => const LoginScreen()),
+        GoRoute(
+          path: '/cadastro',
+          builder: (_, _) => const Scaffold(body: Text('cadastro-screen')),
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          authRepositoryProvider.overrideWithValue(_FakeAuthRepository()),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+
+    await tester.tap(find.text(AppStrings.loginCreateAccount));
+    await tester.pumpAndSettle();
+
+    expect(find.text('cadastro-screen'), findsOneWidget);
+  });
 
   testWidgets('shows an error message on invalid credentials', (tester) async {
     final router = GoRouter(
