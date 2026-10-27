@@ -225,7 +225,7 @@ abstract final class AppStrings {
   static const String releasedStopDiscardButton = 'Descartar';
   static const String releasedStopDiscardTitle = 'Descartar dados deste ponto?';
   static const String releasedStopDiscardBody =
-      'As fotos, respostas e registros feitos offline neste ponto serão '
+      'As fotos e registros feitos offline neste ponto serão '
       'apagados do aparelho.';
   static const String releasedStopDiscarded = 'Dados do ponto descartados.';
 
@@ -305,7 +305,7 @@ abstract final class AppStrings {
   static const String appealClaimedTimeNone = 'Não informado';
   static const String appealSubmit = 'Enviar recurso';
   static const String appealLocalDataWarning =
-      'As fotos e respostas feitas offline neste ponto não serão enviadas com '
+      'As fotos feitas offline neste ponto não serão enviadas com '
       'o recurso e serão apagadas do aparelho.';
   static const String appealWarningConfirm = 'Enviar';
   static const String appealSent = 'Recurso enviado.';

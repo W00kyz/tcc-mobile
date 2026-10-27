@@ -38,8 +38,8 @@ class EvidenceListEntry {
   /// `apiBaseUrlFromEnvironment()` to render `Image.network`.
   final String? contentUrl;
 
-  /// The upload's key, local or synced alike — how a MEDIA form answer finds
-  /// its photos in this list.
+  /// The upload's key, local or synced alike — how a local photo and its
+  /// synced copy are matched in this list.
   final String? idempotencyKey;
 }
 

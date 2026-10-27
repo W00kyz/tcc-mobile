@@ -22,7 +22,7 @@ const _reasonOptions = <(String, String)>[
 /// The appeal is a declaration (spec 2026-10-20-alocacao-automatica §7.5):
 /// a reason, an optional note, and what the device knows — the declared time
 /// is its local check-in, read from the stop's `ReleasedStopNotice`, never
-/// typed by the worker. The offline photos and answers do not go with it:
+/// typed by the worker. The offline photos do not go with it:
 /// the form warns before sending, and once the appeal is on record deletes
 /// everything the device held for the stop. Pops `true` when it is.
 ///
@@ -173,8 +173,8 @@ class _AppealFormScreenState extends ConsumerState<AppealFormScreen> {
     }
   }
 
-  /// Spec §7.5: the app warns before sending that the offline photos and
-  /// answers are left behind and erased. True when the worker goes ahead.
+  /// Spec §7.5: the app warns before sending that the offline photos are
+  /// left behind and erased. True when the worker goes ahead.
   Future<bool> _confirmLocalDataLoss() async {
     final confirmed = await showDialog<bool>(
       context: context,

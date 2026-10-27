@@ -41,7 +41,8 @@ class EvidenceItem {
   final DateTime createdAt;
   final String? contentUrl;
 
-  /// The key this device generated for the upload; a MEDIA answer lists it.
+  /// The key this device generated for the upload, so a local photo and its
+  /// synced copy can be told apart.
   final String? idempotencyKey;
 }
 

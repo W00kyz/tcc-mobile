@@ -165,7 +165,7 @@ class ExecutionRepository {
   /// `Uint8List` — `LocalWriteStore.enqueue` `jsonEncode`s the map) so a
   /// `pending`/`failed` row still has what it needs to render a local
   /// thumbnail before the backend has a copy. Returns the photo's
-  /// idempotency key, which a MEDIA form answer lists to point at it.
+  /// idempotency key, which identifies the upload on the server.
   Future<String> addPhoto({
     required String routeId,
     required String executionId,

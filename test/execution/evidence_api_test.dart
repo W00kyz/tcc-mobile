@@ -112,7 +112,7 @@ void main() {
     expect(items[0].contentType, 'image/jpeg');
     expect(items[0].byteSize, 51200);
     expect(items[0].contentUrl, '/evidence/e1/content');
-    // How a MEDIA answer points at this photo.
+    // The upload's idempotency key travels with the item.
     expect(items[0].idempotencyKey, 'key-e1');
     expect(items[1].idempotencyKey, isNull);
     expect(items[1].kind, 'NOTE');

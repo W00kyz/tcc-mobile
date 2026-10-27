@@ -128,7 +128,7 @@ void main() {
             "WHERE type = 'table' AND name = 'form_draft_items'",
           )
           .get();
-      // The 3→4 step created it; the 6→7 step that follows drops it again.
+      // No step creates it any more (6→7's DROP IF EXISTS is a no-op).
       expect(formDraftItems, isEmpty);
 
       // The current constant: every later step runs right after this one.
