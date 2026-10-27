@@ -479,6 +479,17 @@ class _FakeEvidenceApi implements EvidenceApi {
       syncedItems;
 }
 
+/// An [EvidenceApi] whose `listEvidence` fails like a dropped connection —
+/// the device is offline.
+class _OfflineEvidenceApi extends _NoopEvidenceApi {
+  @override
+  Future<List<EvidenceItem>> listEvidence(String executionId) async =>
+      throw DioException.connectionError(
+        requestOptions: RequestOptions(path: '/executions/$executionId'),
+        reason: 'offline',
+      );
+}
+
 /// A fake camera — returns [photo] (or throws [error]) instead of opening
 /// the real camera app.
 class _FakeEvidenceCapture implements EvidenceCapture {
@@ -1850,6 +1861,25 @@ void main() {
       expect(find.text(AppStrings.evidenceMissingHint(1)), findsOneWidget);
       expect(find.text('Tire pelo menos 2 fotos (faltam 1)'), findsOneWidget);
       expect(tester.widget<TextButton>(concluir()).onPressed, isNull);
+    });
+
+    testWidgets('offline, 2 pending photos enable "Concluir" and 1 does not', (
+      tester,
+    ) async {
+      await pumpWith(
+        tester,
+        pendingPhotos: 2,
+        evidenceApi: _OfflineEvidenceApi(),
+      );
+      expect(tester.widget<TextButton>(concluir()).onPressed, isNotNull);
+
+      await pumpWith(
+        tester,
+        pendingPhotos: 1,
+        evidenceApi: _OfflineEvidenceApi(),
+      );
+      expect(tester.widget<TextButton>(concluir()).onPressed, isNull);
+      expect(find.text(AppStrings.evidenceMissingHint(1)), findsOneWidget);
     });
 
     testWidgets('counts a pending photo together with a synced one', (
