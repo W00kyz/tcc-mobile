@@ -348,6 +348,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     clearNextAttemptAt: true,
   );
 
+  @override
+  Future<int> localPhotoCountFor(String executionId) =>
+      throw UnimplementedError();
+
   List<PendingOperationRow> _sorted(Iterable<PendingOperationRow> it) =>
       it.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 

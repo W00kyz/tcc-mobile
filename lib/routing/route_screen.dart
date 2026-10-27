@@ -7,6 +7,7 @@ import 'package:route_monitor/appeals/appeals_screen.dart';
 import 'package:route_monitor/appeals/released_stop_listener.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
+import 'package:route_monitor/execution/evidence_photo_count.dart';
 import 'package:route_monitor/execution/evidence_requirement.dart';
 import 'package:route_monitor/execution/evidence_thumbnail.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
@@ -245,16 +246,12 @@ class RouteScreen extends ConsumerWidget {
     );
   }
 
-  /// The photos (pending and synced alike) on the stop's open execution, or
-  /// `null` while loading, on error, or with no execution to count against:
-  /// "Concluir" stays closed then (never release before knowing).
+  /// The stop's photo count (device outbox first, the merged list only as a
+  /// larger floor), or `null` without an execution or while the local read
+  /// loads: "Concluir" stays closed then (never release before knowing).
   int? _photoCount(WidgetRef ref, String routeId, String? executionId) {
     if (executionId == null) return null;
-    final items = ref
-        .watch(stopEvidenceProvider((routeId, executionId)))
-        .asData
-        ?.value;
-    return items?.where((item) => item.kind == 'PHOTO').length;
+    return ref.watch(stopPhotoCountProvider((routeId, executionId)));
   }
 
   /// Opens [ImpedimentDialog] for a `PENDING` or `IN_PROGRESS` stop and, on a
@@ -786,9 +783,7 @@ class _EvidenceSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final query = (routeId, executionId);
     final itemsAsync = ref.watch(stopEvidenceProvider(query));
-    final photoCount = itemsAsync.asData?.value
-        .where((item) => item.kind == 'PHOTO')
-        .length;
+    final photoCount = ref.watch(stopPhotoCountProvider(query));
 
     return Padding(
       padding: const EdgeInsets.only(left: 56, right: 16, bottom: 8),
@@ -849,7 +844,9 @@ class _EvidenceSection extends ConsumerWidget {
       await ref
           .read(executionRepositoryProvider)
           .addPhoto(routeId: query.$1, executionId: query.$2, photo: photo);
-      ref.invalidate(stopEvidenceProvider(query));
+      ref
+        ..invalidate(stopEvidenceProvider(query))
+        ..invalidate(localPhotoCountProvider(query.$2));
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,

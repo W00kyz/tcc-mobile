@@ -81,4 +81,22 @@ void main() {
     expect(field.controller!.text.length, 2000);
     expect(field.maxLines, greaterThan(1));
   });
+
+  testWidgets('the sent text never exceeds 2000 code points', (tester) async {
+    ComplaintsDialogResult? result;
+    await openDialog(tester, (r) => result = r);
+
+    // One grapheme, seven code points (four emoji and three joiners): the
+    // field's own limit counts graphemes, the backend counts code points.
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}';
+    expect(family.runes.length, 7);
+    await tester.enterText(find.byType(TextField), family * 400);
+    await tester.pump();
+
+    expect(find.text('2000/2000'), findsOneWidget);
+    await tester.tap(find.text(AppStrings.complaintsContinue));
+    await tester.pumpAndSettle();
+
+    expect(result!.text!.runes.length, 2000);
+  });
 }

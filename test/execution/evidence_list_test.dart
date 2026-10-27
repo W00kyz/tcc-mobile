@@ -95,6 +95,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
 
   @override
   Future<void> resetToPending(String id) => throw UnimplementedError();
+
+  @override
+  Future<int> localPhotoCountFor(String executionId) =>
+      throw UnimplementedError();
 }
 
 PendingOperationRow _row({
@@ -170,7 +174,7 @@ void main() {
       expect(entries[2].kind, 'PHOTO');
       expect(entries[2].syncState, PendingOpState.pending);
       expect(entries[2].photoBytes, [1, 2, 3]);
-      // Both sources carry the key a MEDIA answer uses to find its photos.
+      // Both sources carry the upload's idempotency key.
       expect(entries[0].idempotencyKey, 'key-synced');
       expect(entries[2].idempotencyKey, 'key-pending');
     },

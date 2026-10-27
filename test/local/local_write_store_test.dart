@@ -268,4 +268,37 @@ void main() {
       expect(reset.releasedStopId, isNull);
     },
   );
+
+  group('localPhotoCountFor', () {
+    Future<void> enqueue(
+      String id,
+      PendingOpKind kind,
+      String executionId,
+    ) => store.enqueue(
+      id: id,
+      kind: kind,
+      payload: {'execution_id': executionId},
+      routeId: 'route-A',
+    );
+
+    test(
+      'counts the execution photos in every state, and only those',
+      () async {
+        await enqueue('p-pending', PendingOpKind.evidencePhoto, 'exec-1');
+        await enqueue('p-synced', PendingOpKind.evidencePhoto, 'exec-1');
+        await enqueue('p-failed', PendingOpKind.evidencePhoto, 'exec-1');
+        await enqueue('p-blocked', PendingOpKind.evidencePhoto, 'exec-1');
+        await enqueue('p-other', PendingOpKind.evidencePhoto, 'exec-2');
+        await enqueue('note', PendingOpKind.evidenceNote, 'exec-1');
+        await enqueue('check-in', PendingOpKind.checkIn, 'exec-1');
+        await store.markSynced('p-synced');
+        await store.markFailed('p-failed', 'boom');
+        await store.markBlocked('p-blocked', 'gave up');
+
+        expect(await store.localPhotoCountFor('exec-1'), 4);
+        expect(await store.localPhotoCountFor('exec-2'), 1);
+        expect(await store.localPhotoCountFor('exec-3'), 0);
+      },
+    );
+  });
 }

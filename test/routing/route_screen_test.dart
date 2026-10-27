@@ -293,6 +293,15 @@ class _InMemoryLocalWriteStore implements LocalWriteStore {
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
   @override
+  Future<int> localPhotoCountFor(String executionId) async => _rows.values
+      .where(
+        (r) =>
+            r.kind == PendingOpKind.evidencePhoto &&
+            r.payload['execution_id'] == executionId,
+      )
+      .length;
+
+  @override
   Future<void> markStopReleased(
     String id, {
     required String routeStopId,
@@ -479,15 +488,36 @@ class _FakeEvidenceApi implements EvidenceApi {
       syncedItems;
 }
 
-/// An [EvidenceApi] whose `listEvidence` fails like a dropped connection —
-/// the device is offline.
-class _OfflineEvidenceApi extends _NoopEvidenceApi {
+/// An [EvidenceApi] whose `listEvidence` always throws [error] — the device
+/// is offline, or the server answered an HTTP error.
+class _FailingEvidenceApi extends _NoopEvidenceApi {
+  _FailingEvidenceApi(this.error);
+
+  /// A dropped connection: no HTTP response at all.
+  factory _FailingEvidenceApi.offline() => _FailingEvidenceApi(
+    DioException.connectionError(
+      requestOptions: RequestOptions(path: '/executions/x/evidence'),
+      reason: 'offline',
+    ),
+  );
+
+  /// The server answered [status].
+  factory _FailingEvidenceApi.http(int status) {
+    final request = RequestOptions(path: '/executions/x/evidence');
+    return _FailingEvidenceApi(
+      DioException.badResponse(
+        statusCode: status,
+        requestOptions: request,
+        response: Response<void>(requestOptions: request, statusCode: status),
+      ),
+    );
+  }
+
+  final DioException error;
+
   @override
   Future<List<EvidenceItem>> listEvidence(String executionId) async =>
-      throw DioException.connectionError(
-        requestOptions: RequestOptions(path: '/executions/$executionId'),
-        reason: 'offline',
-      );
+      throw error;
 }
 
 /// A fake camera — returns [photo] (or throws [error]) instead of opening
@@ -1833,12 +1863,20 @@ void main() {
 
     Future<_InMemoryLocalWriteStore> pumpWith(
       WidgetTester tester, {
-      required int pendingPhotos,
+      int pendingPhotos = 0,
+      int syncedPhotos = 0,
       EvidenceApi? evidenceApi,
     }) async {
+      // A fresh tree, so a second call in one test starts from scratch.
+      await tester.pumpWidget(const SizedBox());
       final store = _InMemoryLocalWriteStore();
       for (var i = 0; i < pendingPhotos; i++) {
         await enqueuePhoto(store, 'p$i');
+      }
+      // Delivered photos stay in the outbox, state `synced`.
+      for (var i = 0; i < syncedPhotos; i++) {
+        await enqueuePhoto(store, 's$i');
+        await store.markSynced('s$i');
       }
       await tester.pumpWidget(
         _screenWith(
@@ -1863,23 +1901,62 @@ void main() {
       expect(tester.widget<TextButton>(concluir()).onPressed, isNull);
     });
 
-    testWidgets('offline, 2 pending photos enable "Concluir" and 1 does not', (
+    // The gate reads the device's own outbox: no network answer, good or
+    // bad, may stall or undercount it (spec §6.4, SQLite is the truth).
+    Finder addPhoto() =>
+        find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton);
+
+    testWidgets('offline, 1 delivered + 1 pending photo enable "Concluir"', (
+      tester,
+    ) async {
+      await pumpWith(
+        tester,
+        pendingPhotos: 1,
+        syncedPhotos: 1,
+        evidenceApi: _FailingEvidenceApi.offline(),
+      );
+
+      expect(tester.widget<TextButton>(concluir()).onPressed, isNotNull);
+      expect(find.textContaining('Tire pelo menos'), findsNothing);
+    });
+
+    testWidgets('an HTTP 500 on the list does not stall the count', (
       tester,
     ) async {
       await pumpWith(
         tester,
         pendingPhotos: 2,
-        evidenceApi: _OfflineEvidenceApi(),
+        evidenceApi: _FailingEvidenceApi.http(500),
       );
       expect(tester.widget<TextButton>(concluir()).onPressed, isNotNull);
 
       await pumpWith(
         tester,
         pendingPhotos: 1,
-        evidenceApi: _OfflineEvidenceApi(),
+        evidenceApi: _FailingEvidenceApi.http(500),
       );
       expect(tester.widget<TextButton>(concluir()).onPressed, isNull);
       expect(find.text(AppStrings.evidenceMissingHint(1)), findsOneWidget);
+    });
+
+    testWidgets('the 10-photo cap counts the local photos, list or no list', (
+      tester,
+    ) async {
+      await pumpWith(
+        tester,
+        pendingPhotos: 5,
+        syncedPhotos: 5,
+        evidenceApi: _FailingEvidenceApi.http(404),
+      );
+      expect(tester.widget<TextButton>(addPhoto()).onPressed, isNull);
+
+      await pumpWith(
+        tester,
+        pendingPhotos: 5,
+        syncedPhotos: 4,
+        evidenceApi: _FailingEvidenceApi.http(404),
+      );
+      expect(tester.widget<TextButton>(addPhoto()).onPressed, isNotNull);
     });
 
     testWidgets('counts a pending photo together with a synced one', (

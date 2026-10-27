@@ -89,6 +89,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
 
   @override
   Future<void> resetToPending(String id) => throw UnimplementedError();
+
+  @override
+  Future<int> localPhotoCountFor(String executionId) =>
+      throw UnimplementedError();
 }
 
 /// In-memory stand-in for [DriftStopProgressStore] — real Drift behavior is
@@ -354,7 +358,7 @@ void main() {
     expect(rows.single.payload['execution_id'], 'exec-1');
     expect(rows.single.payload['bytes_b64'], isA<String>());
     expect(rows.single.payload['sha256'], 'abc123');
-    // The key a MEDIA answer lists: the one the upload will carry.
+    // The upload's idempotency key: the one the upload will carry.
     expect(rows.single.payload['idempotency_key'], key);
     expect(syncWorker.syncedRoutes, ['route-A']);
   });

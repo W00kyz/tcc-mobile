@@ -99,6 +99,12 @@ abstract class LocalWriteStore {
   /// oldest first, so the drain replays them in the order they were made.
   Future<List<PendingOperationRow>> unsyncedForRoute(String routeId);
 
+  /// How many evidence photos the outbox holds for [executionId], in EVERY
+  /// state: `synced` rows stay in SQLite after delivery, and `failed` /
+  /// `blocked` ones are still photos the worker took. This is the on-device
+  /// truth behind the "Concluir" gate and the photo cap, valid offline.
+  Future<int> localPhotoCountFor(String executionId);
+
   /// `blocked` rows for [routeId], oldest first — the manual-attention list.
   Future<List<PendingOperationRow>> blockedForRoute(String routeId);
 
@@ -238,6 +244,19 @@ class DriftLocalWriteStore implements LocalWriteStore {
       ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]);
     final rows = await query.get();
     return rows.map(_toRow).toList();
+  }
+
+  @override
+  Future<int> localPhotoCountFor(String executionId) async {
+    final query = _db.select(_db.pendingOperations)
+      ..where((row) => row.kind.equals(PendingOpKind.evidencePhoto.name));
+    final rows = await query.get();
+    // The execution id lives inside the JSON payload, so it is matched here
+    // rather than in SQL; photos are few per device and day.
+    return rows
+        .map(_toRow)
+        .where((row) => row.payload['execution_id'] == executionId)
+        .length;
   }
 
   @override
