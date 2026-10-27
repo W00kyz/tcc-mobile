@@ -19,10 +19,6 @@ import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
-import 'package:route_monitor/forms/form_draft_store.dart';
-import 'package:route_monitor/forms/form_providers.dart';
-import 'package:route_monitor/forms/form_schema.dart';
-import 'package:route_monitor/forms/form_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
@@ -211,8 +207,6 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-    String? formVersionId,
-    List<Map<String, Object?>>? answers,
   }) async => (
     result: CheckOutResult(
       routeStopId: routeStopId ?? 's1',
@@ -621,7 +615,6 @@ Widget _screenWith(
   LocalWriteStore? localWriteStore,
   SyncMetaStore? syncMetaStore,
   SyncWorker? syncWorker,
-  FormDraftStore? formDraftStore,
   String? apiBaseUrl,
   Session? session,
   MonitoringApi? monitoringApi,
@@ -643,17 +636,6 @@ Widget _screenWith(
   final resolvedEvidenceApi = evidenceApi ?? _NoopEvidenceApi();
   final resolvedLocalStore = localWriteStore ?? _InMemoryLocalWriteStore();
   final resolvedSyncMeta = syncMetaStore ?? _InMemorySyncMetaStore();
-  // Always overridden too: `formDraftStoreProvider`'s default builds a real
-  // `DriftFormDraftStore` backed by the on-device SQLite file
-  // (`appDatabaseProvider`) — an in-memory Drift database stands in instead,
-  // same discipline as the stores above.
-  final resolvedFormDraftStore =
-      formDraftStore ??
-      (() {
-        final db = inMemoryDatabase();
-        addTearDown(db.close);
-        return DriftFormDraftStore(db);
-      })();
   // Always overridden: the sync banner watches `routeSyncStatusProvider` on
   // every render now, and building the real `SyncWorker` reaches
   // `apiBaseUrlFromEnvironment()` (no `--dart-define` under flutter_test).
@@ -682,7 +664,6 @@ Widget _screenWith(
       evidenceApiProvider.overrideWithValue(resolvedEvidenceApi),
       localWriteStoreProvider.overrideWithValue(resolvedLocalStore),
       syncMetaStoreProvider.overrideWithValue(resolvedSyncMeta),
-      formDraftStoreProvider.overrideWithValue(resolvedFormDraftStore),
       // Never the real apiBaseUrlFromEnvironment() under flutter_test (no
       // --dart-define here) — a fixed value unless a test needs a specific
       // one (the synced-photo thumbnail URL/header test).
@@ -713,7 +694,6 @@ Widget _screenWith(
             resolvedLocalStore,
             resolvedOpenExecutions,
             resolvedSyncWorker,
-            resolvedFormDraftStore,
           ),
         ),
     ],
@@ -2467,187 +2447,20 @@ void main() {
     },
   );
 
-  // --- Task 13: form fill step gates check-out ---------------------------
-
-  FormSchema oneTextQuestionSchema() => const FormSchema(
-    formVersionId: 'v1',
-    questions: [
-      FormQuestion(
-        stableKey: 'k1',
-        orderIndex: 0,
-        prompt: 'Observação',
-        type: QuestionType.text,
-        required: true,
-        options: [],
-        contentHash: 'h1',
+  testWidgets('an IN_PROGRESS stop offers "Concluir"', (tester) async {
+    await tester.pumpWidget(
+      _screenWith(
+        _repositoryWith(inProgressStopRoute()),
+        stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
       ),
-    ],
-  );
+    );
+    await tester.pumpAndSettle();
 
-  RouteSummary inProgressStopWithFormRoute() => _routeWith(
-    startedAt: DateTime(2026, 8, 25, 8),
-    stops: [
-      RouteStopSummary(
-        id: 's1',
-        orderIndex: 1,
-        batchNumber: 1,
-        status: 'IN_PROGRESS',
-        servicePointName: 'Sala 101',
-        latitude: -7.21,
-        longitude: -35.91,
-        form: oneTextQuestionSchema(),
-      ),
-    ],
-  );
-
-  testWidgets(
-    'an IN_PROGRESS stop with a form and an incomplete draft disables '
-    '"Concluir", shows "Preencher formulário" and the incomplete hint',
-    (tester) async {
-      final db = inMemoryDatabase();
-      addTearDown(db.close);
-      final formStore = DriftFormDraftStore(db);
-      await formStore.snapshotFrom('exec-1', 's1', oneTextQuestionSchema());
-
-      await tester.pumpWidget(
-        _screenWith(
-          _repositoryWith(inProgressStopWithFormRoute()),
-          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
-          formDraftStore: formStore,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final concluir = tester.widget<TextButton>(
-        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
-      );
-      expect(concluir.onPressed, isNull);
-      expect(
-        find.widgetWithText(TextButton, AppStrings.routeFillFormButton),
-        findsOneWidget,
-      );
-      expect(
-        find.text(AppStrings.routeFormIncompleteHint),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets(
-    'tapping "Preencher formulário" pushes FormScreen; completing the '
-    'required question and returning enables "Concluir"',
-    (tester) async {
-      final db = inMemoryDatabase();
-      addTearDown(db.close);
-      final formStore = DriftFormDraftStore(db);
-      await formStore.snapshotFrom('exec-1', 's1', oneTextQuestionSchema());
-
-      await tester.pumpWidget(
-        _screenWith(
-          _repositoryWith(inProgressStopWithFormRoute()),
-          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
-          formDraftStore: formStore,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(
-        find.widgetWithText(TextButton, AppStrings.routeFillFormButton),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byType(FormScreen), findsOneWidget);
-
-      await tester.enterText(find.byType(TextFormField), 'Tudo certo.');
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.widgetWithText(OutlinedButton, AppStrings.commonBack),
-      );
-      await tester.pumpAndSettle();
-
-      final concluir = tester.widget<TextButton>(
-        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
-      );
-      expect(concluir.onPressed, isNotNull);
-      expect(
-        find.text(AppStrings.routeFormIncompleteHint),
-        findsNothing,
-      );
-    },
-  );
-
-  testWidgets(
-    'an IN_PROGRESS stop with no form keeps "Concluir" enabled as before '
-    'this task, with no "Preencher formulário" button',
-    (tester) async {
-      await tester.pumpWidget(
-        _screenWith(
-          _repositoryWith(inProgressStopRoute()),
-          stopProgressStore: _FakeStopProgressStore({'s1': 'exec-1'}),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final concluir = tester.widget<TextButton>(
-        find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
-      );
-      expect(concluir.onPressed, isNotNull);
-      expect(
-        find.widgetWithText(TextButton, AppStrings.routeFillFormButton),
-        findsNothing,
-      );
-    },
-  );
-
-  testWidgets(
-    'checking in on a stop with a form snapshots its questions under the '
-    'returned executionId',
-    (tester) async {
-      final db = inMemoryDatabase();
-      addTearDown(db.close);
-      final formStore = DriftFormDraftStore(db);
-      final store = _InMemoryLocalWriteStore();
-      // ExecutionRepository generates the executionId itself (spec Ruling
-      // 4 — no server 201 to learn it from offline); a real StopProgressStore
-      // captures whatever id it picks so the test can key its assertion on
-      // the same value the snapshot was written under.
-      final progressStore = _FakeStopProgressStore();
-      final route = _routeWith(
-        startedAt: DateTime(2026, 8, 25, 8),
-        stops: [
-          RouteStopSummary(
-            id: 's1',
-            orderIndex: 1,
-            batchNumber: 1,
-            status: 'PENDING',
-            servicePointName: 'Sala 101',
-            latitude: -7.21,
-            longitude: -35.91,
-            form: oneTextQuestionSchema(),
-          ),
-        ],
-      );
-      await tester.pumpWidget(
-        _screenWith(
-          _repositoryWith(route),
-          locationService: _FakeLocationService(),
-          executionApi: _FakeExecutionApi(),
-          localWriteStore: store,
-          formDraftStore: formStore,
-          stopProgressStore: progressStore,
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tapCheckInAndScan(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
-
-      final executionId = (await progressStore.progressFor('s1'))!.executionId;
-      final items = await formStore.itemsFor(executionId);
-      expect(items, hasLength(1));
-      expect(items.single.stableKey, 'k1');
-    },
-  );
+    final concluir = tester.widget<TextButton>(
+      find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
+    );
+    expect(concluir.onPressed, isNotNull);
+  });
 
   // --- Task 10: "Sinalizar impossibilidade" -----------------------------
 
@@ -3169,7 +2982,6 @@ void main() {
         await tester.pumpWidget(
           _screenWith(
             _repositoryWith(route),
-            formDraftStore: DriftFormDraftStore(db),
             releasedStopStore: DriftReleasedStopStore(db),
           ),
         );

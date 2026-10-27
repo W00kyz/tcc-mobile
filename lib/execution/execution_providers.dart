@@ -9,7 +9,6 @@ import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
-import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
@@ -83,7 +82,6 @@ final executionRepositoryProvider = Provider<ExecutionRepository>(
     ref.watch(localWriteStoreProvider),
     ref.watch(stopProgressStoreProvider),
     ref.watch(syncWorkerProvider),
-    ref.watch(formDraftStoreProvider),
   ),
 );
 

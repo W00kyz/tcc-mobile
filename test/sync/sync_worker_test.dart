@@ -45,8 +45,6 @@ class _FakeExecutionApi implements ExecutionApi {
   /// When set, every check-in waits on it — holds a drain pass mid-flight.
   Completer<void>? checkInGate;
   double? lastClientClockOffset;
-  String? lastFormVersionId;
-  List<Map<String, Object?>>? lastAnswers;
   ({
     String routeId,
     String? routeStopId,
@@ -97,12 +95,8 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-    String? formVersionId,
-    List<Map<String, Object?>>? answers,
   }) async {
     log.add('checkOut:$checkoutIdempotencyKey');
-    lastFormVersionId = formVersionId;
-    lastAnswers = answers;
     final error = checkOutError;
     if (error != null) {
       if (consumeError) checkOutError = null;
@@ -419,14 +413,55 @@ class _FakeReleasedStopStore implements ReleasedStopStore {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+final _checkOutResponse = <String, dynamic>{
+  'route_stop_id': 'stop-1',
+  'execution_id': 'exec-1',
+  'checked_out_at': '2026-06-01T12:00:00Z',
+  'validation_flags': <String>[],
+};
+
+/// A real [Dio] whose adapter records every request and answers 200.
+Dio _capturingDio({
+  required void Function(RequestOptions) onRequest,
+  required Map<String, dynamic> body,
+}) =>
+    Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _CapturingAdapter(onRequest, body);
+
+class _CapturingAdapter implements HttpClientAdapter {
+  _CapturingAdapter(this._onRequest, this._body);
+
+  final void Function(RequestOptions) _onRequest;
+  final Map<String, dynamic> _body;
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    _onRequest(options);
+    return ResponseBody.fromString(
+      jsonEncode(_body),
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+}
+
 class _Harness {
-  _Harness() {
+  _Harness({ExecutionApi? api}) {
     worker = SyncWorker(
       store,
       stopProgress,
       syncMeta,
       connectivity,
-      executionApi,
+      api ?? executionApi,
       evidenceApi,
       releasedStops,
       now: () => now,
@@ -516,41 +551,39 @@ void main() {
     },
   );
 
-  test(
-    'a checkOut row with form_version_id + answers in its payload passes '
-    'them through to ExecutionApi.checkOut, correctly typed after the '
-    'jsonEncode/jsonDecode round-trip',
-    () async {
-      final h = _Harness();
-      h.store.seed(
-        'c',
-        kind: PendingOpKind.checkOut,
-        createdAt: 1,
-        payload: {
-          ..._FakeLocalWriteStore._defaultPayload('c'),
-          'form_version_id': 'v2',
-          // A round-trip through jsonEncode/jsonDecode (as the real
-          // LocalWriteStore does) leaves this a List<dynamic> of
-          // Map<String, dynamic> — reproduced here instead of a literal
-          // List<Map<String, Object?>> so the test proves the worker's cast
-          // actually copes with that shape.
-          'answers': jsonDecode(
-            jsonEncode([
-              {'stable_key': 'q1', 'value': 'answered'},
-            ]),
-          ),
-        },
-      );
+  test('legacy checkOut row with form fields is sent without them', () async {
+    // An old build queued this row before forms were removed: the payload
+    // still carries `form_version_id` / `answers`. The real DioExecutionApi
+    // is used so the assertion is on the wire body, not on a fake signature.
+    final sent = <RequestOptions>[];
+    final h = _Harness(
+      api: DioExecutionApi(
+        _capturingDio(onRequest: sent.add, body: _checkOutResponse),
+      ),
+    );
+    h.store.seed(
+      'c',
+      kind: PendingOpKind.checkOut,
+      createdAt: 1,
+      payload: {
+        ..._FakeLocalWriteStore._defaultPayload('c'),
+        'form_version_id': 'v2',
+        'answers': jsonDecode(
+          jsonEncode([
+            {'stable_key': 'q1', 'value': 'answered'},
+          ]),
+        ),
+      },
+    );
 
-      await h.worker.syncRoute('route-R');
+    await h.worker.syncRoute('route-R');
 
-      expect(h.store.rows['c']!.state, PendingOpState.synced);
-      expect(h.executionApi.lastFormVersionId, 'v2');
-      expect(h.executionApi.lastAnswers, [
-        {'stable_key': 'q1', 'value': 'answered'},
-      ]);
-    },
-  );
+    expect(h.store.rows['c']!.state, PendingOpState.synced);
+    final body = sent.single.data as Map;
+    expect(body.containsKey('form_version_id'), isFalse);
+    expect(body.containsKey('answers'), isFalse);
+    expect(body['checkout_idempotency_key'], 'c');
+  });
 
   test(
     'a soft error defers the row and stops the queue, then recovers',

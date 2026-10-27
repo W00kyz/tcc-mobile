@@ -12,8 +12,6 @@ import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/impediment_dialog.dart';
 import 'package:route_monitor/execution/room_picker.dart';
 import 'package:route_monitor/execution/room_resolution.dart';
-import 'package:route_monitor/forms/form_providers.dart';
-import 'package:route_monitor/forms/form_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart'
@@ -210,37 +208,16 @@ class RouteScreen extends ConsumerWidget {
         ref.watch(stopSyncChipProvider((route.id, stop.id))).asData?.value ??
         StopSyncChip.none;
     final inProgress = effectiveStatus == 'IN_PROGRESS';
-    final stopForm = stop.form;
-    final executionId = progress?.executionId;
-    // Default `false` (not "unknown -> allow") while the completeness query
-    // is still loading — a form-gated stop must never let check-out through
-    // before we actually know the draft is complete.
-    final formComplete =
-        inProgress &&
-        stopForm != null &&
-        executionId != null &&
-        (ref.watch(formDraftCompleteProvider(executionId)).asData?.value ??
-            false);
-    final formIncomplete = inProgress && stopForm != null && !formComplete;
     return _StopTile(
       stop: stop,
       effectiveStatus: effectiveStatus,
       syncChip: syncChip,
-      onConcluir: inProgress && (stopForm == null || formComplete)
+      onConcluir: inProgress
           ? () => _checkOut(context, ref, route, stop)
           : null,
       evidenceSection: inProgress
           ? _StopEvidenceSection(routeId: route.id, routeStopId: stop.id)
           : null,
-      formFillAction: (inProgress && stopForm != null && executionId != null)
-          ? () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) =>
-                    FormScreen(routeId: route.id, executionId: executionId),
-              ),
-            )
-          : null,
-      formIncomplete: formIncomplete,
       // PENDING too, not just IN_PROGRESS: a worker who can't even reach a
       // stop (access blocked → can't scan the QR → can't check in) must still
       // be able to signal it. Gated on an IN_PROGRESS route — the backend
@@ -340,7 +317,7 @@ class RouteScreen extends ConsumerWidget {
     // The repository only enqueues + writes local state now (spec Ruling 2):
     // it never throws `AmbiguousRoomException` or a network error, so there
     // is nothing to catch here.
-    final executionId = await ref
+    await ref
         .read(executionRepositoryProvider)
         .checkIn(
           routeId: route.id,
@@ -349,17 +326,6 @@ class RouteScreen extends ConsumerWidget {
           latitude: scan.coordinates?.latitude,
           longitude: scan.coordinates?.longitude,
         );
-    // The FormSchema lives on the route's stop list, not on the execution
-    // repository — snapshot the draft here, right after check-in succeeds
-    // and before the stale `route.stops` view gets invalidated below.
-    // `snapshotFrom` is idempotent (Task 11), so a retried check-in on the
-    // same executionId never clobbers an answer already drafted.
-    final checkedInStop = route.stops.firstWhere((s) => s.id == routeStopId);
-    if (checkedInStop.form != null) {
-      await ref
-          .read(formDraftStoreProvider)
-          .snapshotFrom(executionId, routeStopId, checkedInStop.form!);
-    }
     ref.invalidate(myDayProvider);
     if (context.mounted) {
       ScaffoldMessenger.of(
@@ -603,8 +569,6 @@ class _StopTile extends StatelessWidget {
     this.syncChip = StopSyncChip.none,
     this.onConcluir,
     this.evidenceSection,
-    this.formFillAction,
-    this.formIncomplete = false,
     this.signalImpossibilityAction,
   });
 
@@ -630,21 +594,10 @@ class _StopTile extends StatelessWidget {
   /// tile, keeping `_StopTile` itself a plain, ref-free StatelessWidget.
   final Widget? evidenceSection;
 
-  /// Pushes [FormScreen] for this stop's open execution, or null to hide the
-  /// "Preencher formulário" action — set only for an `IN_PROGRESS` stop that
-  /// carries a [RouteStopSummary.form]. Kept as a plain callback (same
-  /// pattern as [onConcluir]) so this widget stays ref-free.
-  final VoidCallback? formFillAction;
-
-  /// True while this stop's form-gated check-out is blocked on an
-  /// incomplete draft — shows a hint below the tile explaining why
-  /// "Concluir" is disabled.
-  final bool formIncomplete;
-
   /// Opens the "Sinalizar impossibilidade" dialog for this stop, or null to
   /// hide the action — RouteScreen passes a callback for a `PENDING` or
   /// `IN_PROGRESS` stop (never a DONE one). Same plain-callback pattern as
-  /// [onConcluir]/[formFillAction] so this widget stays ref-free.
+  /// [onConcluir] so this widget stays ref-free.
   final VoidCallback? signalImpossibilityAction;
 
   @override
@@ -681,28 +634,19 @@ class _StopTile extends StatelessWidget {
             ],
           ),
           subtitle: leg == null ? null : Text(AppStrings.routeLeg(leg)),
-          trailing: onConcluir == null && formFillAction == null
+          trailing: onConcluir == null
               ? null
               : TextButton(
                   onPressed: onConcluir,
                   child: const Text(AppStrings.routeConcludeButton),
                 ),
         ),
-        if (formFillAction != null ||
-            formIncomplete ||
-            signalImpossibilityAction != null)
+        if (signalImpossibilityAction != null)
           Padding(
             padding: const EdgeInsets.only(left: 56, right: 16, bottom: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (formFillAction != null)
-                  TextButton(
-                    onPressed: formFillAction,
-                    child: const Text(AppStrings.routeFillFormButton),
-                  ),
-                if (formIncomplete)
-                  const Text(AppStrings.routeFormIncompleteHint),
                 if (signalImpossibilityAction != null)
                   TextButton(
                     onPressed: signalImpossibilityAction,

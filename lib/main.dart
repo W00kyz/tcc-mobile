@@ -8,7 +8,6 @@ import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/auth/login_screen.dart';
 import 'package:route_monitor/auth/registration_screen.dart';
-import 'package:route_monitor/forms/form_reconciliation.dart';
 import 'package:route_monitor/monitoring/position_reporting_trigger.dart';
 import 'package:route_monitor/privacy/consent_screen.dart';
 import 'package:route_monitor/privacy/my_data_screen.dart';
@@ -113,10 +112,8 @@ class RouteMonitorApp extends ConsumerWidget {
       ),
       routerConfig: ref.watch(routerProvider),
       builder: (context, child) => SyncTriggers(
-        child: FormReconciliationTrigger(
-          child: PositionReportingTrigger(
-            child: child ?? const SizedBox.shrink(),
-          ),
+        child: PositionReportingTrigger(
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );

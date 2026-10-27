@@ -958,8 +958,6 @@ class _RecordingExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-    String? formVersionId,
-    List<Map<String, Object?>>? answers,
   }) async {
     _log.add('checkOut:$routeStopId');
     scannedAtArgs.add(scannedAt);

@@ -70,31 +70,6 @@ class SyncMeta extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-/// One row per form question the field worker has drafted or answered for a
-/// given execution — the local shape the diff engine reconciles against a
-/// fresh `FormVersion` fetch (spec §6.1 / Ruling 8: a version bump must not
-/// silently discard answers already on the device).
-class FormDraftItems extends Table {
-  TextColumn get executionId => text()();
-  TextColumn get stableKey => text()();
-  TextColumn get routeStopId => text()(); // to find the draft from the stop
-  TextColumn get formVersionId =>
-      text()(); // the version this item was last diffed against
-  IntColumn get orderIndex => integer()();
-  TextColumn get prompt => text()();
-  TextColumn get questionType => text()();
-  BoolColumn get required => boolean()();
-  TextColumn get optionsJson => text()(); // JSON list of strings
-  TextColumn get contentHash => text()();
-  TextColumn get valueJson =>
-      text().nullable()(); // the answer; null = unanswered
-  BoolColumn get needsReanswer =>
-      boolean().withDefault(const Constant(false))();
-
-  @override
-  Set<Column> get primaryKey => {executionId, stableKey};
-}
-
 /// One row per stop the server released while this device still had
 /// writes for it — the late check-in/check-out/evidence came back `409
 /// STOP_RELEASED` (spec 2026-10-20-alocacao-automatica §7.5). It holds what
@@ -123,7 +98,6 @@ class ReleasedStops extends Table {
     PendingOperations,
     StopProgress,
     SyncMeta,
-    FormDraftItems,
     ReleasedStops,
   ],
 )
@@ -134,7 +108,7 @@ class AppDatabase extends _$AppDatabase {
     : super(executor ?? driftDatabase(name: 'route_monitor'));
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -162,9 +136,9 @@ class AppDatabase extends _$AppDatabase {
         );
         await customStatement('DROP TABLE open_executions');
       }
-      if (from < 4) {
-        await m.createTable(formDraftItems);
-      }
+      // No `from < 4` branch any more: it created `form_draft_items`, a
+      // table the `from < 7` step below drops again, and its drift table
+      // object no longer exists in the generated code.
       if (from < 5) {
         // "Iniciar rota" left the outbox: it is an online call now (spec
         // 2026-10-20-alocacao-automatica §9). A queued `startRoute` row would
@@ -186,6 +160,12 @@ class AppDatabase extends _$AppDatabase {
         // old build never recorded which stop the server named.
         await m.addColumn(pendingOperations, pendingOperations.releasedStopId);
         await m.createTable(releasedStops);
+      }
+      if (from < 7) {
+        // Forms left the app (spec 2026-10-26-exige-evidencias §6.4). The
+        // outbox is untouched: a check-out queued with form fields is sent
+        // without them (SyncWorker._performCheckOut).
+        await m.deleteTable('form_draft_items');
       }
     },
   );

@@ -118,7 +118,7 @@ void main() {
     // make `PendingOpKind.values.byName` throw on the next drain.
     final store = DriftLocalWriteStore(db);
     expect(await store.unsyncedForRoute('route-1'), hasLength(1));
-    expect(db.schemaVersion, 6);
+    expect(db.schemaVersion, 7);
   });
 
   test(

@@ -145,26 +145,12 @@ void main() {
       expect(route.doneToday, 1);
     });
 
-    test("parses a stop's service type and form when present", () async {
+    test("parses a stop's service type when present", () async {
       final route = _routePayload();
       final stops = (route['stops'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
       stops[2]['service_type_id'] = 'st1';
       stops[2]['service_type_name'] = 'Limpeza';
-      stops[2]['form'] = {
-        'form_version_id': 'v1',
-        'questions': [
-          {
-            'stable_key': 'k1',
-            'order_index': 0,
-            'prompt': 'p',
-            'question_type': 'TEXT',
-            'required': true,
-            'options': <String>[],
-            'content_hash': 'h1',
-          },
-        ],
-      };
       final repository = DioRouteRepository(
         _dioAnswering(200, _myDayPayload(route: route)),
       );
@@ -173,8 +159,6 @@ void main() {
 
       expect(stop.serviceTypeId, 'st1');
       expect(stop.serviceTypeName, 'Limpeza');
-      expect(stop.form!.formVersionId, 'v1');
-      expect(stop.form!.questions.single.stableKey, 'k1');
     });
   });
 

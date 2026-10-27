@@ -271,8 +271,6 @@ class _AcceptingExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-    String? formVersionId,
-    List<Map<String, Object?>>? answers,
   }) => throw UnimplementedError();
 
   @override

@@ -63,10 +63,9 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
   /// Fire-and-forget: a trigger asks the worker to drain, it does not wait for
   /// the pass. `SyncWorker` already guards against overlapping drains.
   ///
-  /// Also invalidates `myDayProvider` (Task 14) so a resume/reconnect
-  /// re-fetches the day — which in turn feeds `formReconciliationProvider`
-  /// fresh `FormSchema`s to diff local drafts against (RF39/RF40), and lets
-  /// the next-batch controller see a batch finished while the app was away.
+  /// Also invalidates `myDayProvider` so a resume/reconnect re-fetches the
+  /// day, which lets the next-batch controller see a batch finished while
+  /// the app was away.
   /// Gated on `Connectivity.isOnline`: a re-fetch while offline only falls
   /// back to the device snapshot, or — with none saved — throws, and
   /// `route_screen.dart`'s error branch would replace the whole,

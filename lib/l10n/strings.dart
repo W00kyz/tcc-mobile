@@ -106,13 +106,7 @@ abstract final class AppStrings {
   static const String routeViewMapButton = 'Ver no mapa';
   static const String routeStartButton = 'Iniciar rota';
   static const String routeCheckInButton = 'Fazer check-in';
-  static const String formMediaTakePhoto = 'Tirar foto';
-  static const String formMediaRemove = 'Remover foto';
-  static const String formMediaLimit = 'Limite de 10 fotos por pergunta.';
   static const String routeConcludeButton = 'Concluir';
-  static const String routeFillFormButton = 'Preencher formulário';
-  static const String routeFormIncompleteHint =
-      'Preencha o formulário para concluir.';
   static const String routeSignalImpossibilityButton =
       'Sinalizar impossibilidade';
   static const String routeNotificationsTooltip = 'Notificações';
@@ -328,19 +322,8 @@ abstract final class AppStrings {
     _ => appealSendError,
   };
 
-  // --- form screen ---
-  static const String formAppBarTitle = 'Formulário';
-  static const String formLoadError = 'Não foi possível carregar o formulário.';
-  static const String formQuestionChanged =
-      'Esta pergunta mudou — responda de novo.';
-  static const String formComplete = 'Formulário completo';
+  // --- evidence note dialog ---
   static const String formAddNoteDialogTitle = 'Adicionar observação';
-
-  /// A required question's prompt, suffixed `(obrigatória)`.
-  static String formRequiredPrompt(String prompt) => '$prompt (obrigatória)';
-
-  /// `<n> pendências` remaining in the draft footer.
-  static String formPending(int n) => '$n pendências';
 
   // --- notifications screen ---
   static const String notificationsAppBarTitle = 'Notificações';
