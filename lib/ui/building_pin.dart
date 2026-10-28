@@ -12,7 +12,7 @@ String truncateLabel(String name) => name.length <= _maxLabelChars
     ? name
     : '${name.substring(0, _maxLabelChars - 1)}…';
 
-/// A building on the map: a 40dp circle with `done/total` and the name beside.
+/// A building on the map: a 40dp circle with `done/total` and the name above.
 /// The map hides the name when zoomed out ([showLabel] false); the circle and
 /// its count always stay.
 class BuildingPin extends StatelessWidget {
@@ -36,15 +36,17 @@ class BuildingPin extends StatelessWidget {
     final p = Theme.of(context).extension<FieldPalette>()!;
     return Opacity(
       opacity: dimmed ? 0.4 : 1,
-      child: Row(
+      // The name sits above the circle, so the circle stays on the route line
+      // and neighbouring pins' names do not run into each other sideways.
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (showLabel) ...[_label(p), const SizedBox(height: 4)],
           // Zoomed out, the name is not drawn but still read aloud.
           if (showLabel)
             _circle(p)
           else
             Semantics(label: group.buildingName, child: _circle(p)),
-          if (showLabel) ...[const SizedBox(width: 6), _label(p)],
         ],
       ),
     );

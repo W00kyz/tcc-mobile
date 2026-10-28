@@ -10,12 +10,14 @@ import 'package:route_monitor/ui/building_pin.dart';
 // What [CampusMap] draws over the base map: legs, building pins, the
 // worker's dot and the "trajeto aproximado" caption.
 
-/// Wide enough for the 40dp circle plus a 16-character label on its right.
-const double _pinMarkerWidth = 280;
-const double _pinMarkerHeight = 56;
+/// Wide enough for a 16-character label centred over the circle; tall enough
+/// for that label, a 4dp gap and the 48dp padded circle.
+const double _pinMarkerWidth = 200;
+const double _pinMarkerHeight = 80;
 
-/// The circle's centre inside the marker box: the point it stands on.
-const double _pinCircleCenterX = 24;
+/// The circle's centre inside the marker box: the point it stands on (the
+/// bottom-centre circle, 4dp padding plus half its 40dp).
+const double _pinCircleCenterY = _pinMarkerHeight - 24;
 
 /// A leg's stroke (redesign §6.3): walked in `rule`, the next one thicker
 /// in moss, the rest in ink. A straight approximation stays dashed.
@@ -35,8 +37,8 @@ Polyline legPolyline(RouteMapLeg leg, FieldPalette p) {
   );
 }
 
-/// A building's pin, standing on the mean of its stops; the label hangs to
-/// the right of the circle, like Google Maps' place labels.
+/// A building's pin, standing on the mean of its stops; the label sits above
+/// the circle, so the circle itself marks the spot on the route.
 Marker buildingMarker(
   BuildingGroup group, {
   required bool selected,
@@ -52,11 +54,11 @@ Marker buildingMarker(
     alignment: Marker.computePixelAlignment(
       width: _pinMarkerWidth,
       height: _pinMarkerHeight,
-      left: _pinCircleCenterX,
-      top: _pinMarkerHeight / 2,
+      left: _pinMarkerWidth / 2,
+      top: _pinCircleCenterY,
     ),
     child: Align(
-      alignment: Alignment.centerLeft,
+      alignment: Alignment.bottomCenter,
       child: GestureDetector(
         key: ValueKey('pin-${group.buildingId}'),
         behavior: HitTestBehavior.opaque,

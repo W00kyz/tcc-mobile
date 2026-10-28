@@ -96,7 +96,8 @@ void main() {
           (c) => c.decoration,
         )
         .whereType<BoxDecoration>()
-        .first;
+        // The label (above) is a box too; the pin is the circle.
+        .firstWhere((d) => d.shape == BoxShape.circle);
     expect(box.color, FieldPalette.light.moss);
   });
 
@@ -123,5 +124,13 @@ void main() {
     expect(find.text('1/3'), findsOneWidget);
     expect(find.text('Central de Aulas'), findsNothing);
     expect(find.bySemanticsLabel(RegExp('Central de Aulas')), findsOneWidget);
+  });
+
+  testWidgets('the name sits above the circle', (t) async {
+    await t.pumpWidget(host(BuildingPin(group: group('Central de Aulas'))));
+    final label = t.getRect(find.text('Central de Aulas'));
+    final count = t.getRect(find.text('1/3'));
+    expect(label.bottom, lessThanOrEqualTo(count.top));
+    expect(label.center.dx, closeTo(count.center.dx, 1));
   });
 }
