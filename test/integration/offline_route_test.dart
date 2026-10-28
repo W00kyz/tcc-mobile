@@ -43,7 +43,7 @@ import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
-import '../routing/map_home_harness.dart' show closeStopSheet, openStopSheet;
+import '../routing/map_home_harness.dart' show slotOf;
 import '../routing/no_tiles_tile_provider.dart';
 import '../support/fake_sync_notification_taps.dart';
 import '../support/in_memory_database.dart';
@@ -194,10 +194,8 @@ void main() {
       expect(find.text(AppStrings.dayProgress(2, 2, 3)), findsOneWidget);
       expect(_nextBatchOfflinePanel(), findsNothing);
       expect(find.byTooltip(AppStrings.routeAllSynced), findsOneWidget);
-      // Its stop reads on the sheet its card slot opens.
-      await openStopSheet(tester, 's3');
-      expect(find.text('Sala 201'), findsOneWidget);
-      await closeStopSheet(tester);
+      // Its stop reads on the floor card.
+      expect(slotOf('s3'), findsOneWidget);
 
       // ---- Idempotent re-drain -----------------------------------------
       await fixture.worker.syncAll();
@@ -506,9 +504,9 @@ void main() {
         expect(parked.single.releasedStopId, _stop1);
         final held = await fixture.store.unsyncedForRoute(_routeId);
         expect(held.single.kind, PendingOpKind.checkOut);
-        // A paused day draws no sync slot: the blocked-sync screen is out
-        // of reach, so /recursos is the way out.
-        expect(find.text(AppStrings.routePausedTitle), findsOneWidget);
+        // A paused day draws no sync slot (only "Retomar" over the map): the
+        // blocked-sync screen is out of reach, so /recursos is the way out.
+        expect(find.text(AppStrings.dayResumeButton), findsOneWidget);
         expect(find.byTooltip(AppStrings.routeSyncBlockedBanner), findsNothing);
         // The snackbar offered the appeal too; this test takes the other
         // road, so it is put away (it would sit over the form's button).

@@ -50,7 +50,7 @@ List<double> mapSheetSnaps(
 /// [body], and an optional [stickyFooter] that never scrolls away — "Escanear
 /// QR" must stay on screen at every height (spec §5 anti-goal).
 ///
-///     MapSheet(header: NextStopRow(...), body: card, stickyFooter: scanButton)
+///     MapSheet(header: header, body: card, stickyFooter: scanFooter)
 class MapSheet extends StatefulWidget {
   const MapSheet({
     required this.header,

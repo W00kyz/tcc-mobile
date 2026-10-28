@@ -122,7 +122,11 @@ stopSyncChipProvider =
       final (routeId, routeStopId) = key;
       final store = ref.watch(localWriteStoreProvider);
       final blocked = await store.blockedForRoute(routeId);
-      final unsynced = await store.unsyncedForRoute(routeId);
+      // A `held` photo waits for the worker's stamp, not for the network:
+      // it must not read as "aguardando envio".
+      final unsynced = (await store.unsyncedForRoute(
+        routeId,
+      )).where((row) => row.state != PendingOpState.held);
       final progress = await ref.watch(
         stopProgressForProvider(routeStopId).future,
       );

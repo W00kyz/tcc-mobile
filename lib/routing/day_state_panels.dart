@@ -12,9 +12,9 @@ import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
-// What the home sheet shows outside a batch in progress (redesign §6.10):
-// no service, no route yet, paused, done, load error, and a finished batch
-// waiting for the network.
+// What the home shows outside a route being worked (redesign §6.10): no
+// service, the start bar (no route yet, paused), done, load error, the
+// loading skeleton, and a finished batch waiting for the network.
 
 /// "Hoje não tem serviço para você": no card, no start.
 class NoServicePanel extends StatelessWidget {
@@ -25,36 +25,42 @@ class NoServicePanel extends StatelessWidget {
       const _Panel(title: AppStrings.dayNoService);
 }
 
-/// No route yet: "Iniciar rota" asks for the first batch.
-class StartDayPanel extends StatelessWidget {
-  const StartDayPanel({super.key});
+/// Before the route starts and while it is paused: no sheet over the map,
+/// only the start button anchored at the bottom — a 56dp pill with a 16dp
+/// gutter, above the system bar. "Iniciar rota" asks for the first batch,
+/// "Retomar" resumes a paused route with a new one.
+///
+///     const StartDayBar(label: AppStrings.routeStartButton)
+class StartDayBar extends StatelessWidget {
+  const StartDayBar({required this.label, super.key});
 
-  @override
-  Widget build(BuildContext context) => const _Panel(
-    action: StartDayButton(label: AppStrings.routeStartButton),
-  );
-}
-
-/// "Rota pausada" + why + "Retomar", which resumes the route with a new
-/// batch.
-class PausedPanel extends StatelessWidget {
-  const PausedPanel({this.releaseReason, super.key});
-
-  /// The `release_reason` code behind the pause, when known.
-  final String? releaseReason;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    final reason = releaseReason;
-    return _Panel(
-      title: AppStrings.routePausedTitle,
-      lines: [
-        if (reason != null)
-          AppStrings.routePausedReason(AppStrings.releaseReasonLabel(reason)),
-      ],
-      action: const StartDayButton(label: AppStrings.dayResumeButton),
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.only(bottom: 16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: StartDayButton(label: label),
+        ),
+      ),
     );
   }
+}
+
+/// How high [StartDayBar] reaches from the screen's bottom edge, system bar
+/// included: what "Minha posição" must clear.
+///
+///     bottom: startDayBarHeight(context) + 16
+double startDayBarHeight(BuildContext context) {
+  final inset = MediaQuery.paddingOf(context).bottom;
+  return (inset > 16 ? inset : 16) + 56;
 }
 
 /// "Dia concluído" + the day's count + "Verificar de novo". Not final before
@@ -223,3 +229,22 @@ String? _startOutcomeMessage(AllocationOutcome outcome) => switch (outcome) {
   AllocationOutcome.locationUnavailable => AppStrings.routeLocationUnavailable,
   AllocationOutcome.failed => AppStrings.routeStartFailed,
 };
+
+/// While the day loads: the card's shape, empty (spec §6.10).
+class CardSkeleton extends StatelessWidget {
+  const CardSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    return Container(
+      height: 160,
+      margin: const EdgeInsets.only(top: 8),
+      decoration: BoxDecoration(
+        color: p.card,
+        border: Border.all(color: p.rule),
+        borderRadius: BorderRadius.circular(16),
+      ),
+    );
+  }
+}

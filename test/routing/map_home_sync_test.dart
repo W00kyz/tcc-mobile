@@ -7,6 +7,7 @@ import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_status.dart';
+import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_connectivity.dart';
 import '../support/fake_route_repository.dart';
@@ -41,9 +42,9 @@ RouteSyncStatus _statusOf({
   blocked: blocked,
 );
 
-/// The outbox chip of a stop row — not the "Pendente" state word. The row
-/// is on the stop's sheet, opened from its card slot.
-Finder _chip(String label) => find.widgetWithText(Chip, label);
+/// Whether [stopId]'s slot carries the "aguardando envio" cloud mark.
+bool _pendingSync(WidgetTester tester, String stopId) =>
+    tester.widget<StampSlot>(slotOf(stopId)).slot.pendingSync;
 
 void main() {
   group('the sync slot', () {
@@ -144,10 +145,10 @@ void main() {
     });
   });
 
-  group('the per-stop outbox chip', () {
+  group('the per-stop outbox mark', () {
     testWidgets(
-      'a stop with a pending check-in row shows "Pendente"; a stop with no '
-      'rows shows none',
+      'a stop with a pending check-in row is marked "aguardando envio"; a '
+      'stop with no rows is not',
       (tester) async {
         final store = InMemoryLocalWriteStore();
         await store.enqueue(
@@ -171,19 +172,14 @@ void main() {
           ),
         );
 
-        await openStopSheet(tester, 's1');
-        expect(_chip(AppStrings.routeChipPending), findsOneWidget);
-        expect(_chip(AppStrings.routeChipBlocked), findsNothing);
-        await closeStopSheet(tester);
-
-        await openStopSheet(tester, 's2');
-        expect(find.byType(Chip), findsNothing);
+        expect(_pendingSync(tester, 's1'), isTrue);
+        expect(_pendingSync(tester, 's2'), isFalse);
       },
     );
 
     testWidgets(
       'a stop with a pending evidence row (matched by its StopProgress '
-      'executionId) shows "Pendente"',
+      'executionId) is marked',
       (tester) async {
         final store = InMemoryLocalWriteStore();
         await store.enqueue(
@@ -204,13 +200,39 @@ void main() {
             localWriteStore: store,
           ),
         );
-        await openStopSheet(tester, 's1');
 
-        expect(_chip(AppStrings.routeChipPending), findsOneWidget);
+        expect(_pendingSync(tester, 's1'), isTrue);
       },
     );
 
-    testWidgets('a stop whose only outbox row is blocked shows "Bloqueado"', (
+    testWidgets('a held photo waits on the stamp, not the network: no mark', (
+      tester,
+    ) async {
+      final store = InMemoryLocalWriteStore();
+      await store.enqueue(
+        id: 'op-photo',
+        kind: PendingOpKind.evidencePhoto,
+        routeId: 'r1',
+        payload: {'execution_id': 'exec-1'},
+        initialState: PendingOpState.held,
+      );
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(
+            routeWith(
+              stops: [stopIn(id: 's1', status: 'IN_PROGRESS')],
+            ),
+          ),
+          stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
+          localWriteStore: store,
+        ),
+      );
+
+      expect(_pendingSync(tester, 's1'), isFalse);
+    });
+
+    testWidgets('a stop whose only outbox row is blocked is marked too', (
       tester,
     ) async {
       final store = InMemoryLocalWriteStore();
@@ -225,43 +247,8 @@ void main() {
         tester,
         homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
       );
-      await openStopSheet(tester, 's1');
 
-      expect(_chip(AppStrings.routeChipBlocked), findsOneWidget);
-      expect(_chip(AppStrings.routeChipPending), findsNothing);
-    });
-
-    testWidgets('blocked wins pending', (tester) async {
-      final store = InMemoryLocalWriteStore();
-      await store.enqueue(
-        id: 'op-checkin',
-        kind: PendingOpKind.checkIn,
-        routeId: 'r1',
-        payload: {'route_stop_id': 's1'},
-      );
-      await store.markBlocked('op-checkin', 'HTTP 422');
-      await store.enqueue(
-        id: 'op-photo',
-        kind: PendingOpKind.evidencePhoto,
-        routeId: 'r1',
-        payload: {'execution_id': 'exec-1'},
-      );
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(
-            routeWith(
-              stops: [stopIn(id: 's1', status: 'IN_PROGRESS')],
-            ),
-          ),
-          stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
-          localWriteStore: store,
-        ),
-      );
-      await openStopSheet(tester, 's1');
-
-      expect(_chip(AppStrings.routeChipBlocked), findsOneWidget);
-      expect(_chip(AppStrings.routeChipPending), findsNothing);
+      expect(_pendingSync(tester, 's1'), isTrue);
     });
   });
 
@@ -293,30 +280,31 @@ void main() {
     }
 
     testWidgets(
-      'checking out the last open stop delivers it and pulls the next batch',
+      'the exit scan of the last open stop delivers it and pulls the next '
+      'batch',
       (tester) async {
         final store = InMemoryLocalWriteStore();
         final repository = repositoryWith(lastStopInProgress());
         handOutSecondBatch(repository);
+        final progress = FakeStopProgressStore({'s1': 'exec-1'});
+        await progress.markStamped('s1');
         await pumpHome(
           tester,
           homeWith(
             repository,
             localWriteStore: store,
-            stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
+            stopProgressStore: progress,
             syncWorker: RecordingSyncWorker(drains: store),
           ),
         );
         expect(repository.allocationCalls, isEmpty);
 
-        await concludeWith(tester, 'v1.floor.1.sig');
-        await tester.pumpAndSettle();
+        await scanWith(tester, qrOf('Térreo'));
 
         expect(repository.allocationCalls, ['nextBatch:r1']);
         expect(await store.unsyncedForRoute('r1'), isEmpty);
         expect(find.text(AppStrings.dayProgress(2, 1, 2)), findsOneWidget);
-        await openStopSheet(tester, 's2');
-        expect(find.text('Sala 202'), findsOneWidget);
+        expect(slotOf('s2'), findsOneWidget);
       },
     );
 
@@ -347,8 +335,7 @@ void main() {
 
         expect(repository.allocationCalls, ['nextBatch:r1']);
         expect(nextBatchOfflinePanel(), findsNothing);
-        await openStopSheet(tester, 's2');
-        expect(find.text('Sala 202'), findsOneWidget);
+        expect(slotOf('s2'), findsOneWidget);
       },
     );
 
@@ -455,8 +442,7 @@ void main() {
 
         expect(worker.syncAllCount, 1);
         expect(repository.allocationCalls, ['nextBatch:r1']);
-        await openStopSheet(tester, 's2');
-        expect(find.text('Sala 202'), findsOneWidget);
+        expect(slotOf('s2'), findsOneWidget);
       },
     );
   });

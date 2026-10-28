@@ -13,9 +13,10 @@ import 'package:route_monitor/gamification/streak.dart';
 import 'package:route_monitor/local/day_log_store.dart' show dayKey;
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/floor_actions.dart'
+    show lastStampedStopProvider;
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
-import 'package:route_monitor/routing/stop_actions.dart';
 
 /// The map home's gamification hooks (redesign §6.8): logs each day the
 /// worker's day is read, and opens the full card once the stamp that

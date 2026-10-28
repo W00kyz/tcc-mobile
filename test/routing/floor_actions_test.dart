@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/checkin/checkin_providers.dart';
-import 'package:route_monitor/checkin/qr_verifier.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
@@ -18,23 +17,12 @@ import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/floor_actions.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
-import 'package:route_monitor/routing/stop_actions.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../support/fake_day_log_store.dart';
 import '../support/in_memory_database.dart';
 import 'map_home_fakes.dart';
-
-/// Accepts any `v1.<floor>.<n>.<sig>` string, with no signature check.
-class _FakeQrVerifier implements QrVerifier {
-  @override
-  Future<QrPayload?> verify(String payload) async {
-    final parts = payload.split('.');
-    if (parts.length != 4 || parts[0] != 'v1') return null;
-    return QrPayload(floorId: parts[1], version: 1);
-  }
-}
 
 RouteStopSummary _stop(
   String id,
@@ -102,7 +90,7 @@ void main() {
           stopProgressStoreProvider.overrideWithValue(progress),
           syncWorkerProvider.overrideWithValue(worker),
           executionRepositoryProvider.overrideWithValue(repository),
-          qrVerifierProvider.overrideWithValue(_FakeQrVerifier()),
+          qrVerifierProvider.overrideWithValue(FakeQrVerifier()),
           locationServiceProvider.overrideWithValue(FakeLocationService()),
         ],
         child: MaterialApp(

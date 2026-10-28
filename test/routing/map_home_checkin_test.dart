@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
+import 'package:route_monitor/routing/batch_card_model.dart' show SlotState;
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
 
-// Ported from the deleted route_screen_test.dart: "Escanear QR" (check-in
-// with on-device room resolution) and the silence clock, now driven from
-// the map home.
+// Ported from the deleted route_screen_test.dart: "Escanear QR" (one floor
+// scan checks in every open task of that floor) and the silence clock, now
+// driven from the map home.
 
 RouteSummary _pendingRoute() => routeWith(stops: [stopIn(id: 's1')]);
 
@@ -18,46 +21,16 @@ RouteSummary _inProgressStopRoute() => routeWith(
   stops: [stopIn(id: 's1', status: 'IN_PROGRESS')],
 );
 
-// The GPS fix FakeLocationService reports; the stops below are positioned
-// relative to it so the offline room resolution (spec Ruling 4) lands on a
-// known branch.
-RouteSummary _oneRoomInRadiusRoute() => routeWith(
+/// Two tasks on the Térreo and one on the 1º andar of the same building.
+RouteSummary _twoFloorsRoute() => routeWith(
   stops: [
-    stopIn(
-      id: 's1',
-      servicePointName: 'Sala 101',
-      latitude: -7.23,
-      longitude: -35.88,
-    ),
-    // ~2.5 km away — well outside the 50 m check radius.
-    stopIn(
-      id: 's2',
-      orderIndex: 2,
-      servicePointName: 'Sala 102',
-      latitude: -7.25,
-      longitude: -35.90,
-    ),
+    stopIn(id: 's1'),
+    stopIn(id: 's2', orderIndex: 2),
+    stopIn(id: 's3', orderIndex: 3, floorLabel: '1º andar'),
   ],
 );
 
-RouteSummary _twoRoomsInRadiusRoute() => routeWith(
-  stops: [
-    stopIn(
-      id: 's1',
-      servicePointName: 'Sala 101',
-      latitude: -7.23,
-      longitude: -35.88,
-    ),
-    // ~11 m from the GPS fix — inside the radius, but farther than s1.
-    stopIn(
-      id: 's2',
-      orderIndex: 2,
-      servicePointName: 'Sala 102',
-      latitude: -7.2301,
-      longitude: -35.88,
-    ),
-  ],
-);
+final String _terreoQr = qrOf('Térreo');
 
 void main() {
   group('the scan button', () {
@@ -85,8 +58,8 @@ void main() {
     });
 
     testWidgets(
-      'hides when the only remaining stop is already IN_PROGRESS (checked '
-      'in, awaiting checkout — Task 18), not PENDING',
+      'turns into the exit scan when the only remaining stop is already '
+      'IN_PROGRESS (checked in, awaiting checkout — Task 18)',
       (tester) async {
         // Regression: _canCheckIn used to accept any stop.status != 'DONE',
         // so it stayed visible here — the backend has no PENDING candidate
@@ -98,6 +71,7 @@ void main() {
         );
 
         expect(scanQrButton(), findsNothing);
+        expect(find.text(AppStrings.scanExitQrButton), findsOneWidget);
       },
     );
   });
@@ -111,16 +85,15 @@ void main() {
         homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
       );
 
-      await scanWith(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
+      await scanWith(tester, _terreoQr);
 
       final rows = await store.unsyncedForRoute('r1');
       expect(rows, hasLength(1));
       expect(rows.single.kind, PendingOpKind.checkIn);
-      expect(rows.single.payload['qr_payload'], 'v1.floor.1.sig');
+      expect(rows.single.payload['qr_payload'], _terreoQr);
       expect(rows.single.payload['latitude'], -7.23);
       expect(rows.single.payload['longitude'], -35.88);
-      expect(find.text(AppStrings.routeCheckInDone), findsOneWidget);
+      expect(find.text(AppStrings.floorCheckInDone(1)), findsOneWidget);
     },
   );
 
@@ -134,7 +107,6 @@ void main() {
     );
 
     await scanWith(tester, null);
-    await tester.pumpAndSettle();
 
     expect(await store.unsyncedForRoute('r1'), isEmpty);
     expect(scanQrButton(), findsOneWidget);
@@ -154,7 +126,9 @@ void main() {
         ),
       );
 
-      await scanWith(tester, 'v1.floor.1.sig');
+      await tester.tap(scanFooterButton());
+      await tester.pumpAndSettle();
+      Navigator.of(tester.element(find.byType(ScanScreen))).pop(_terreoQr);
       // A single pump catches the GPS-failure snackbar before the queued
       // success snackbar replaces it — asserting the final state here would
       // race the ScaffoldMessenger's own dismiss timer.
@@ -168,122 +142,42 @@ void main() {
       await tester.pumpAndSettle();
       final rows = await store.unsyncedForRoute('r1');
       expect(rows, hasLength(1));
-      expect(rows.single.payload['qr_payload'], 'v1.floor.1.sig');
+      expect(rows.single.payload['qr_payload'], _terreoQr);
       expect(rows.single.payload['latitude'], isNull);
       expect(rows.single.payload['longitude'], isNull);
     },
   );
 
-  testWidgets(
-    'check-in with GPS placing one pending stop in radius resolves to it and '
-    'enqueues that routeStopId',
-    (tester) async {
-      final store = InMemoryLocalWriteStore();
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(_oneRoomInRadiusRoute()),
-          localWriteStore: store,
-        ),
-      );
-
-      await scanWith(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
-
-      expect(find.text(AppStrings.roomPickerPrompt), findsNothing);
-      final rows = await store.unsyncedForRoute('r1');
-      expect(rows, hasLength(1));
-      expect(rows.single.kind, PendingOpKind.checkIn);
-      expect(rows.single.payload['route_stop_id'], 's1');
-      expect(find.text(AppStrings.routeCheckInDone), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'check-in with two pending stops in radius shows the picker sheet '
-    '(nearest pre-selected); choosing the second enqueues its routeStopId',
-    (tester) async {
-      final store = InMemoryLocalWriteStore();
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(_twoRoomsInRadiusRoute()),
-          localWriteStore: store,
-        ),
-      );
-
-      await scanWith(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
-
-      expect(find.text(AppStrings.roomPickerPrompt), findsOneWidget);
-      // Scope to the sheet — the stop list behind it also renders a
-      // "Sala 102" row.
-      await tester.tap(
-        find.descendant(
-          of: find.byType(BottomSheet),
-          matching: find.text('Sala 102'),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
-      await tester.pumpAndSettle();
-
-      final rows = await store.unsyncedForRoute('r1');
-      expect(rows, hasLength(1));
-      expect(rows.single.payload['route_stop_id'], 's2');
-      expect(find.text(AppStrings.routeCheckInDone), findsOneWidget);
-    },
-  );
-
-  testWidgets('dismissing the room picker enqueues nothing and shows no '
-      'snackbar', (tester) async {
+  testWidgets('one floor scan checks in every open task of that floor and '
+      'none of another', (tester) async {
     final store = InMemoryLocalWriteStore();
     await pumpHome(
       tester,
-      homeWith(
-        repositoryWith(_twoRoomsInRadiusRoute()),
-        localWriteStore: store,
-      ),
+      homeWith(repositoryWith(_twoFloorsRoute()), localWriteStore: store),
     );
 
-    await scanWith(tester, 'v1.floor.1.sig');
-    await tester.pumpAndSettle();
+    await scanWith(tester, _terreoQr);
 
-    await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
-    await tester.pumpAndSettle();
-
-    expect(await store.unsyncedForRoute('r1'), isEmpty);
-    expect(find.text(AppStrings.routeCheckInDone), findsNothing);
+    final rows = await store.unsyncedForRoute('r1');
+    expect(rows.map((row) => row.kind).toSet(), {PendingOpKind.checkIn});
+    expect(rows.map((row) => row.payload['route_stop_id']), ['s1', 's2']);
+    expect(find.text(AppStrings.floorCheckInDone(2)), findsOneWidget);
   });
 
-  testWidgets(
-    'no GPS with a single pending stop resolves to it and enqueues the '
-    'check-in with a null distance',
-    (tester) async {
-      final store = InMemoryLocalWriteStore();
-      // A single PENDING stop — with no GPS the resolution falls to the
-      // "lone pending stop resolves anyway" path (Ruling 4 /
-      // validation.py:117).
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(_pendingRoute()),
-          locationService: FailingLocationService(),
-          localWriteStore: store,
-        ),
-      );
+  testWidgets('a QR of a floor with no open task enqueues nothing', (
+    tester,
+  ) async {
+    final store = InMemoryLocalWriteStore();
+    await pumpHome(
+      tester,
+      homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
+    );
 
-      await scanWith(tester, 'v1.floor.1.sig');
-      await tester.pump();
-      await tester.pumpAndSettle();
+    await scanWith(tester, qrOf('elsewhere'));
 
-      expect(find.text(AppStrings.roomPickerPrompt), findsNothing);
-      final rows = await store.unsyncedForRoute('r1');
-      expect(rows, hasLength(1));
-      expect(rows.single.payload['route_stop_id'], 's1');
-      expect(rows.single.payload['latitude'], isNull);
-    },
-  );
+    expect(await store.unsyncedForRoute('r1'), isEmpty);
+    expect(find.text(AppStrings.floorHasNoOpenTasks), findsOneWidget);
+  });
 
   group('the silence clock (spec §7.3)', () {
     final t0 = DateTime.utc(2026, 10, 20, 8);
@@ -312,8 +206,7 @@ void main() {
       );
       now = t0.add(const Duration(minutes: 29));
 
-      await scanWith(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
+      await scanWith(tester, _terreoQr);
 
       now = t0.add(const Duration(minutes: 31));
       expect(watchdog.currentWarning(), isNotNull);
@@ -322,17 +215,24 @@ void main() {
     testWidgets('a check-out written locally does not reset the clock', (
       tester,
     ) async {
+      // s1 checked in and stamped: the floor's exit scan is open.
+      final progress = FakeStopProgressStore({'s1': 'exec-1'});
+      await progress.markStamped('s1');
+      final store = InMemoryLocalWriteStore();
       await pumpHome(
         tester,
         homeWith(
           repositoryWith(_inProgressStopRoute()),
           silenceWatchdog: watchdog,
+          stopProgressStore: progress,
+          localWriteStore: store,
         ),
       );
       now = t0.add(const Duration(minutes: 29));
 
-      await concludeWith(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
+      await scanWith(tester, _terreoQr);
+      final kinds = (await store.unsyncedForRoute('r1')).map((r) => r.kind);
+      expect(kinds, [PendingOpKind.checkOut]);
 
       now = t0.add(const Duration(minutes: 31));
       expect(watchdog.currentWarning(), isNotNull);
@@ -349,18 +249,62 @@ void main() {
     });
   });
 
-  testWidgets('the in-progress block shows after an offline check-in', (
+  testWidgets('the floor reads checked in after an offline check-in', (
     tester,
   ) async {
     // RecordingSyncWorker never delivers: the server still says PENDING,
     // only the device's own progress row says the stop is open.
-    await pumpHome(tester, homeWith(repositoryWith(_oneRoomInRadiusRoute())));
-    expect(blockConcludeButton(), findsNothing);
+    await pumpHome(tester, homeWith(repositoryWith(_pendingRoute())));
+    expect(find.text(AppStrings.scanExitQrButton), findsNothing);
 
-    await scanWith(tester, 'v1.floor.1.sig');
-    await tester.pumpAndSettle();
+    await scanWith(tester, _terreoQr);
 
-    expect(blockConcludeButton(), findsOneWidget);
-    expect(blockTakePhotosButton(), findsOneWidget);
+    expect(find.text(AppStrings.scanExitQrButton), findsOneWidget);
+    expect(
+      tester.widget<StampSlot>(slotOf('s1')).slot.state,
+      SlotState.inProgress,
+    );
+  });
+
+  testWidgets('runs the exit scan end-to-end: checks out the stamped task, '
+      'reloads the day and shows success', (tester) async {
+    final progress = FakeStopProgressStore({'s1': 'exec-1'});
+    await progress.markStamped('s1', observation: 'pia entupida');
+    final store = InMemoryLocalWriteStore();
+    final repository = repositoryWith(_inProgressStopRoute());
+    await pumpHome(
+      tester,
+      homeWith(repository, localWriteStore: store, stopProgressStore: progress),
+    );
+    expect(repository.fetchCount, 1);
+
+    await scanWith(tester, _terreoQr);
+
+    final rows = await store.unsyncedForRoute('r1');
+    expect(rows, hasLength(1));
+    expect(rows.single.kind, PendingOpKind.checkOut);
+    expect(rows.single.payload['qr_payload'], _terreoQr);
+    expect(rows.single.payload['route_stop_id'], 's1');
+    expect(rows.single.payload['complaints_suggestions'], 'pia entupida');
+    expect(find.text(AppStrings.floorCheckOutDone), findsOneWidget);
+    expect(repository.fetchCount, 2);
+  });
+
+  testWidgets('a local IN_PROGRESS row overrides a server PENDING stop', (
+    tester,
+  ) async {
+    await pumpHome(
+      tester,
+      homeWith(
+        repositoryWith(_pendingRoute()),
+        stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
+      ),
+    );
+
+    expect(
+      tester.widget<StampSlot>(slotOf('s1')).slot.state,
+      SlotState.inProgress,
+    );
+    expect(find.text(AppStrings.scanExitQrButton), findsOneWidget);
   });
 }

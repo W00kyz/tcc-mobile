@@ -7,6 +7,7 @@ import 'package:route_monitor/appeals/appeal_api.dart';
 import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
+import 'package:route_monitor/checkin/checkin_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_camera.dart';
@@ -33,7 +34,7 @@ import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:route_monitor/ui/app_theme.dart';
-import 'package:route_monitor/ui/batch_card.dart';
+import 'package:route_monitor/ui/floor_card.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../appeals/fake_appeal_api.dart';
@@ -99,6 +100,8 @@ Widget homeWith(
       locationServiceProvider.overrideWithValue(
         locationService ?? FakeLocationService(),
       ),
+      // A floor scan verifies its QR first: any `v1.<floor>.<n>.<sig>` here.
+      qrVerifierProvider.overrideWithValue(FakeQrVerifier()),
       // The live first leg asks the server once a position is known.
       approachApiProvider.overrideWithValue(approachApi ?? FakeApproachApi()),
       // Online unless a test says otherwise: the next-batch controller the
@@ -187,52 +190,30 @@ Future<void> tapInSheet(WidgetTester tester, Finder finder) async {
   await tester.pumpAndSettle();
 }
 
-/// The card slot of [stopId] in the sheet's carousel.
+/// The task slot of [stopId] on the floor card.
 Finder slotOf(String stopId) => find.byWidgetPredicate(
   (widget) => widget is StampSlot && widget.slot.stopId == stopId,
 );
 
-/// Taps [stopId]'s slot on the card and lets its stop sheet open: the
-/// stop's actions live there now, not in a list under the card.
-Future<void> openStopSheet(WidgetTester tester, String stopId) async {
-  await tapInSheet(tester, slotOf(stopId));
-  expect(stopSheet(), findsOneWidget, reason: 'stop sheet of $stopId');
-}
-
-/// The carousel's page, settled: the index of the batch card shown.
-double? carouselPage(WidgetTester tester) => tester
-    .widget<PageView>(find.byKey(const ValueKey('batch-card-carousel')))
-    .controller
-    ?.page;
-
 /// The pin of [buildingId], teardrop and name: a tap anywhere on it selects.
 Finder pinCircle(String buildingId) => find.byKey(ValueKey('pin-$buildingId'));
 
-/// The carousel's card nearest the centre of the screen: the one shown.
-BatchCardView shownCard(WidgetTester tester) {
-  final centre = tester.getCenter(find.byType(MapHomeScreen)).dx;
-  final cards = find.byType(BatchCardView).evaluate().toList()
-    ..sort(
-      (a, b) => (tester.getCenter(find.byWidget(a.widget)).dx - centre)
-          .abs()
-          .compareTo(
-            (tester.getCenter(find.byWidget(b.widget)).dx - centre).abs(),
-          ),
-    );
-  return cards.first.widget as BatchCardView;
-}
+/// The floor card the sheet shows.
+FloorCard shownFloorCard(WidgetTester tester) =>
+    tester.widget<FloorCard>(find.byType(FloorCard));
 
-/// The open stop sheet (a modal bottom sheet over the home).
-Finder stopSheet() => find.byKey(const ValueKey('stop-sheet'));
+/// The sheet's scan button, entry or exit.
+Finder scanFooterButton() => find.byKey(const ValueKey('scan-footer-button'));
 
-/// Closes the open stop sheet the way a worker would: back.
-Future<void> closeStopSheet(WidgetTester tester) async {
-  await tester.binding.handlePopRoute();
-  await tester.pumpAndSettle();
-}
+/// Whether the sheet's scan button is on.
+bool scanFooterEnabled(WidgetTester tester) =>
+    tester.widget<ButtonStyleButton>(scanFooterButton()).onPressed != null;
 
-/// Taps "Escanear QR" and answers the pushed [ScanScreen] with [rawValue]
-/// (null = dismissed).
+/// The QR of floor [floorId], as [FakeQrVerifier] reads it.
+String qrOf(String floorId) => 'v1.$floorId.1.sig';
+
+/// Taps the sheet's scan button and answers the pushed [ScanScreen] with
+/// [rawValue] (null = dismissed), then settles.
 ///
 /// This pushes a real, uncontrolled ScanScreen() — MobileScanner builds its
 /// own default (autoStart: true) controller and tries to start the real
@@ -241,34 +222,7 @@ Future<void> closeStopSheet(WidgetTester tester) async {
 /// (traced in task-17 review). Safe only because nothing here awaits or
 /// observes that leaked future.
 Future<void> scanWith(WidgetTester tester, String? rawValue) async {
-  await tester.tap(scanQrButton());
-  await tester.pumpAndSettle();
-  expect(find.byType(ScanScreen), findsOneWidget);
-  Navigator.of(tester.element(find.byType(ScanScreen))).pop(rawValue);
-}
-
-/// The in-progress block's "Concluir" (the stop rows keep a text one).
-Finder blockConcludeButton() =>
-    find.byKey(const ValueKey('in-progress-conclude'));
-
-/// The in-progress block's "Tirar fotos".
-Finder blockTakePhotosButton() =>
-    find.byKey(const ValueKey('in-progress-take-photos'));
-
-/// Taps the in-progress block's "Concluir", optionally types [observation]
-/// into the conclusion sheet, taps "Escanear QR de saída" and answers the
-/// pushed [ScanScreen] with [rawValue] (null = cancelled; same
-/// leaked-camera caveat as [scanWith]).
-Future<void> concludeWith(
-  WidgetTester tester,
-  String? rawValue, {
-  String? observation,
-}) async {
-  await tapInSheet(tester, blockConcludeButton());
-  if (observation != null) {
-    await tester.enterText(find.byType(TextField), observation);
-  }
-  await tester.tap(find.text(AppStrings.concludeScanExitButton));
+  await tester.tap(scanFooterButton());
   await tester.pumpAndSettle();
   expect(find.byType(ScanScreen), findsOneWidget);
   Navigator.of(tester.element(find.byType(ScanScreen))).pop(rawValue);
@@ -276,12 +230,14 @@ Future<void> concludeWith(
 }
 
 /// A [RouteStopSummary] in building [buildingId] (default `b1`), batch 1,
-/// PENDING unless told otherwise.
+/// PENDING unless told otherwise. Its floor id is its floor label unless
+/// given, so [qrOf] of the label scans it.
 RouteStopSummary stopIn({
   required String id,
   String buildingId = 'b1',
   String buildingName = 'Prédio',
   String floorLabel = 'Térreo',
+  String? floorId,
   int orderIndex = 1,
   int batchNumber = 1,
   String status = 'PENDING',
@@ -297,6 +253,7 @@ RouteStopSummary stopIn({
   buildingId: buildingId,
   buildingName: buildingName,
   floorLabel: floorLabel,
+  floorId: floorId ?? floorLabel,
   id: id,
   orderIndex: orderIndex,
   batchNumber: batchNumber,

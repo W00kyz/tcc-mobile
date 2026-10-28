@@ -211,10 +211,10 @@ void main() {
           ),
         ),
       );
-      await openStopSheet(tester, 's1');
 
-      expect(find.text('Liberado'), findsOneWidget);
-      expect(find.textContaining('Liberado · '), findsNothing);
+      // The slot's spoken label, with no reason after it.
+      expect(find.bySemanticsLabel('Liberado'), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('Liberado: ')), findsNothing);
     });
 
     testWidgets(

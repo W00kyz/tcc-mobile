@@ -18,6 +18,7 @@ import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 
+import '../routing/map_home_fakes.dart' show FakeStopProgressStore;
 import '../support/fake_connectivity.dart';
 import '../support/in_memory_database.dart';
 
@@ -200,6 +201,37 @@ void main() {
       expect(await allSynced(), isTrue);
     },
   );
+
+  group('stopSyncChipProvider', () {
+    Future<StopSyncChip> chipWithPhoto(PendingOpState state) async {
+      final store = DriftLocalWriteStore(db);
+      final container = ProviderContainer(
+        overrides: [
+          localWriteStoreProvider.overrideWithValue(store),
+          stopProgressStoreProvider.overrideWithValue(
+            FakeStopProgressStore({'s1': 'e1'}),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await store.enqueue(
+        id: 'p1',
+        kind: PendingOpKind.evidencePhoto,
+        routeId: 'r1',
+        payload: const {'execution_id': 'e1', 'idempotency_key': 'p1'},
+        initialState: state,
+      );
+      return container.read(stopSyncChipProvider(('r1', 's1')).future);
+    }
+
+    test('a held photo waits on the stamp, not the network: no chip', () async {
+      expect(await chipWithPhoto(PendingOpState.held), StopSyncChip.none);
+    });
+
+    test('a pending photo still shows the pending chip', () async {
+      expect(await chipWithPhoto(PendingOpState.pending), StopSyncChip.pending);
+    });
+  });
 }
 
 /// A session whose access token is a readable JWT for the same user, issued

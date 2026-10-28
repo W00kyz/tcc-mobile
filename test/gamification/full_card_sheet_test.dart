@@ -8,6 +8,9 @@ import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/floor_actions.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
+import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -85,6 +88,18 @@ Future<_RecordingAllocation> _open(WidgetTester tester) async {
   return allocation;
 }
 
+/// "Concluir tarefa" on [stopId] (the task dialog's own call), then the
+/// floor's exit scan.
+Future<void> _stampAndLeave(WidgetTester tester, String stopId) async {
+  final element = tester.element(find.byType(MapHomeScreen));
+  final ref = element as WidgetRef;
+  final route = ref.read(myDayProvider).requireValue.route!;
+  final stop = route.stops.firstWhere((s) => s.id == stopId);
+  await concludeTask(ref, route, stop);
+  await tester.pumpAndSettle();
+  await scanWith(tester, qrOf(stop.floorLabel));
+}
+
 void main() {
   testWidgets('shows the title, the batch time from the first check-in to '
       'the last stamp, and the streak', (tester) async {
@@ -144,9 +159,10 @@ void main() {
       stopIn(id: 's2', batchNumber: 2, status: 'IN_PROGRESS', orderIndex: 2),
     ];
 
-    /// Concludes s2, the batch's last stop. The sync worker never delivers
-    /// anything, so the check-out just written is still unsent when the
-    /// card is counted (ruling R14). [prepare] seeds the outbox first.
+    /// Stamps s2, the batch's last stop, then scans its floor's exit QR. The
+    /// sync worker never delivers anything, so the check-out just written is
+    /// still unsent when the card is counted (ruling R14). [prepare] seeds
+    /// the outbox first.
     Future<RecordingDayLogStore> concludeLast(
       WidgetTester tester, {
       Future<void> Function(InMemoryLocalWriteStore store)? prepare,
@@ -175,7 +191,7 @@ void main() {
           dayLogStore: dayLog,
         ),
       );
-      await concludeWith(tester, 'v1.floor.1.sig');
+      await _stampAndLeave(tester, 's2');
       return dayLog;
     }
 
@@ -257,7 +273,7 @@ void main() {
           dayLogStore: dayLog,
         ),
       );
-      await concludeWith(tester, 'v1.floor.1.sig');
+      await _stampAndLeave(tester, 's2');
 
       expect(find.text(AppStrings.fullCardTitle), findsNothing);
       expect(dayLog.calls.where((c) => c.startsWith('cardCompleted')), isEmpty);

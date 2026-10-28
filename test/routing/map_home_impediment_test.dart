@@ -1,169 +1,71 @@
-import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/routing/batch_card_model.dart' show SlotState;
+import 'package:route_monitor/routing/floor_actions.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
 
-// Ported from the deleted route_screen_test.dart: "Sinalizar
-// impossibilidade", now a modal sheet (redesign §6.12) opened from a stop's
-// row — itself in the stop sheet a card slot opens.
+// A task reported impossible from the home: its STOP impediment is written
+// first, the floor card greys its slot at once (offline too), and once the
+// server has it the released stop lets the next batch in. The dialog that
+// asks for the reason is the task dialog's (Task 7); here the flow is driven
+// through the same `signalTaskImpossible` it calls.
 
 RouteSummary _pendingRoute() => routeWith(stops: [stopIn(id: 's1')]);
 
-RouteSummary _inProgressStopRoute() => routeWith(
-  stops: [stopIn(id: 's1', status: 'IN_PROGRESS')],
-);
+WidgetRef _homeRef(WidgetTester tester) =>
+    tester.element(find.byType(MapHomeScreen)) as WidgetRef;
 
-Finder _signalButton() =>
-    find.widgetWithText(TextButton, AppStrings.routeSignalImpossibilityButton);
+Future<void> _signal(WidgetTester tester, RouteSummary route) async {
+  await signalTaskImpossible(
+    tester.element(find.byType(MapHomeScreen)),
+    _homeRef(tester),
+    route,
+    route.stops.first,
+    reason: 'ACCESS_BLOCKED',
+    note: 'Portão fechado.',
+  );
+  await tester.pumpAndSettle();
+}
 
 void main() {
-  group('"Sinalizar impossibilidade"', () {
-    testWidgets(
-      'on an IN_PROGRESS stop, picking a reason and confirming enqueues an '
-      'impediment row scoped to that stop',
-      (tester) async {
-        final store = InMemoryLocalWriteStore();
-        await pumpHome(
-          tester,
-          homeWith(
-            repositoryWith(_inProgressStopRoute()),
-            localWriteStore: store,
-          ),
-        );
-
-        await openStopSheet(tester, 's1');
-        await tapInSheet(tester, _signalButton());
-
-        // A modal sheet now (redesign §6.12), with the same options, over
-        // the stop sheet.
-        expect(find.byType(BottomSheet), findsNWidgets(2));
-        expect(
-          find.text(AppStrings.impedimentReasonAccessBlocked),
-          findsOneWidget,
-        );
-        expect(find.text('Não consigo fazer este ponto'), findsOneWidget);
-        // Offered even on the last stop: "can't go on today" is how the
-        // worker ends the day — a STOP impediment there would pull the next
-        // batch.
-        expect(find.text('Não consigo continuar hoje'), findsOneWidget);
-
-        // Regression: the note field is capped at the backend `note` column
-        // (`String(500)`) so an over-long note can't poison the sync queue.
-        expect(tester.widget<TextField>(find.byType(TextField)).maxLength, 500);
-
-        await tester.tap(find.text(AppStrings.impedimentReasonSiteRefusal));
-        await tester.enterText(find.byType(TextField), 'Portão fechado.');
-        await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
-        await tester.pumpAndSettle();
-
-        final rows = await store.unsyncedForRoute('r1');
-        expect(rows, hasLength(1));
-        expect(rows.single.kind, PendingOpKind.impediment);
-        expect(rows.single.payload['scope'], 'STOP');
-        expect(rows.single.payload['route_stop_id'], 's1');
-        expect(rows.single.payload['reason'], 'SITE_REFUSAL');
-        expect(rows.single.payload['note'], 'Portão fechado.');
-        expect(find.text(AppStrings.routeImpedimentReported), findsOneWidget);
-        // The written action closes the stop sheet.
-        expect(stopSheet(), findsNothing);
-      },
-    );
-
-    testWidgets(
-      'with two or more PENDING stops left, flipping the "resto da rota" '
-      'switch enqueues a ROUTE_REMAINDER impediment with a null '
-      'route_stop_id',
-      (tester) async {
-        final store = InMemoryLocalWriteStore();
-        final route = routeWith(
-          stops: [
-            stopIn(id: 's1', status: 'IN_PROGRESS'),
-            stopIn(id: 's2', orderIndex: 2),
-            stopIn(id: 's3', orderIndex: 3),
-          ],
-        );
-        await pumpHome(
-          tester,
-          homeWith(repositoryWith(route), localWriteStore: store),
-        );
-
-        // s1 (IN_PROGRESS) plus s2/s3 (PENDING) each carry the action — s1
-        // is the stop this report is about.
-        await openStopSheet(tester, 's1');
-        await tapInSheet(tester, _signalButton());
-
-        await tester.tap(find.text(AppStrings.impedimentReasonHealthIssue));
-        await tester.tap(find.text(AppStrings.impedimentRemainderSwitch));
-        await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
-        await tester.pumpAndSettle();
-
-        final rows = await store.unsyncedForRoute('r1');
-        expect(rows, hasLength(1));
-        expect(rows.single.payload['scope'], 'ROUTE_REMAINDER');
-        expect(rows.single.payload['route_stop_id'], isNull);
-        expect(rows.single.payload['reason'], 'HEALTH_ISSUE');
-        expect(rows.single.payload['note'], isNull);
-      },
-    );
-
-    testWidgets('cancelling the impediment sheet enqueues nothing', (
+  group('a task reported impossible', () {
+    testWidgets('enqueues a STOP impediment for that stop and greys its slot', (
       tester,
     ) async {
       final store = InMemoryLocalWriteStore();
+      final route = _pendingRoute();
       await pumpHome(
         tester,
-        homeWith(
-          repositoryWith(_inProgressStopRoute()),
-          localWriteStore: store,
-        ),
+        homeWith(repositoryWith(route), localWriteStore: store),
       );
 
-      await openStopSheet(tester, 's1');
-      await tapInSheet(tester, _signalButton());
-      await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
-      await tester.pumpAndSettle();
+      await _signal(tester, route);
 
-      expect(await store.unsyncedForRoute('r1'), isEmpty);
-      expect(find.text(AppStrings.routeImpedimentReported), findsNothing);
-      // Nothing written: the stop sheet stays open.
-      expect(stopSheet(), findsOneWidget);
+      final rows = await store.unsyncedForRoute('r1');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.impediment);
+      expect(rows.single.payload['scope'], 'STOP');
+      expect(rows.single.payload['route_stop_id'], 's1');
+      expect(rows.single.payload['reason'], 'ACCESS_BLOCKED');
+      expect(rows.single.payload['note'], 'Portão fechado.');
+      expect(find.text(AppStrings.taskImpededDone), findsOneWidget);
+      expect(
+        tester.widget<StampSlot>(slotOf('s1')).slot.state,
+        SlotState.impeded,
+      );
+      expect(shownFloorCard(tester).animateImpededStopId, 's1');
     });
 
     testWidgets(
-      'on a not-yet-reached (PENDING) stop enqueues a STOP-scoped impediment '
-      'for that stop — a worker who cannot reach the stop to scan the QR '
-      'must still be able to signal it',
-      (tester) async {
-        final store = InMemoryLocalWriteStore();
-        await pumpHome(
-          tester,
-          homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
-        );
-
-        await openStopSheet(tester, 's1');
-        await tapInSheet(tester, _signalButton());
-        await tester.tap(find.text(AppStrings.impedimentReasonAccessBlocked));
-        await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
-        await tester.pumpAndSettle();
-
-        final rows = await store.unsyncedForRoute('r1');
-        expect(rows, hasLength(1));
-        expect(rows.single.kind, PendingOpKind.impediment);
-        expect(rows.single.payload['scope'], 'STOP');
-        expect(rows.single.payload['route_stop_id'], 's1');
-        expect(find.text(AppStrings.routeImpedimentReported), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      'an impediment on the last open stop reloads the day once it synced, '
-      'and the released stop lets the next batch in',
+      'on the last open stop reloads the day once it synced, and the released '
+      'stop lets the next batch in',
       (tester) async {
         final secondBatch = routeWith(
           currentBatch: 2,
@@ -178,11 +80,10 @@ void main() {
           ],
         );
         final store = InMemoryLocalWriteStore();
-        final repository = repositoryWith(
-          routeWith(
-            stops: [stopWith(id: 's1', servicePointName: 'Sala 101')],
-          ),
+        final first = routeWith(
+          stops: [stopWith(id: 's1', servicePointName: 'Sala 101')],
         );
+        final repository = repositoryWith(first);
         repository.allocate = () {
           repository.day = myDayWith(secondBatch);
           return AllocationResult(route: secondBatch, poolEmpty: false);
@@ -195,11 +96,6 @@ void main() {
             syncWorker: RecordingSyncWorker(drains: store),
           ),
         );
-
-        await openStopSheet(tester, 's1');
-        await tapInSheet(tester, _signalButton());
-        await tester.tap(find.text(AppStrings.impedimentReasonAccessBlocked));
-        await tester.pumpAndSettle();
         // What the server reports once it has the impediment.
         repository.day = myDayWith(
           routeWith(
@@ -213,13 +109,11 @@ void main() {
             ],
           ),
         );
-        await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
-        await tester.pumpAndSettle();
+
+        await _signal(tester, first);
 
         expect(repository.allocationCalls, ['nextBatch:r1']);
-        expect(stopSheet(), findsNothing);
-        await openStopSheet(tester, 's2');
-        expect(find.text('Sala 202'), findsOneWidget);
+        expect(slotOf('s2'), findsOneWidget);
       },
     );
   });

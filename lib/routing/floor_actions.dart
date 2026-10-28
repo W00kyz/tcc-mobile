@@ -3,9 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/checkin/checkin_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart' show ExitScan;
-import 'package:route_monitor/execution/conclude_sheet.dart'
-    show observationDraftProvider;
 import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/observation_draft.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_card_model.dart' show SlotState;
 import 'package:route_monitor/routing/building_card_model.dart';
@@ -13,8 +12,6 @@ import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/scan_and_locate.dart';
-import 'package:route_monitor/routing/stop_actions.dart'
-    show LastStamped, lastStampedStopProvider;
 import 'package:route_monitor/sync/sync_providers.dart' show syncWorkerProvider;
 import 'package:uuid/uuid.dart';
 
@@ -23,6 +20,26 @@ import 'package:uuid/uuid.dart';
 // one exit scan checks out every stamped task of the floor.
 
 const _uuid = Uuid();
+
+/// The stop whose stamp just fell: set only once its write is in SQLite
+/// (RNF06 — the stamp is a consequence of the write, never ahead of it). The
+/// card animates that one slot; the map home centres on its building.
+///
+///     ref.watch(lastStampedStopProvider); // 's1' right after s1's stamp
+final lastStampedStopProvider = NotifierProvider<LastStamped, String?>(
+  LastStamped.new,
+);
+
+class LastStamped extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  // A method, not a setter: reads as the action it is at the call site.
+  // ignore: use_setters_to_change_properties
+  void stamp(String routeStopId) => state = routeStopId;
+
+  void clear() => state = null;
+}
 
 /// The stop whose task was just reported impossible: the card draws that one
 /// slot as a red stamp, the map home centres on its building. Same shape as

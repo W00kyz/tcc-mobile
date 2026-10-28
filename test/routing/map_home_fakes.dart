@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
+import 'package:route_monitor/checkin/qr_verifier.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
@@ -387,8 +388,17 @@ class FakeStopProgressStore implements StopProgressStore {
   }
 
   @override
-  Future<void> markStamped(String routeStopId, {String? observation}) =>
-      throw UnimplementedError();
+  Future<void> markStamped(String routeStopId, {String? observation}) async {
+    final existing = _rows[routeStopId];
+    if (existing == null) return;
+    _rows[routeStopId] = StopProgressEntry(
+      updatedAt: existing.updatedAt,
+      routeStopId: existing.routeStopId,
+      executionId: existing.executionId,
+      status: StopLocalStatus.stamped,
+      observation: observation,
+    );
+  }
 
   @override
   Future<StopProgressEntry?> progressFor(String routeStopId) async =>
@@ -535,4 +545,15 @@ class FixedSession extends SessionNotifier {
 
   @override
   Session? build() => _session;
+}
+
+/// Accepts any `v1.<floor>.<n>.<sig>` string, with no signature check: the
+/// floor id is the second part.
+class FakeQrVerifier implements QrVerifier {
+  @override
+  Future<QrPayload?> verify(String payload) async {
+    final parts = payload.split('.');
+    if (parts.length != 4 || parts[0] != 'v1') return null;
+    return QrPayload(floorId: parts[1], version: 1);
+  }
 }

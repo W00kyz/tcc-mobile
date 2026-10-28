@@ -6,35 +6,36 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'package:route_monitor/appeals/released_stop_listener.dart';
-import 'package:route_monitor/execution/conclude_sheet.dart';
-import 'package:route_monitor/execution/in_progress_block.dart';
+import 'package:route_monitor/execution/observation_draft.dart';
 import 'package:route_monitor/gamification/full_card_trigger.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/collection_banner.dart';
 import 'package:route_monitor/monitoring/silence_banner.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
-import 'package:route_monitor/routing/batch_sheet.dart';
 import 'package:route_monitor/routing/building_card_model.dart';
+import 'package:route_monitor/routing/building_sheet.dart';
 import 'package:route_monitor/routing/campus_map.dart';
+import 'package:route_monitor/routing/day_local_state.dart';
 import 'package:route_monitor/routing/day_state_panels.dart';
+import 'package:route_monitor/routing/floor_actions.dart';
 import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/home_top_bar.dart';
 import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
-import 'package:route_monitor/routing/stop_actions.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_snackbars.dart';
 import 'package:route_monitor/ui/app_theme.dart';
+import 'package:route_monitor/ui/floor_card.dart';
 import 'package:route_monitor/ui/map_sheet.dart';
 import 'package:route_monitor/ui/snackbar_lane.dart';
 import 'package:route_monitor/ui/sync_indicator.dart';
 
 /// The building whose pin the worker tapped: the other pins dim (redesign
-/// §6.3) and the sheet's carousel comes back to the current batch with that
-/// building highlighted. Null highlights none.
+/// §6.3) and the sheet shows that building's floor card. Null shows the
+/// next building's.
 ///
 ///     ref.read(selectedBuildingProvider.notifier).select('b2');
 final selectedBuildingProvider = NotifierProvider<SelectedBuilding, String?>(
@@ -57,7 +58,8 @@ const double _topOverlayHeight = 150;
 
 /// The home (`/rota`, redesign §6.2): the campus map edge to edge, the top
 /// bar and chips floating over it, and the three-height sheet with the day's
-/// state — the batch cards in a carousel while a batch is worked.
+/// state — one building's floor card and its scan button while the route is
+/// worked; before it starts (or while paused), only the start button.
 ///
 ///     GoRoute(path: '/rota', builder: (_, _) => const MapHomeScreen())
 class MapHomeScreen extends ConsumerStatefulWidget {
@@ -81,8 +83,8 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     sheet: _sheet,
   );
 
-  /// The card last drawn, so the stamp listener finds the stop's building.
-  BatchCard? _card;
+  /// The pins last drawn, so the stamp listener finds the stop's building.
+  List<DayBuilding> _buildings = const [];
 
   /// Where the lane is lent to the stop flows; kept to give it back.
   late final HomeSnackbarLaneSlot _laneSlot;
@@ -104,9 +106,13 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   @override
   Widget build(BuildContext context) {
     _clearSelectionOnNewBatch();
-    ref.listen<String?>(lastStampedStopProvider, (_, stopId) {
-      if (stopId != null) _onStamped(stopId);
-    });
+    ref
+      ..listen<String?>(lastStampedStopProvider, (_, stopId) {
+        if (stopId != null) _onStamped(stopId);
+      })
+      ..listen<String?>(lastImpededStopProvider, (_, stopId) {
+        if (stopId != null) _onStamped(stopId);
+      });
     final dayAsync = ref.watch(myDayProvider);
     // Watched here so the automatic next-batch pull lives as long as the
     // screen does (spec §6.4), and its offline panel shows in the sheet.
@@ -118,13 +124,13 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     final pendingSync = _isWorked(route)
         ? watchPendingSyncStops(ref, route!)
         : const <String>{};
+    // The batch's card still feeds the full card and the day log (the
+    // gamification counts by batch), and the live first leg.
     final card = _isWorked(route)
         ? buildBatchCard(route!, local, pendingSync)
         : null;
-    _card = card;
-    final buildings = _dayBuildings(route, local, pendingSync);
+    final buildings = _buildings = _dayBuildings(route, local, pendingSync);
     final selectedId = ref.watch(selectedBuildingProvider);
-    final selected = _selectedGroup(card, selectedId);
     final pinned = buildings.any((b) => b.buildingId == selectedId)
         ? selectedId
         : null;
@@ -159,14 +165,11 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
                       ),
                     ),
                     _topOverlay(route, local),
-                    _myPositionButton(constraints.maxHeight),
-                    _sheetFor(
-                      dayAsync,
-                      local,
-                      pendingSync,
-                      selected,
-                      nextBatch,
+                    _myPositionButton(
+                      constraints.maxHeight,
+                      hasSheet: _startLabel(dayAsync.value) == null,
                     ),
+                    _sheetFor(dayAsync, local, buildings, pinned, nextBatch),
                   ],
                 ),
               ),
@@ -183,16 +186,27 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   Widget _sheetFor(
     AsyncValue<MyDay> dayAsync,
     Map<String, LocalStopState> local,
-    Set<String> pendingSync,
-    BuildingGroup? selected,
+    List<DayBuilding> buildings,
+    String? pinned,
     NextBatchState nextBatch,
   ) {
     final day = dayAsync.value;
     if (day != null) {
-      return _daySheet(day, local, pendingSync, selected, nextBatch);
+      return _daySheet(day, local, buildings, pinned, nextBatch);
     }
     if (dayAsync.hasError) return _panelSheet(const LoadErrorPanel());
-    return _panelSheet(const _CardSkeleton());
+    return _panelSheet(const CardSkeleton());
+  }
+
+  /// The start bar's label when the day shows only it — no route yet on a
+  /// service day, or a paused route — else null (a sheet shows).
+  String? _startLabel(MyDay? day) {
+    if (day == null) return null;
+    final route = day.route;
+    if (route == null) {
+      return day.serviceDay ? AppStrings.routeStartButton : null;
+    }
+    return route.status == 'PAUSED' ? AppStrings.dayResumeButton : null;
   }
 
   /// A new batch (or route) starts with no building highlighted: a
@@ -241,11 +255,6 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     return buildDayBuildings(route, local, impeded, pendingSync);
   }
 
-  BuildingGroup? _selectedGroup(BatchCard? card, String? buildingId) {
-    if (buildingId == null) return null;
-    return card?.groups.where((g) => g.buildingId == buildingId).firstOrNull;
-  }
-
   Widget _campusMap(
     RouteSummary? route,
     BatchCard? card,
@@ -268,12 +277,12 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       controller: _map,
       onPinTap: _selectBuilding,
       onMapTap: _clearSelection,
-      // Wider on the right: each pin's label hangs to the right of its
-      // circle.
+      // Symmetric: each pin's name is centred above its teardrop, so it
+      // overhangs both sides equally.
       overlayPadding: EdgeInsets.fromLTRB(
         48,
         top,
-        168,
+        48,
         constraints.maxHeight * kMapSheetInitial + 24,
       ),
       tileProviderOverride: widget.mapTileProvider,
@@ -317,20 +326,22 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     );
   }
 
-  /// "Minha posição", at the right just above the sheet; hidden while the
-  /// sheet is open past half, where it would sit under the top bar.
-  Widget _myPositionButton(double height) {
+  /// "Minha posição", at the right just above the sheet (or the start bar);
+  /// hidden while the sheet is open past half, where it would sit under the
+  /// top bar.
+  Widget _myPositionButton(double height, {required bool hasSheet}) {
     return ListenableBuilder(
       listenable: _sheet,
       builder: (context, _) {
         final size = _sheet.isAttached ? _sheet.size : kMapSheetInitial;
         final p =
             Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+        final above = hasSheet ? height * size : startDayBarHeight(context);
         return Positioned(
           right: 16,
-          bottom: height * size + 16,
+          bottom: above + 16,
           child: Visibility(
-            visible: size <= kMapSheetInitial + 0.05,
+            visible: !hasSheet || size <= kMapSheetInitial + 0.05,
             child: FloatingActionButton(
               heroTag: null,
               backgroundColor: p.white,
@@ -345,34 +356,24 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     );
   }
 
-  /// One state per moment of the day: no service, no route yet, a batch to
-  /// work, points released (resume), nothing left.
+  /// One state per moment of the day: no service, no route yet or paused
+  /// (the start bar, no sheet), a route to work, nothing left.
   Widget _daySheet(
     MyDay day,
     Map<String, LocalStopState> local,
-    Set<String> pendingSync,
-    BuildingGroup? selected,
+    List<DayBuilding> buildings,
+    String? pinned,
     NextBatchState nextBatch,
   ) {
+    final start = _startLabel(day);
+    if (start != null) return StartDayBar(label: start);
     final route = day.route;
-    if (route == null) {
-      return _panelSheet(
-        day.serviceDay ? const StartDayPanel() : const NoServicePanel(),
-      );
-    }
+    if (route == null) return _panelSheet(const NoServicePanel());
     return switch (route.status) {
-      'PAUSED' => _panelSheet(
-        PausedPanel(releaseReason: route.latestReleaseReason),
-      ),
       // Not final before the workday ends: points released later go back to
       // the pool, and "Verificar de novo" asks for them (spec §1).
       'DONE' => _panelSheet(DonePanel(doneToday: dayDoneCount(route, local))),
-      _ => _batchSheet(
-        route,
-        buildBatchCards(route, local, pendingSync),
-        selected,
-        nextBatch,
-      ),
+      _ => _buildingSheet(route, buildings, pinned, nextBatch),
     };
   }
 
@@ -382,70 +383,63 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     body: const SizedBox.shrink(),
   );
 
-  /// The batch being worked: the stop in progress or the next one, then
-  /// the day's cards. A selected building keeps this layout — the carousel
-  /// comes back to the current card and highlights it there.
-  Widget _batchSheet(
+  /// The route being worked: the tapped building, or the one the worker is
+  /// on or heading to — its header, floor card and scan button.
+  Widget _buildingSheet(
     RouteSummary route,
-    List<BatchCard> cards,
-    BuildingGroup? selected,
+    List<DayBuilding> buildings,
+    String? pinned,
     NextBatchState nextBatch,
   ) {
+    final offline = nextBatch == NextBatchState.waitingForNetwork;
+    final building = sheetBuildingOf(buildings, pinned);
+    if (building == null) {
+      return _panelSheet(
+        offline ? const NextBatchOfflinePanel() : const CardSkeleton(),
+      );
+    }
     return MapSheet(
       controller: _sheet,
       header: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (nextBatch == NextBatchState.waitingForNetwork)
-            const NextBatchOfflinePanel(),
-          _inProgressBlock(route, _card!) ??
-              NextStopRow(route: route, card: _card!),
+          if (offline) const NextBatchOfflinePanel(),
+          BuildingSheetHeader(
+            building: building,
+            selected: building.buildingId == pinned,
+          ),
         ],
       ),
-      body: BatchOverview(
-        route: route,
-        cards: cards,
-        highlightBuildingId: selected?.buildingId,
-      ),
-      stickyFooter: _scanQrFooter(route),
+      body: _floorCard(building),
+      // Nothing left to scan in a finished building.
+      stickyFooter: building.complete
+          ? null
+          : ScanFooter(route: route, building: building),
     );
   }
 
-  /// "Escanear QR", while the batch has a stop to check in.
-  Widget? _scanQrFooter(RouteSummary route) {
-    if (!canCheckIn(route.currentBatchStops)) return null;
-    return FilledButton.icon(
-      onPressed: () => startCheckIn(context, ref, route),
-      icon: const Icon(Icons.qr_code_scanner),
-      label: const Text(AppStrings.scanQrButton),
-    );
-  }
+  Widget _floorCard(DayBuilding building) => FloorCard(
+    key: ValueKey('floor-card-of-${building.buildingId}'),
+    building: building,
+    // The task dialog (Task 7) opens from here.
+    onSlotTap: (_, _) {},
+    animateStopId: ref.watch(lastStampedStopProvider),
+    animateImpededStopId: ref.watch(lastImpededStopProvider),
+  );
 
-  /// The stop in progress, in place of "Próxima parada" (redesign §6.2);
-  /// also while a building is selected, so its photos and "Concluir" never
-  /// hide behind a pin tap.
-  Widget? _inProgressBlock(RouteSummary route, BatchCard card) {
-    final slot = inProgressSlotOf(card);
-    if (slot == null) return null;
-    final stop = route.stops.firstWhere((s) => s.id == slot.stopId);
-    return InProgressBlock(
-      key: ValueKey('in-progress-${stop.id}'),
-      route: route,
-      stop: stop,
-    );
-  }
-
-  /// After a written check-out (redesign §6.6): the map centres on the
-  /// stop's building and the sheet comes to half height, where the card —
-  /// and the stamp falling on it — shows (the carousel comes back to the
-  /// current batch for it). The selection goes first, so the highlight of
-  /// a building tapped before does not linger (final review I-5).
+  /// After a stamp (done or impossible, redesign §6.6): the map centres on
+  /// the stop's building and the sheet comes to half height, where its
+  /// floor card — and the stamp falling on it — shows. The selection goes
+  /// first, so a building tapped before does not hold the sheet (final
+  /// review I-5).
   void _onStamped(String stopId) {
     _clearSelection();
-    final group = _card?.groups
-        .where((g) => g.slots.any((slot) => slot.stopId == stopId))
+    final building = _buildings
+        .where(
+          (b) => b.floors.any((f) => f.slots.any((s) => s.stopId == stopId)),
+        )
         .firstOrNull;
-    if (group != null) _map.move(group.position, _map.camera.zoom);
+    if (building != null) _map.move(building.position, _map.camera.zoom);
     if (!_sheet.isAttached) return;
     unawaited(
       _sheet.animateTo(
@@ -457,8 +451,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   }
 
   /// Pin tap: select the building, centre the map on it and bring the sheet
-  /// to half height, the current card showing with that building
-  /// highlighted.
+  /// to half height, showing that building's floor card.
   void _selectBuilding(DayBuilding building) {
     ref.read(selectedBuildingProvider.notifier).select(building.buildingId);
     _forgetStamp();
@@ -477,7 +470,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   /// A stamp falls once: a card rebuilt later (a pin tap, a new batch) must
   /// not replay it.
-  void _forgetStamp() => ref.read(lastStampedStopProvider.notifier).clear();
+  void _forgetStamp() {
+    ref.read(lastStampedStopProvider.notifier).clear();
+    ref.read(lastImpededStopProvider.notifier).clear();
+  }
 
   /// One GPS read, drawn as the worker's dot and centred on.
   Future<void> _locateMe() async {
@@ -495,24 +491,5 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     } catch (_) {
       _lane.show(SnackKind.action, AppStrings.routeLocationUnavailable);
     }
-  }
-}
-
-/// While the day loads: the card's shape, empty (spec §6.10).
-class _CardSkeleton extends StatelessWidget {
-  const _CardSkeleton();
-
-  @override
-  Widget build(BuildContext context) {
-    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
-    return Container(
-      height: 160,
-      margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-        color: p.card,
-        border: Border.all(color: p.rule),
-        borderRadius: BorderRadius.circular(16),
-      ),
-    );
   }
 }
