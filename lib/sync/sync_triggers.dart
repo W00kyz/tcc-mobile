@@ -68,7 +68,7 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
   /// the app was away.
   /// Gated on `Connectivity.isOnline`: a re-fetch while offline only falls
   /// back to the device snapshot, or — with none saved — throws, and
-  /// `route_screen.dart`'s error branch would replace the whole,
+  /// the map home's error panel would replace the whole,
   /// still-perfectly-valid day with a generic error message.
   ///
   /// The notification providers are also refreshed here (RF49): the route

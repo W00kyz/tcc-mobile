@@ -3,12 +3,15 @@ import 'dart:convert';
 // Theme is hidden from material: vector_tile_renderer exports its own Theme and
 // that is the one VectorTileLayer wants. Same choice VectorTileLayer makes.
 import 'package:flutter/material.dart' hide Theme;
+import 'package:flutter/material.dart' as material show Theme;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:pmtiles/pmtiles.dart';
-import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/campus_map_layers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/ui/app_theme.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 import 'package:vector_map_tiles_pmtiles/vector_map_tiles_pmtiles.dart';
 import 'package:vector_tile_renderer/vector_tile_renderer.dart'
@@ -48,9 +51,17 @@ class RouteMapStop {
   final bool pending;
 }
 
+/// Where a leg sits in the walk (redesign §6.3): already behind the worker,
+/// the one to the next stop, or still ahead.
+enum LegKind { walked, next, rest }
+
 /// One segment of the drawn trajectory.
 class RouteMapLeg {
-  RouteMapLeg({required this.points, required this.approximate});
+  RouteMapLeg({
+    required this.points,
+    required this.approximate,
+    this.kind = LegKind.rest,
+  });
 
   /// The polyline vertices, in `LatLng(lat, lng)` order.
   final List<LatLng> points;
@@ -59,6 +70,9 @@ class RouteMapLeg {
   /// is just a straight hop between the two stops — drawn dashed so the field
   /// worker does not read it as a surveyed path.
   final bool approximate;
+
+  /// Drives the stroke: `rule` walked, moss 6px next, ink 3px rest.
+  final LegKind kind;
 }
 
 /// Pure transform from the API summary to what the map draws: the current
@@ -66,14 +80,24 @@ class RouteMapLeg {
 ///
 /// The OSRM leg geometry arrives as `[lng, lat]` pairs; every pair is flipped
 /// to `LatLng(lat, lng)`. A stop with no `legGeometry` gets a straight,
-/// [RouteMapLeg.approximate] leg between it and its predecessor.
+/// [RouteMapLeg.approximate] leg between it and its predecessor. Each leg
+/// takes its [LegKind] from the stop it leads to, as [card] draws that stop
+/// (the server status alone when no card is given): a done stop's leg was
+/// walked, the next stop's leg is the next one.
 ///
 /// ```dart
-/// final data = buildRouteMapData(route);
+/// final data = buildRouteMapData(route, card: card);
 /// CampusMap(data: data);
 /// ```
-RouteMapData buildRouteMapData(RouteSummary route) {
+RouteMapData buildRouteMapData(RouteSummary route, {BatchCard? card}) {
   final batchStops = route.currentBatchStops;
+  final states = {
+    for (final slot
+        in (card ?? buildBatchCard(route, const {}, const {})).groups.expand(
+          (group) => group.slots,
+        ))
+      slot.stopId: slot.state,
+  };
   final stops = [
     for (final stop in batchStops)
       RouteMapStop(
@@ -95,6 +119,7 @@ RouteMapData buildRouteMapData(RouteSummary route) {
             for (final point in geometry) LatLng(point[1], point[0]),
           ],
           approximate: false,
+          kind: _legKind(states[current.id]),
         ),
       );
     } else {
@@ -105,6 +130,7 @@ RouteMapData buildRouteMapData(RouteSummary route) {
             LatLng(current.latitude, current.longitude),
           ],
           approximate: true,
+          kind: _legKind(states[current.id]),
         ),
       );
     }
@@ -113,7 +139,18 @@ RouteMapData buildRouteMapData(RouteSummary route) {
   return RouteMapData(stops: stops, legs: legs);
 }
 
-/// The bundled offline base map plus one route's pins and trajectory.
+LegKind _legKind(SlotState? destination) => switch (destination) {
+  SlotState.done || SlotState.released => LegKind.walked,
+  SlotState.next => LegKind.next,
+  _ => LegKind.rest,
+};
+
+/// Where the map opens when there is nothing to fit (no route yet): the
+/// UFCG Campina Grande campus.
+const LatLng kCampusCenter = LatLng(-7.2167, -35.9097);
+
+/// The bundled offline base map plus one batch's building pins and
+/// trajectory (redesign §6.3).
 ///
 /// The base layer is the `assets/campus.pmtiles` vector archive rendered with
 /// `assets/campus-style.json`. Tests pass [tileProviderOverride] — a no-op
@@ -124,11 +161,43 @@ RouteMapData buildRouteMapData(RouteSummary route) {
 /// A "trajeto aproximado" caption is overlaid whenever any leg is a straight
 /// approximation (spec §6.2), so the field worker does not read the dashed
 /// line as a surveyed path.
+///
+///     CampusMap(data: data, groups: card.groups, onPinTap: select)
 class CampusMap extends StatelessWidget {
-  const CampusMap({required this.data, this.tileProviderOverride, super.key});
+  const CampusMap({
+    required this.data,
+    this.groups = const [],
+    this.selectedBuildingId,
+    this.workerPosition,
+    this.controller,
+    this.onPinTap,
+    this.onMapTap,
+    this.overlayPadding = const EdgeInsets.all(48),
+    this.tileProviderOverride,
+    super.key,
+  });
 
   /// The route to draw.
   final RouteMapData data;
+
+  /// One pin per building of the batch.
+  final List<BuildingGroup> groups;
+
+  /// The building whose pin grows; every other pin dims.
+  final String? selectedBuildingId;
+
+  /// The worker's last known position, drawn as an ink dot with a halo.
+  final LatLng? workerPosition;
+
+  final MapController? controller;
+  final ValueChanged<BuildingGroup>? onPinTap;
+
+  /// A tap on the map itself (not a pin) — clears the selection.
+  final VoidCallback? onMapTap;
+
+  /// The part of the map hidden by the top bar and the sheet: the camera
+  /// fits the route inside the rest, and the caption sits above the sheet.
+  final EdgeInsets overlayPadding;
 
   /// Test seam: when set, the base map is a plain [TileLayer] fed by this
   /// provider instead of the PMTiles vector layer.
@@ -141,66 +210,117 @@ class CampusMap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final points = _allPoints;
+    final p =
+        material.Theme.of(context).extension<FieldPalette>() ??
+        FieldPalette.light;
     return Stack(
       fit: StackFit.expand,
       children: [
         FlutterMap(
-          options: MapOptions(
-            initialCameraFit: points.isEmpty
-                ? null
-                : CameraFit.coordinates(
-                    coordinates: points,
-                    padding: const EdgeInsets.all(48),
-                    maxZoom: 18,
-                  ),
-            minZoom: 12,
-            maxZoom: 19,
-            backgroundColor: const Color(0xFFF2EFE9),
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
-            ),
-          ),
+          mapController: controller,
+          options: _options(p),
           children: [
-            _CampusBaseLayer(tileProviderOverride: tileProviderOverride),
+            _CampusBaseLayer(
+              tileProviderOverride: tileProviderOverride,
+              ground: p.mapGround,
+            ),
             PolylineLayer(
-              polylines: [for (final leg in data.legs) _polyline(leg)],
+              polylines: [for (final leg in data.legs) legPolyline(leg, p)],
             ),
-            MarkerLayer(
-              markers: [
-                for (final stop in data.stops)
-                  Marker(
-                    point: stop.position,
-                    width: 34,
-                    height: 34,
-                    child: _StopPin(stop: stop),
-                  ),
-              ],
-            ),
+            MarkerLayer(markers: _markers(p)),
+            _RefitOnNewRoute(points: _allPoints, padding: overlayPadding),
           ],
         ),
-        if (data.legs.any((leg) => leg.approximate)) const _ApproximateLegend(),
+        if (data.legs.any((leg) => leg.approximate))
+          ApproximateLegend(padding: overlayPadding),
       ],
     );
   }
 
-  Polyline _polyline(RouteMapLeg leg) => Polyline(
-    points: leg.points,
-    strokeWidth: leg.approximate ? 3 : 5,
-    color: leg.approximate ? const Color(0xFF9E9E9E) : const Color(0xFF1565C0),
-    pattern: leg.approximate
-        ? StrokePattern.dashed(segments: const [7, 5])
-        : const StrokePattern.solid(),
-  );
+  MapOptions _options(FieldPalette p) {
+    final points = _allPoints;
+    return MapOptions(
+      initialCenter: kCampusCenter,
+      initialZoom: 16,
+      initialCameraFit: points.isEmpty ? null : _fitTo(points, overlayPadding),
+      minZoom: 12,
+      maxZoom: 19,
+      backgroundColor: p.mapGround,
+      onTap: onMapTap == null ? null : (_, _) => onMapTap!(),
+      interactionOptions: const InteractionOptions(
+        flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+      ),
+    );
+  }
+
+  List<Marker> _markers(FieldPalette p) {
+    final selected = selectedBuildingId;
+    final position = workerPosition;
+    return [
+      if (position != null) workerMarker(position, p),
+      for (final group in groups)
+        buildingMarker(
+          group,
+          selected: group.buildingId == selected,
+          dimmed: selected != null && group.buildingId != selected,
+          onTap: onPinTap == null ? null : () => onPinTap!(group),
+        ),
+    ];
+  }
+}
+
+CameraFit _fitTo(List<LatLng> points, EdgeInsets padding) =>
+    CameraFit.coordinates(coordinates: points, padding: padding, maxZoom: 18);
+
+/// Re-frames the camera when the drawn route changes (the day loaded after
+/// the map, or a new batch came in): `initialCameraFit` only runs once.
+class _RefitOnNewRoute extends StatefulWidget {
+  const _RefitOnNewRoute({required this.points, required this.padding});
+
+  final List<LatLng> points;
+  final EdgeInsets padding;
+
+  @override
+  State<_RefitOnNewRoute> createState() => _RefitOnNewRouteState();
+}
+
+class _RefitOnNewRouteState extends State<_RefitOnNewRoute> {
+  @override
+  void didUpdateWidget(_RefitOnNewRoute oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final points = widget.points;
+    if (points.isEmpty || _samePoints(points, oldWidget.points)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      MapController.of(context).fitCamera(_fitTo(points, widget.padding));
+    });
+  }
+
+  bool _samePoints(List<LatLng> a, List<LatLng> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 /// Base map: the injected no-op provider under test, the real PMTiles vector
 /// layer otherwise. The load future is held in state so a rebuild does not
 /// re-open the archive.
 class _CampusBaseLayer extends StatefulWidget {
-  const _CampusBaseLayer({required this.tileProviderOverride});
+  const _CampusBaseLayer({
+    required this.tileProviderOverride,
+    required this.ground,
+  });
 
   final TileProvider? tileProviderOverride;
+
+  /// Shown while the archive loads (the style's own background after).
+  final Color ground;
 
   @override
   State<_CampusBaseLayer> createState() => _CampusBaseLayerState();
@@ -225,7 +345,7 @@ class _CampusBaseLayerState extends State<_CampusBaseLayer> {
     }
     final tilesFuture = _tiles;
     if (tilesFuture == null) {
-      return const ColoredBox(color: Color(0xFFF2EFE9));
+      return ColoredBox(color: widget.ground);
     }
     return FutureBuilder<CampusTiles>(
       future: tilesFuture,
@@ -234,7 +354,7 @@ class _CampusBaseLayerState extends State<_CampusBaseLayer> {
         if (tiles == null) {
           // A plain filled box, never a spinner: a spinner animates forever and
           // would keep `pumpAndSettle` from ever returning.
-          return const ColoredBox(color: Color(0xFFF2EFE9));
+          return ColoredBox(color: widget.ground);
         }
         return VectorTileLayer(
           theme: tiles.theme,
@@ -283,100 +403,4 @@ Future<CampusTiles> loadCampusTiles() async {
     theme: ThemeReader().read(styleJson),
     provider: PmTilesVectorTileProvider.fromArchive(archive),
   );
-}
-
-/// A numbered circular pin. Pending stops are blue, done stops green.
-class _StopPin extends StatelessWidget {
-  const _StopPin({required this.stop});
-
-  final RouteMapStop stop;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: stop.pending ? const Color(0xFF1565C0) : const Color(0xFF2E7D32),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2),
-      ),
-      child: Center(
-        child: Text(
-          '${stop.order}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Bottom-left caption shown whenever the route has at least one approximate
-/// leg (spec §6.2). A dashed swatch plus the pt-BR label so a straight hop is
-/// never mistaken for a surveyed path.
-class _ApproximateLegend extends StatelessWidget {
-  const _ApproximateLegend();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Align(
-      alignment: Alignment.bottomLeft,
-      child: Padding(
-        padding: EdgeInsets.all(8),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            // Near-opaque white so the caption stays readable over any tile.
-            color: Color(0xF2FFFFFF),
-            borderRadius: BorderRadius.all(Radius.circular(6)),
-          ),
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 26,
-                  height: 3,
-                  child: CustomPaint(painter: _DashSwatchPainter()),
-                ),
-                SizedBox(width: 8),
-                Text(
-                  AppStrings.mapApproximateLegLabel,
-                  style: TextStyle(fontSize: 12, color: Color(0xFF424242)),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Paints the short dashed line used in [_ApproximateLegend], matched to the
-/// approximate-leg polyline style.
-class _DashSwatchPainter extends CustomPainter {
-  const _DashSwatchPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF9E9E9E)
-      ..strokeWidth = 3;
-    const dash = 5.0;
-    const gap = 4.0;
-    for (var x = 0.0; x < size.width; x += dash + gap) {
-      final endX = (x + dash).clamp(0.0, size.width);
-      canvas.drawLine(
-        Offset(x, size.height / 2),
-        Offset(endX, size.height / 2),
-        paint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashSwatchPainter oldDelegate) => false;
 }

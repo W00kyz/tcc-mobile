@@ -26,20 +26,31 @@ void main() {
     await pump(tester, routeWith(stops: const []));
     await tester.pumpAndSettle();
 
-    expect(find.text(AppStrings.collectionBannerText), findsOneWidget);
+    expect(find.text(AppStrings.collectionChip), findsOneWidget);
+  });
+
+  testWidgets('a tap explains what is collected and why', (tester) async {
+    await pump(tester, routeWith(stops: const []));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text(AppStrings.collectionChip));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.collectionNotificationBody), findsOneWidget);
+    expect(find.text(AppStrings.locationPurposeRationale), findsOneWidget);
   });
 
   testWidgets('renders nothing while the route is PAUSED', (tester) async {
     await pump(tester, routeWith(status: 'PAUSED', stops: const []));
     await tester.pumpAndSettle();
 
-    expect(find.text(AppStrings.collectionBannerText), findsNothing);
+    expect(find.text(AppStrings.collectionChip), findsNothing);
   });
 
   testWidgets('renders nothing before the first batch', (tester) async {
     await pump(tester, null);
     await tester.pumpAndSettle();
 
-    expect(find.text(AppStrings.collectionBannerText), findsNothing);
+    expect(find.text(AppStrings.collectionChip), findsNothing);
   });
 }

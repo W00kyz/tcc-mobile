@@ -35,7 +35,7 @@ final localWriteStoreProvider = Provider<LocalWriteStore>(
 );
 
 /// Wraps `apiBaseUrlFromEnvironment()` for widgets that need the raw base
-/// URL rather than a whole `Dio` client — e.g. `route_screen.dart`'s
+/// URL rather than a whole `Dio` client — e.g. the stop evidence list's
 /// synced-photo thumbnail, which builds a `NetworkImage` URL by hand. Going
 /// through a provider (instead of calling the env function directly from
 /// build()) lets a test override it with a fixed value, rather than
@@ -71,7 +71,7 @@ final evidenceApiProvider = Provider<EvidenceApi>((ref) {
   return DioEvidenceApi(dio);
 });
 
-/// Real camera capture in production; RouteScreen's tests override this
+/// Real camera capture in production; the map home's tests override this
 /// with a fake `EvidenceCapture` instead of touching the platform camera.
 final evidenceCaptureProvider = Provider<EvidenceCapture>(
   (ref) => DeviceEvidenceCapture(),
@@ -86,8 +86,9 @@ final executionRepositoryProvider = Provider<ExecutionRepository>(
 );
 
 /// Null both for an untouched stop and for the Ruling 17 cold-start gap (a
-/// stop that turned `IN_PROGRESS` before `StopProgress` existed) — RouteScreen
-/// hides the evidence buttons entirely on null, and also on a `done` entry.
+/// stop that turned `IN_PROGRESS` before `StopProgress` existed) — the map
+/// home hides the evidence buttons entirely on null, and also on a `done`
+/// entry.
 final FutureProviderFamily<StopProgressEntry?, String> stopProgressForProvider =
     FutureProvider.family<StopProgressEntry?, String>(
       (ref, routeStopId) =>

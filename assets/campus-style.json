@@ -15,7 +15,7 @@
     {
       "id": "background",
       "type": "background",
-      "paint": { "background-color": "#f2efe9" }
+      "paint": { "background-color": "#E3E3DF" }
     },
     {
       "id": "landuse",
@@ -23,7 +23,7 @@
       "source": "campus",
       "source-layer": "landuse",
       "paint": {
-        "fill-color": "#e6e2d3",
+        "fill-color": "#E3E3DF",
         "fill-opacity": 0.6
       }
     },
@@ -32,7 +32,7 @@
       "type": "fill",
       "source": "campus",
       "source-layer": "water",
-      "paint": { "fill-color": "#a0c8f0" }
+      "paint": { "fill-color": "#D8DBD6" }
     },
     {
       "id": "building",
@@ -41,8 +41,8 @@
       "source-layer": "building",
       "minzoom": 13,
       "paint": {
-        "fill-color": "#d9d0c9",
-        "fill-outline-color": "#c2b8ae"
+        "fill-color": "#D6D6D1",
+        "fill-outline-color": "#BDBDB6"
       }
     },
     {
@@ -55,7 +55,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#ffffff",
+        "line-color": "#F4F4F1",
         "line-width": {
           "base": 1.4,
           "stops": [[12, 0.5], [14, 2], [18, 12]]
@@ -77,8 +77,8 @@
         "text-max-width": 8
       },
       "paint": {
-        "text-color": "#333333",
-        "text-halo-color": "#ffffff",
+        "text-color": "#55554F",
+        "text-halo-color": "#F4F4F1",
         "text-halo-width": 1.2
       }
     }

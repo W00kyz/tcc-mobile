@@ -209,12 +209,7 @@ class AppealsEntryButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final eligible = ref.watch(appealEligibleProvider).asData?.value ?? [];
-    final local = ref.watch(localReleasedNoticesProvider).asData?.value ?? [];
-    final count = {
-      for (final stop in eligible) stop.routeStopId,
-      for (final notice in local) notice.routeStopId,
-    }.length;
+    final count = watchAppealableCount(ref);
     final button = IconButton(
       icon: const Icon(Icons.gavel_outlined),
       tooltip: AppStrings.appealsTooltip,
@@ -223,4 +218,18 @@ class AppealsEntryButton extends ConsumerWidget {
     if (count == 0) return button;
     return Badge(label: Text('$count'), child: button);
   }
+}
+
+/// The stops the worker can still contest or settle: the server's eligible
+/// list and this device's own release notices, each stop once. Drives the
+/// badge on the appeals entry and on the home's account avatar.
+///
+///     final count = watchAppealableCount(ref);
+int watchAppealableCount(WidgetRef ref) {
+  final eligible = ref.watch(appealEligibleProvider).asData?.value ?? [];
+  final local = ref.watch(localReleasedNoticesProvider).asData?.value ?? [];
+  return {
+    for (final stop in eligible) stop.routeStopId,
+    for (final notice in local) notice.routeStopId,
+  }.length;
 }

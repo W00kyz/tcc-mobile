@@ -8,7 +8,7 @@
 ///
 /// Example:
 /// ```dart
-/// AppBar(title: const Text(AppStrings.routeAppBarTitle));
+/// FilledButton(onPressed: scan, child: const Text(AppStrings.scanQrButton));
 /// Text(AppStrings.routePendingSync(count));
 /// ```
 abstract final class AppStrings {
@@ -101,11 +101,8 @@ abstract final class AppStrings {
   static String approvalRejectionReason(String reason) => 'Motivo: $reason';
 
   // --- route screen ---
-  static const String routeAppBarTitle = 'Rota de hoje';
   static const String routeLoadError = 'Não foi possível carregar sua rota.';
-  static const String routeViewMapButton = 'Ver no mapa';
   static const String routeStartButton = 'Iniciar rota';
-  static const String routeCheckInButton = 'Fazer check-in';
   static const String routeConcludeButton = 'Concluir';
   static const String routeSignalImpossibilityButton =
       'Sinalizar impossibilidade';
@@ -116,7 +113,7 @@ abstract final class AppStrings {
   static const String routeLocationUnavailable =
       'Não foi possível obter sua localização.';
   static const String routeLocationUnavailableCheckIn =
-      'Não foi possível obter sua localização; check-in seguirá sem GPS.';
+      'Sem localização agora. O registro foi feito mesmo assim.';
 
   // --- route screen · batches (spec 2026-10-20-alocacao-automatica §6.4) ---
   static const String routeNotServiceDay = 'Hoje não é dia de serviço.';
@@ -129,7 +126,7 @@ abstract final class AppStrings {
   static const String routeCheckAgainButton = 'Verificar de novo';
   static const String routeStartFailed =
       'Não foi possível iniciar a rota. Tente novamente.';
-  static const String routePausedTitle = 'Seus pontos foram liberados';
+  static const String routePausedTitle = 'Rota pausada';
   static const String routeNextBatchOffline =
       'Conecte-se para receber mais pontos';
 
@@ -137,11 +134,6 @@ abstract final class AppStrings {
   /// `Liberado` when the server sent no reason.
   static String routeStopReleased(String? reason) =>
       reason == null ? 'Liberado' : 'Liberado · $reason';
-
-  /// `Lote <n> · <x> ponto(s) feito(s) hoje`.
-  static String routeBatchHeader(int batch, int doneToday) =>
-      'Lote $batch · $doneToday '
-      '${doneToday == 1 ? 'ponto feito' : 'pontos feitos'} hoje';
 
   /// Why a paused route's points went back to the pool.
   static String routePausedReason(String reason) => 'Motivo: $reason';
@@ -159,7 +151,6 @@ abstract final class AppStrings {
   // --- route screen · sync banner ---
   static const String routeSyncBlockedBanner =
       'Sincronização bloqueada — toque para ver';
-  static const String routeSyncNowButton = 'Sincronizar agora';
   static const String routeAllSynced = 'Tudo sincronizado';
   static const String routeChipPending = 'Pendente';
   static const String routeChipBlocked = 'Bloqueado';
@@ -194,8 +185,7 @@ abstract final class AppStrings {
       'Reclamações e Sugestões (opcional)';
   static const String complaintsContinue = 'Continuar';
 
-  // --- map screen ---
-  static const String mapAppBarTitle = 'Trajeto da rota';
+  // --- map ---
   static const String mapApproximateLegLabel = 'trajeto aproximado';
 
   // --- scan screen ---
@@ -405,8 +395,6 @@ abstract final class AppStrings {
   static const String collectionNotificationBody =
       'Sua localização está sendo registrada durante a rota para fins de '
       'fiscalização.';
-  static const String collectionBannerText =
-      'Coleta de localização ativa durante a rota.';
   static const String collectionNotificationChannelName =
       'Coleta de localização';
   static const String collectionNotificationChannelDescription =
@@ -448,6 +436,10 @@ abstract final class AppStrings {
 
   // --- batch card atoms (not-by-colour labels) ---
   static String slotDone(String hour) => 'Concluído às $hour';
+
+  /// A stop done with no known hour (an old server answer without
+  /// `done_at`).
+  static const String slotDoneNoHour = 'Concluído';
   static String slotReleased(String? reason) =>
       reason == null ? 'Liberado' : 'Liberado: $reason';
   static const String slotPending = 'Pendente';
@@ -458,4 +450,31 @@ abstract final class AppStrings {
   static String batchCardSubtitle(int total) => 'Junte os $total carimbos';
   static String batchReleasedCount(int n) =>
       n == 1 ? '1 liberado' : '$n liberados';
+
+  // --- map home (redesign §6.2, §6.10) ---
+  static const String scanQrButton = 'Escanear QR';
+  static const String nextStopLabel = 'Próxima parada';
+  static const String inProgressStopLabel = 'Em andamento';
+  static const String myPositionTooltip = 'Minha posição';
+  static const String accountMenuTooltip = 'Menu da conta';
+  static const String collectionChip = 'Coleta de localização ativa';
+  static const String dayNoService = 'Hoje não tem serviço para você';
+  static const String dayResumeButton = 'Retomar';
+  static const String dayDoneTitle = 'Dia concluído';
+  static const String retryButton = 'Tentar de novo';
+
+  /// `Lote <n> · <done> de <total> pontos hoje` (top bar).
+  static String dayProgress(int batch, int done, int total) =>
+      'Lote $batch · $done de $total pontos hoje';
+
+  /// The day's summary under "Dia concluído".
+  static String dayDoneSummary(int done) =>
+      done == 1 ? '1 ponto concluído hoje' : '$done pontos concluídos hoje';
+
+  /// The silence chip over the map: `Sem localização há <min> min`.
+  static String silenceChip(int minutes) => 'Sem localização há $minutes min';
+
+  /// A building's floor line in the sheet: `<prédio> · <andar>`.
+  static String buildingFloor(String building, String floor) =>
+      '$building · $floor';
 }

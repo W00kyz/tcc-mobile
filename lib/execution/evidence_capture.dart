@@ -14,7 +14,7 @@ class CapturedPhoto {
 
 /// The seam over `image_picker` + `flutter_image_compress` (Ruling 11, Etapa
 /// 5 design §6.4 — the OS camera app, not the `camera` package) that keeps
-/// `route_screen.dart`'s tests off the platform camera channel (docs/
+/// the map home's tests off the platform camera channel (docs/
 /// CLAUDE.base.md — "wrap third-party libs behind a thin interface").
 // ignore: one_member_abstracts
 abstract class EvidenceCapture {

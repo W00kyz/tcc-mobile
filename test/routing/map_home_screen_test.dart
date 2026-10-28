@@ -1,0 +1,330 @@
+import 'package:dio/dio.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/monitoring/silence_watchdog.dart';
+import 'package:route_monitor/routing/campus_map.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
+import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/ui/batch_card.dart';
+import 'package:route_monitor/ui/building_pin.dart';
+
+import '../support/fake_route_repository.dart';
+import 'map_home_harness.dart';
+
+/// Two buildings: "Central de Aulas" (Térreo, 1º andar) and "Bloco B"
+/// (2º andar), far enough apart to draw two pins.
+RouteSummary _twoBuildings() => routeWith(
+  stops: [
+    stopIn(id: 's1', buildingName: 'Central de Aulas'),
+    stopIn(
+      id: 's2',
+      orderIndex: 2,
+      buildingName: 'Central de Aulas',
+      floorLabel: '1º andar',
+    ),
+    stopIn(
+      id: 's3',
+      orderIndex: 3,
+      buildingId: 'b2',
+      buildingName: 'Bloco B',
+      floorLabel: '2º andar',
+      latitude: -7.214,
+      longitude: -35.906,
+    ),
+  ],
+);
+
+BuildingPin _pinOf(WidgetTester tester, String buildingId) =>
+    tester.widget<BuildingPin>(
+      find.descendant(
+        of: find.byKey(ValueKey('pin-$buildingId')),
+        matching: find.byType(BuildingPin),
+      ),
+    );
+
+/// The pin's `done/total` count, inside its circle (the label may hang
+/// off-screen to the right).
+Finder _pinCircle(String buildingId) => find.descendant(
+  of: find.byKey(ValueKey('pin-$buildingId')),
+  matching: find.textContaining('/'),
+);
+
+/// The top bar's progress dots, filled (`on`) or empty (`off`).
+Finder _dots(String state) => find.byWidgetPredicate(
+  (widget) =>
+      widget.key is ValueKey<String> &&
+      (widget.key! as ValueKey<String>).value.startsWith('progress-dot-$state'),
+);
+
+void main() {
+  group('day states (spec §6.10)', () {
+    testWidgets('no service says so, with no card and no start', (
+      tester,
+    ) async {
+      await pumpHome(
+        tester,
+        homeWith(FakeRouteRepository(myDayWith(null, serviceDay: false))),
+      );
+
+      expect(find.text(AppStrings.dayNoService), findsOneWidget);
+      expect(find.byType(BatchCardView), findsNothing);
+      expect(find.text(AppStrings.routeStartButton), findsNothing);
+      expect(find.byType(CampusMap), findsOneWidget);
+    });
+
+    testWidgets('no route yet shows the start panel', (tester) async {
+      await pumpHome(tester, homeWith(repositoryWith(null)));
+
+      expect(
+        find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a paused route shows why and "Retomar"', (tester) async {
+      final paused = routeWith(
+        status: 'PAUSED',
+        stops: [
+          stopIn(id: 's1', status: 'RELEASED', releaseReason: 'LEFT_CAMPUS'),
+        ],
+      );
+      await pumpHome(tester, homeWith(repositoryWith(paused)));
+
+      expect(find.text(AppStrings.routePausedTitle), findsOneWidget);
+      expect(find.text('Rota pausada'), findsOneWidget);
+      expect(
+        find.text(
+          AppStrings.routePausedReason(
+            AppStrings.releaseReasonLabel('LEFT_CAMPUS'),
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(FilledButton, AppStrings.dayResumeButton),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a done route shows "Dia concluído" and "Verificar de novo"', (
+      tester,
+    ) async {
+      final done = routeWith(
+        status: 'DONE',
+        stops: [stopIn(id: 's1', status: 'DONE')],
+      );
+      await pumpHome(tester, homeWith(repositoryWith(done)));
+
+      expect(find.text(AppStrings.dayDoneTitle), findsOneWidget);
+      expect(find.text(AppStrings.dayDoneSummary(1)), findsOneWidget);
+      expect(
+        find.widgetWithText(FilledButton, AppStrings.routeCheckAgainButton),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a load error offers "Tentar de novo" over the map', (
+      tester,
+    ) async {
+      final repository = FakeRouteRepository()
+        ..fetchError = DioException(
+          requestOptions: RequestOptions(path: '/routes/me'),
+        );
+      await pumpHome(tester, homeWith(repository));
+
+      expect(find.text(AppStrings.routeLoadError), findsOneWidget);
+      expect(find.byType(CampusMap), findsOneWidget);
+
+      repository.fetchError = null;
+      await tester.tap(find.text(AppStrings.retryButton));
+      await tester.pumpAndSettle();
+
+      expect(repository.fetchCount, greaterThan(1));
+      expect(find.text(AppStrings.routeLoadError), findsNothing);
+      expect(find.text(AppStrings.routeStartButton), findsOneWidget);
+    });
+  });
+
+  testWidgets('in-progress batch shows the card and Escanear QR', (
+    tester,
+  ) async {
+    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+
+    expect(find.byType(BatchCardView), findsOneWidget);
+    expect(scanQrButton(), findsOneWidget);
+    expect(find.text(AppStrings.nextStopLabel), findsOneWidget);
+  });
+
+  testWidgets('Escanear QR visible at all three snaps', (tester) async {
+    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+
+    for (final size in [0.22, 0.5, 0.9]) {
+      await snapSheetTo(tester, size);
+      expect(scanQrButton().hitTestable(), findsOneWidget, reason: '$size');
+    }
+  });
+
+  testWidgets('no Escanear QR when the batch has no PENDING stop', (
+    tester,
+  ) async {
+    final route = routeWith(
+      stops: [
+        stopIn(id: 's1', status: 'IN_PROGRESS'),
+        stopIn(id: 's2', orderIndex: 2, status: 'DONE'),
+      ],
+    );
+    await pumpHome(tester, homeWith(repositoryWith(route)));
+
+    expect(scanQrButton(), findsNothing);
+  });
+
+  testWidgets('tapping a pin selects the building', (tester) async {
+    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+
+    await tester.tap(_pinCircle('b2'));
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(MapHomeScreen)),
+    );
+    expect(container.read(selectedBuildingProvider), 'b2');
+    expect(find.text('2º andar'), findsWidgets);
+    expect(find.text('Térreo'), findsNothing);
+    expect(find.text('1º andar'), findsNothing);
+    expect(_pinOf(tester, 'b1').dimmed, isTrue);
+    expect(_pinOf(tester, 'b2').selected, isTrue);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(container.read(selectedBuildingProvider), isNull);
+    expect(_pinOf(tester, 'b1').dimmed, isFalse);
+    expect(find.byType(BatchCardView), findsOneWidget);
+  });
+
+  testWidgets(
+    'the building panel offers Sinalizar impossibilidade on PENDING and '
+    'IN_PROGRESS stops only',
+    (tester) async {
+      final route = routeWith(
+        stops: [
+          stopIn(id: 's1', status: 'DONE'),
+          stopIn(id: 's2', orderIndex: 2, status: 'IN_PROGRESS'),
+          stopIn(id: 's3', orderIndex: 3),
+          stopIn(
+            id: 's4',
+            orderIndex: 4,
+            status: 'RELEASED',
+            releaseReason: 'IMPEDIMENT',
+          ),
+        ],
+      );
+      await pumpHome(tester, homeWith(repositoryWith(route)));
+
+      await tester.tap(_pinCircle('b1'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text(AppStrings.routeSignalImpossibilityButton),
+        findsNWidgets(2),
+      );
+    },
+  );
+
+  testWidgets(
+    'top bar shows "Lote 2 · 3 de 8 pontos hoje" with 8 progress dots, '
+    '3 filled',
+    (tester) async {
+      final route = routeWith(
+        currentBatch: 2,
+        stops: [
+          for (var i = 1; i <= 3; i++)
+            stopIn(id: 'd$i', orderIndex: i, status: 'DONE'),
+          for (var i = 4; i <= 8; i++)
+            stopIn(id: 'p$i', orderIndex: i, batchNumber: 2),
+          stopIn(
+            id: 'r9',
+            orderIndex: 9,
+            batchNumber: 2,
+            status: 'RELEASED',
+          ),
+        ],
+      );
+      await pumpHome(tester, homeWith(repositoryWith(route)));
+
+      expect(find.text('Lote 2 · 3 de 8 pontos hoje'), findsOneWidget);
+      expect(_dots('on'), findsNWidgets(3));
+      expect(_dots('off'), findsNWidgets(5));
+    },
+  );
+
+  testWidgets('collection chip shows while the route is IN_PROGRESS', (
+    tester,
+  ) async {
+    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+
+    expect(find.text(AppStrings.collectionChip), findsOneWidget);
+  });
+
+  testWidgets('the silence chip shows "Sem localização há 12 min"', (
+    tester,
+  ) async {
+    // Started at t0, read at t0 + 12 min.
+    final t0 = DateTime.utc(2026, 10, 20, 8);
+    var now = t0;
+    final started = SilenceWatchdog(
+      clock: () => now,
+      scheduler: NoopScheduler(),
+      warningMinutes: 10,
+      releaseMinutes: 45,
+    )..startWatching();
+    now = t0.add(const Duration(minutes: 12));
+
+    await pumpHome(
+      tester,
+      homeWith(repositoryWith(_twoBuildings()), silenceWatchdog: started),
+    );
+
+    expect(find.text('Sem localização há 12 min'), findsOneWidget);
+    await tester.tap(find.text('Sem localização há 12 min'));
+    await tester.pumpAndSettle();
+    expect(find.text(AppStrings.silenceWarning(12, 33)), findsOneWidget);
+  });
+
+  testWidgets('"Minha posição" draws the worker on the map', (tester) async {
+    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+    expect(find.byKey(const ValueKey('worker-position')), findsNothing);
+
+    await tester.tap(find.byTooltip(AppStrings.myPositionTooltip));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('worker-position')), findsOneWidget);
+  });
+
+  testWidgets('"Minha posição" without GPS says so', (tester) async {
+    await pumpHome(
+      tester,
+      homeWith(
+        repositoryWith(_twoBuildings()),
+        locationService: FailingLocationService(),
+      ),
+    );
+
+    await tester.tap(find.byTooltip(AppStrings.myPositionTooltip));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.routeLocationUnavailable), findsOneWidget);
+    expect(find.byKey(const ValueKey('worker-position')), findsNothing);
+  });
+
+  testWidgets('a selected building still offers Escanear QR', (tester) async {
+    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+
+    await tester.tap(_pinCircle('b2'));
+    await tester.pumpAndSettle();
+
+    expect(scanQrButton().hitTestable(), findsOneWidget);
+  });
+}

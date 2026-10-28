@@ -8,8 +8,8 @@ import 'package:route_monitor/l10n/strings.dart';
 
 /// A pure scanner: verifies the QR signature offline (RF29, RNF13 — no
 /// network in a basement) and, on a valid QR, pops with the raw scanned
-/// string. It knows nothing about GPS or check-in — RouteScreen handles
-/// both once it gets the raw value back.
+/// string. It knows nothing about GPS or check-in — `stop_actions.dart`
+/// handles both once it gets the raw value back.
 class ScanScreen extends ConsumerStatefulWidget {
   const ScanScreen({this.controller, super.key});
 

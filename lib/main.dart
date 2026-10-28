@@ -11,7 +11,7 @@ import 'package:route_monitor/auth/registration_screen.dart';
 import 'package:route_monitor/monitoring/position_reporting_trigger.dart';
 import 'package:route_monitor/privacy/consent_screen.dart';
 import 'package:route_monitor/privacy/my_data_screen.dart';
-import 'package:route_monitor/routing/route_screen.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -81,7 +81,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/consentimento',
         builder: (context, state) => const ConsentScreen(),
       ),
-      GoRoute(path: '/rota', builder: (context, state) => const RouteScreen()),
+      GoRoute(
+        path: '/rota',
+        builder: (context, state) => const MapHomeScreen(),
+      ),
       GoRoute(
         path: '/meus-dados',
         builder: (context, state) => const MyDataScreen(),

@@ -5,14 +5,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
+import 'package:route_monitor/ui/map_chip.dart';
 
-/// The in-app silence warning (spec 2026-10-20-alocacao-automatica §7.3):
-/// "Sem enviar sua localização há X min…" while the app is open and the
-/// watchdog says the worker is silent. Silence grows with no event to react
-/// to, so the banner re-reads the watchdog every [refreshInterval]. Renders
-/// nothing otherwise, so callers can mount it unconditionally.
+/// The in-app silence warning (spec 2026-10-20-alocacao-automatica §7.3), as
+/// a chip over the map (redesign §6.2): "Sem localização há X min" while the
+/// app is open and the watchdog says the worker is silent; a tap opens the
+/// whole warning ("Sem enviar sua localização há X min…"). Silence grows
+/// with no event to react to, so the banner re-reads the watchdog every
+/// [refreshInterval]. Renders nothing otherwise, so callers can mount it
+/// unconditionally.
 ///
-///     Column(children: [const SilenceBanner(), Expanded(child: list)])
+///     Column(children: [const CollectionBanner(), const SilenceBanner()])
 class SilenceBanner extends ConsumerStatefulWidget {
   const SilenceBanner({super.key});
 
@@ -45,23 +48,17 @@ class _SilenceBannerState extends ConsumerState<SilenceBanner> {
     final warning = ref.watch(silenceWatchdogProvider)?.currentWarning();
     if (warning == null) return const SizedBox.shrink();
 
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      color: scheme.errorContainer,
-      child: Row(
-        children: [
-          Icon(Icons.location_off, size: 18, color: scheme.onErrorContainer),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              AppStrings.silenceWarning(
-                warning.silentMinutes,
-                warning.minutesUntilRelease,
-              ),
-              style: TextStyle(color: scheme.onErrorContainer),
-            ),
+    return MapChip(
+      icon: Icons.location_off,
+      label: AppStrings.silenceChip(warning.silentMinutes),
+      alert: true,
+      onTap: () => showChipExplanation(
+        context,
+        title: AppStrings.silenceChip(warning.silentMinutes),
+        paragraphs: [
+          AppStrings.silenceWarning(
+            warning.silentMinutes,
+            warning.minutesUntilRelease,
           ),
         ],
       ),

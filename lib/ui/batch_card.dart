@@ -74,7 +74,14 @@ class BatchCardView extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(AppStrings.batchCardSubtitle(card.total), style: muted),
+          Flexible(
+            child: Text(
+              AppStrings.batchCardSubtitle(card.total),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: muted,
+            ),
+          ),
           Row(
             children: [
               Text(

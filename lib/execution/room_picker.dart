@@ -87,18 +87,22 @@ class _RoomPickerSheetState extends State<_RoomPickerSheet> {
     );
   }
 
+  /// Expanded, because the theme's primary button asks for the full width.
   Widget _actions(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text(AppStrings.commonCancel),
+        Expanded(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(AppStrings.commonCancel),
+          ),
         ),
         const SizedBox(width: 8),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(_selected),
-          child: const Text(AppStrings.commonConfirm),
+        Expanded(
+          child: FilledButton(
+            onPressed: () => Navigator.of(context).pop(_selected),
+            child: const Text(AppStrings.commonConfirm),
+          ),
         ),
       ],
     );
