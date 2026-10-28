@@ -445,4 +445,17 @@ abstract final class AppStrings {
   static String silenceWarningPastRelease(int silent) =>
       'Sem enviar sua localização há $silent min. Seus pontos podem ter '
       'sido liberados. Abra o app ou procure sinal.';
+
+  // --- batch card atoms (not-by-colour labels) ---
+  static String slotDone(String hour) => 'Concluído às $hour';
+  static String slotReleased(String? reason) =>
+      reason == null ? 'Liberado' : 'Liberado: $reason';
+  static const String slotPending = 'Pendente';
+  static const String slotNext = 'Próximo';
+  static const String slotInProgress = 'Em andamento';
+  static const String slotPendingSync = 'Aguardando sincronização';
+  static String batchCardTitle(int n) => 'CARTÃO DO LOTE $n';
+  static String batchCardSubtitle(int total) => 'Junte os $total carimbos';
+  static String batchReleasedCount(int n) =>
+      n == 1 ? '1 liberado' : '$n liberados';
 }
