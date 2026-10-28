@@ -59,7 +59,10 @@ class PhotoSequenceScreen extends ConsumerStatefulWidget {
 class _State extends ConsumerState<PhotoSequenceScreen> {
   late final EvidenceCamera _camera = ref.read(evidenceCameraProvider);
   final List<SessionShot> _shots = [];
-  Set<String> _unsynced = {};
+
+  /// Each outbox row's state by id, as last read; a shot missing here was
+  /// delivered (see [shotStatusFor]).
+  Map<String, PendingOpState> _states = {};
   bool _ready = false;
   bool _failed = false;
   bool _busy = false;
@@ -90,15 +93,16 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
     }
   }
 
-  Future<void> _refreshUnsynced() async {
-    final rows = await ref
-        .read(localWriteStoreProvider)
-        .unsyncedForRoute(widget.routeId);
-    // A photo a sync worker is uploading right now (`sending`) cannot be
-    // deleted (`deletePendingPhoto` refuses it): show the cloud state.
-    _unsynced = {
-      for (final row in rows)
-        if (row.state != PendingOpState.sending) row.id,
+  /// Reads every shot's real state: the unsent rows (`pending`, `failed`,
+  /// `sending`) and the `blocked` ones. A photo a sync worker is uploading
+  /// right now (`sending`) cannot be deleted (`deletePendingPhoto` refuses
+  /// it), but it is not delivered either (final review I-1).
+  Future<void> _refreshStates() async {
+    final store = ref.read(localWriteStoreProvider);
+    final unsent = await store.unsyncedForRoute(widget.routeId);
+    final blocked = await store.blockedForRoute(widget.routeId);
+    _states = {
+      for (final row in [...unsent, ...blocked]) row.id: row.state,
     };
   }
 
@@ -116,7 +120,7 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
             photo: photo,
           );
       _invalidateCounts();
-      await _refreshUnsynced();
+      await _refreshStates();
       if (mounted) {
         setState(() => _shots.add(SessionShot(id: id, bytes: photo.bytes)));
       }
@@ -150,12 +154,16 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
   }
 
   Future<void> _openShot(SessionShot shot) async {
-    await _refreshUnsynced();
+    await _refreshStates();
     if (!mounted) return;
+    // Redraw the strip too: a badge may have moved on since the last shot.
+    setState(() {});
+    final state = _states[shot.id];
     final delete = await showShotViewer(
       context,
       shot: shot,
-      deletable: _unsynced.contains(shot.id),
+      status: shotStatusFor(state),
+      deletable: shotDeletable(state),
     );
     if (delete) await _delete(shot);
   }
@@ -271,7 +279,7 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _strip(),
+            _strip(count),
             const SizedBox(height: 12),
             _controls(
               canShoot: _ready && !_busy && !capped,
@@ -283,8 +291,11 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
     );
   }
 
-  Widget _strip() {
-    final slots = (widget.minimum ?? 0) - _shots.length;
+  /// The session's shots, then one empty slot per photo the stop still
+  /// needs: [count] is stop-wide, so photos taken in an earlier session
+  /// count too (final review M-2).
+  Widget _strip(int count) {
+    final slots = (widget.minimum ?? 0) - count;
     return SizedBox(
       height: 60,
       child: ListView(
@@ -297,14 +308,14 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
                 key: Key('photo-thumb-$i'),
                 shot: shot,
                 number: i + 1,
-                synced: !_unsynced.contains(shot.id),
+                status: shotStatusFor(_states[shot.id]),
                 onTap: () => _openShot(shot),
               ),
             ),
           for (var n = 1; n <= slots; n++)
             Padding(
               padding: const EdgeInsets.only(right: 10),
-              child: PendingSlot(number: _shots.length + n),
+              child: PendingSlot(number: count + n),
             ),
         ],
       ),

@@ -226,6 +226,8 @@ abstract final class AppStrings {
   static const String photoSequenceShutter = 'Tirar foto';
   static const String photoSequenceClose = 'Fechar';
   static const String photoSequenceSynced = 'Foto já enviada';
+  static const String photoSequenceNotSent = 'Foto ainda não enviada';
+  static const String photoSequenceBlocked = 'Foto não pôde ser enviada';
   static const String photoSequenceCameraError =
       'Não foi possível abrir a câmera.';
   static const String photoSequenceSaveError =

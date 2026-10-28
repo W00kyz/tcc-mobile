@@ -182,7 +182,8 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
         row != null &&
         row.kind == PendingOpKind.evidencePhoto &&
         (row.state == PendingOpState.pending ||
-            row.state == PendingOpState.failed);
+            row.state == PendingOpState.failed ||
+            row.state == PendingOpState.blocked);
     if (deletable) _rows.remove(operationId);
     return deletable;
   }

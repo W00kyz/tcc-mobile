@@ -156,8 +156,9 @@ abstract class LocalWriteStore {
   Future<void> resetToPending(String id);
 
   /// Deletes [operationId] only if it is an `evidencePhoto` row not yet
-  /// delivered (`pending` or `failed`); returns whether it did. A synced,
-  /// blocked or non-photo row is left untouched and yields `false`.
+  /// delivered and not in flight (`pending`, `failed` or `blocked`); returns
+  /// whether it did. A `synced` or `sending` row, or a non-photo one, is left
+  /// untouched and yields `false`.
   Future<bool> deletePendingPhoto(String operationId);
 }
 
@@ -262,6 +263,9 @@ class DriftLocalWriteStore implements LocalWriteStore {
             row.state.isIn([
               PendingOpState.pending.name,
               PendingOpState.failed.name,
+              // A blocked photo waits for the worker: dropping it is one of
+              // the ways out (final review I-1).
+              PendingOpState.blocked.name,
             ]),
       );
     return await delete.go() > 0;

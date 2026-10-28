@@ -332,6 +332,18 @@ void main() {
       expect(await store.localPhotoCountFor('exec-1'), 1);
       expect(await store.unsyncedForRoute('route-A'), hasLength(1));
     });
+
+    test('deletes a blocked photo, refuses a sending one', () async {
+      await enqueue('p-blocked', PendingOpKind.evidencePhoto);
+      await enqueue('p-sending', PendingOpKind.evidencePhoto);
+      await store.markBlocked('p-blocked', 'HTTP 422');
+      await store.claim('p-sending', now: 0, leaseUntil: 100);
+
+      expect(await store.deletePendingPhoto('p-blocked'), isTrue);
+      expect(await store.deletePendingPhoto('p-sending'), isFalse);
+      expect(await store.blockedForRoute('route-A'), isEmpty);
+      expect(await store.localPhotoCountFor('exec-1'), 1);
+    });
   });
 
   group('claiming a row for one send (two connections, one file)', () {

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/photo_sequence_screen.dart';
+import 'package:route_monitor/execution/photo_sequence_widgets.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -192,7 +193,7 @@ void main() {
     expect(find.text(AppStrings.photoSequenceSynced), findsOneWidget);
   });
 
-  testWidgets('Apagar is not offered while the photo is uploading', (
+  testWidgets('an uploading photo is not shown as sent and has no Apagar', (
     tester,
   ) async {
     final store = InMemoryLocalWriteStore();
@@ -205,7 +206,68 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('photo-delete')), findsNothing);
-    expect(find.byIcon(Icons.cloud_done), findsWidgets);
+    expect(find.byIcon(Icons.cloud_done), findsNothing);
+    expect(find.text(AppStrings.photoSequenceSynced), findsNothing);
+    expect(find.text(AppStrings.photoSequenceNotSent), findsOneWidget);
+  });
+
+  testWidgets('a blocked photo gets the brick badge and can be deleted', (
+    tester,
+  ) async {
+    final store = InMemoryLocalWriteStore();
+    await _pump(tester, store: store, minimum: 2);
+    await _shoot(tester);
+    final id = (await store.unsyncedForRoute('r1')).single.id;
+    await store.markBlocked(id, 'HTTP 422');
+
+    await tester.tap(find.byKey(const Key('photo-thumb-0')));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.photoSequenceBlocked), findsOneWidget);
+    expect(find.text(AppStrings.photoSequenceSynced), findsNothing);
+    final badge = tester.widget<Container>(
+      find
+          .ancestor(
+            of: find.descendant(
+              of: find.byKey(const Key('photo-thumb-0')),
+              matching: find.byIcon(Icons.cloud_off),
+            ),
+            matching: find.byType(Container),
+          )
+          .first,
+    );
+    expect(
+      (badge.decoration! as BoxDecoration).color,
+      FieldPalette.light.brick,
+    );
+
+    await tester.tap(find.byKey(const Key('photo-delete')));
+    await tester.pumpAndSettle();
+
+    expect(await store.blockedForRoute('r1'), isEmpty);
+    expect(await store.localPhotoCountFor('exec-1'), 0);
+    expect(find.byKey(const Key('photo-thumb-0')), findsNothing);
+    expect(find.text('0 de 2 obrigatórias'), findsOneWidget);
+  });
+
+  testWidgets("empty slots count the stop's photos from earlier sessions", (
+    tester,
+  ) async {
+    final store = InMemoryLocalWriteStore();
+    await store.enqueue(
+      id: 'earlier',
+      kind: PendingOpKind.evidencePhoto,
+      payload: {'execution_id': 'exec-1'},
+      routeId: 'r1',
+    );
+    await _pump(tester, store: store, minimum: 2);
+
+    expect(find.text('1 de 2 obrigatórias'), findsOneWidget);
+    expect(find.byType(PendingSlot), findsOneWidget);
+
+    await _shoot(tester);
+
+    expect(find.byType(PendingSlot), findsNothing);
   });
 
   testWidgets('no gallery entry point', (tester) async {
