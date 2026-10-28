@@ -9,6 +9,7 @@ import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_providers.dart';
+import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -25,16 +26,41 @@ class NoServicePanel extends StatelessWidget {
       const _Panel(title: AppStrings.dayNoService);
 }
 
+/// What the start bar says: its button and, on a paused route, why.
+typedef StartBarContent = ({String label, String? caption});
+
+/// The start bar a day shows instead of a sheet — no route yet on a service
+/// day ("Iniciar rota"), or a paused route ("Retomar" under its reason) —
+/// else null (a sheet shows).
+///
+///     final bar = startBarOf(day); // (label: 'Retomar', caption: 'Motivo: …')
+StartBarContent? startBarOf(MyDay? day) {
+  if (day == null) return null;
+  final route = day.route;
+  if (route == null) {
+    return day.serviceDay
+        ? (label: AppStrings.routeStartButton, caption: null)
+        : null;
+  }
+  if (route.status != 'PAUSED') return null;
+  return (
+    label: AppStrings.dayResumeButton,
+    caption: pausedCaption(route.latestReleaseReason),
+  );
+}
+
 /// Before the route starts and while it is paused: no sheet over the map,
 /// only the start button anchored at the bottom — a 56dp pill with a 16dp
 /// gutter, above the system bar. "Iniciar rota" asks for the first batch,
-/// "Retomar" resumes a paused route with a new one.
+/// "Retomar" resumes a paused route with a new one; [caption] (why it was
+/// paused) reads in a muted chip just above the pill.
 ///
-///     const StartDayBar(label: AppStrings.routeStartButton)
+///     StartDayBar(label: AppStrings.dayResumeButton, caption: 'Motivo: …')
 class StartDayBar extends StatelessWidget {
-  const StartDayBar({required this.label, super.key});
+  const StartDayBar({required this.label, this.caption, super.key});
 
   final String label;
+  final String? caption;
 
   @override
   Widget build(BuildContext context) {
@@ -47,21 +73,62 @@ class StartDayBar extends StatelessWidget {
         minimum: const EdgeInsets.only(bottom: 16),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: StartDayButton(label: label),
+          child: _captionAndButton(),
         ),
+      ),
+    );
+  }
+
+  Widget _captionAndButton() {
+    final text = caption;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (text != null) _StartBarCaption(text: text),
+        StartDayButton(label: label),
+      ],
+    );
+  }
+}
+
+/// The start bar's caption: over the map, so on a paper chip with a rule
+/// hairline rather than bare text on the tiles.
+class _StartBarCaption extends StatelessWidget {
+  const _StartBarCaption({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    final chip = BoxDecoration(
+      color: p.paper,
+      border: Border.all(color: p.rule),
+      borderRadius: BorderRadius.circular(16),
+    );
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: chip,
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 12, height: 16 / 12, color: p.muted),
       ),
     );
   }
 }
 
-/// How high [StartDayBar] reaches from the screen's bottom edge, system bar
-/// included: what "Minha posição" must clear.
+/// Why a paused route stopped, as the start bar's caption: `Motivo: <…>`,
+/// or null when the server sent no reason.
 ///
-///     bottom: startDayBarHeight(context) + 16
-double startDayBarHeight(BuildContext context) {
-  final inset = MediaQuery.paddingOf(context).bottom;
-  return (inset > 16 ? inset : 16) + 56;
-}
+///     pausedCaption(route.latestReleaseReason) // 'Motivo: Saiu do campus'
+String? pausedCaption(String? releaseReason) => releaseReason == null
+    ? null
+    : AppStrings.routePausedReason(
+        AppStrings.releaseReasonLabel(releaseReason),
+      );
 
 /// "Dia concluído" + the day's count + "Verificar de novo". Not final before
 /// the workday ends: points released later go back to the pool, and

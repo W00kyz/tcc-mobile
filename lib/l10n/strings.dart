@@ -132,6 +132,11 @@ abstract final class AppStrings {
       'Carimbe todas as tarefas do andar para sair';
   static const String floorCardDone = 'Prédio concluído';
 
+  /// Another floor's check-in is still open:
+  /// `Finalize <prédio> · <andar> antes`.
+  static String scanFinishOpenFloor(String building, String floor) =>
+      'Finalize $building · $floor antes';
+
   /// The floor card's title: `Complete <n> tarefas`.
   static String floorCardTitle(int n) =>
       'Complete $n ${n == 1 ? 'tarefa' : 'tarefas'}';
@@ -154,6 +159,9 @@ abstract final class AppStrings {
       'Não foi possível iniciar a rota. Tente novamente.';
   static const String routeNextBatchOffline =
       'Conecte-se para receber mais pontos';
+
+  /// Why a paused route's points went back to the pool.
+  static String routePausedReason(String reason) => 'Motivo: $reason';
 
   /// A stop's `release_reason` code in words (same labels as the dashboard).
   static String releaseReasonLabel(String code) => switch (code) {

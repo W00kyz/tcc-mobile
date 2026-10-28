@@ -282,7 +282,7 @@ void main() {
       },
     );
 
-    testWidgets('a paused route shows only "Retomar", which resumes it', (
+    testWidgets('a paused route explains why and "Retomar" resumes it', (
       tester,
     ) async {
       final paused = routeWith(
@@ -300,6 +300,14 @@ void main() {
       await pumpHome(tester, homeWith(repository));
 
       expect(find.byType(DraggableScrollableSheet), findsNothing);
+      expect(
+        find.text(
+          AppStrings.routePausedReason(
+            AppStrings.releaseReasonLabel('LEFT_CAMPUS'),
+          ),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('Sala 101'), findsNothing);
 
       await tester.tap(

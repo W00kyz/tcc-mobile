@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:route_monitor/ui/app_theme.dart';
@@ -44,6 +45,23 @@ List<double> mapSheetSnaps(
     _maxClosedSize,
   );
   return [closed, kMapSheetSnaps[1], kMapSheetSnaps.last];
+}
+
+/// One line of caption over the start bar (12sp text in an 8dp-padded
+/// chip) plus its 8dp gap to the pill.
+const double kStartBarCaptionHeight = 16 + 2 * 8 + 8;
+
+/// How high the start bar (the bottom-only pill shown instead of a sheet
+/// before the route starts or while paused) reaches from the screen's bottom
+/// edge: the 56dp pill above the system bar, at least 16dp up, and the
+/// caption over it when [withCaption]. What the map camera, "Minha posição"
+/// and the snackbars clear when no sheet is shown.
+///
+///     bottom: startBarHeight(context) + 16
+double startBarHeight(BuildContext context, {bool withCaption = false}) {
+  final inset = MediaQuery.paddingOf(context).bottom;
+  final caption = withCaption ? kStartBarCaptionHeight : 0.0;
+  return math.max<double>(inset, 16) + 56 + caption;
 }
 
 /// The bottom sheet over the map: a drag handle, a scrolling [header] +

@@ -14,7 +14,7 @@ import 'package:route_monitor/local/day_log_store.dart' show dayKey;
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/floor_actions.dart'
-    show lastStampedStopProvider;
+    show lastFloorExitProvider, lastStampedStopProvider;
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
@@ -72,12 +72,21 @@ class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
         .where((s) => s.stopId == stopId)
         .firstOrNull;
     if (slot != null && slot.state != SlotState.done) return;
+    // A floor exit checks out its stamped tasks one by one: wait until the
+    // last of them reads done before judging the card.
+    if (_exitUnderway(card)) return;
     _stamped = null;
     if (slot == null || !card.complete) return;
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _logged('full_card_failed', _celebrate(card, routeId, stopId)),
     );
   }
+
+  /// Some slot is stamped but not yet checked out. Only one floor is open
+  /// at a time, so these are the floor exit still being written.
+  static bool _exitUnderway(BatchCard card) => card.groups
+      .expand((g) => g.slots)
+      .any((s) => s.state == SlotState.stamped);
 
   Future<void> _celebrate(
     BatchCard card,
@@ -108,8 +117,9 @@ class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
 
   /// Counts the card once, right away (ruling R14): waiting for the sync
   /// would lose the card if the app were killed meanwhile. "Clean" means
-  /// nothing blocked and nothing unsent but the check-out just written for
-  /// [stampedStopId] — that one is always still in the outbox at this point.
+  /// nothing blocked and nothing unsent but the check-outs just written for
+  /// [stampedStopId] and the rest of its floor exit — those are always still
+  /// in the outbox at this point.
   Future<void> _recordCompletion(
     String routeId,
     String stampedStopId,
@@ -117,23 +127,22 @@ class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
   ) async {
     final store = ref.read(localWriteStoreProvider);
     final dayLog = ref.read(dayLogStoreProvider);
+    final ownExit = {stampedStopId, ...ref.read(lastFloorExitProvider)};
     // A `held` photo is not a write yet: it waits for its stamp.
     final pending = (await store.unsyncedForRoute(routeId)).where(
       (row) => row.state != PendingOpState.held,
     );
     final blocked = await store.blockedForRoute(routeId);
-    final otherPending = pending.where(
-      (row) => !_isCheckOutOf(row, stampedStopId),
-    );
+    final otherPending = pending.where((row) => !_isCheckOutOf(row, ownExit));
     await dayLog.recordCardCompleted(
       now,
       clean: blocked.isEmpty && otherPending.isEmpty,
     );
   }
 
-  static bool _isCheckOutOf(PendingOperationRow row, String stopId) =>
+  static bool _isCheckOutOf(PendingOperationRow row, Set<String> stopIds) =>
       row.kind == PendingOpKind.checkOut &&
-      row.payload['route_stop_id'] == stopId;
+      stopIds.contains(row.payload['route_stop_id']);
 
   /// Skipped for a day that is not today: offline, `myDayProvider` serves
   /// the last cached day, and its `service_day` belongs to that date. A day

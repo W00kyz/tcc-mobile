@@ -81,7 +81,12 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   late final SnackbarLane _lane = SnackbarLane(
     contextOf: () => mounted ? context : null,
     sheet: _sheet,
+    startBarReach: _startBarReach,
   );
+
+  /// The start bar shown in place of a sheet, as last built; null while a
+  /// sheet shows.
+  StartBarContent? _startBar;
 
   /// The pins last drawn, so the stamp listener finds the stop's building.
   List<DayBuilding> _buildings = const [];
@@ -114,6 +119,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         if (stopId != null) _onStamped(stopId);
       });
     final dayAsync = ref.watch(myDayProvider);
+    _startBar = startBarOf(dayAsync.value);
     // Watched here so the automatic next-batch pull lives as long as the
     // screen does (spec §6.4), and its offline panel shows in the sheet.
     final nextBatch = ref.watch(batchAllocationProvider);
@@ -165,10 +171,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
                       ),
                     ),
                     _topOverlay(route, local),
-                    _myPositionButton(
-                      constraints.maxHeight,
-                      hasSheet: _startLabel(dayAsync.value) == null,
-                    ),
+                    _myPositionButton(constraints.maxHeight),
                     _sheetFor(dayAsync, local, buildings, pinned, nextBatch),
                   ],
                 ),
@@ -198,16 +201,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     return _panelSheet(const CardSkeleton());
   }
 
-  /// The start bar's label when the day shows only it — no route yet on a
-  /// service day, or a paused route — else null (a sheet shows).
-  String? _startLabel(MyDay? day) {
-    if (day == null) return null;
-    final route = day.route;
-    if (route == null) {
-      return day.serviceDay ? AppStrings.routeStartButton : null;
-    }
-    return route.status == 'PAUSED' ? AppStrings.dayResumeButton : null;
-  }
+  /// What the map, "Minha posição" and the snackbars clear at the bottom:
+  /// the start bar (with its caption, if any) when no sheet shows.
+  double _startBarReach(BuildContext context) =>
+      startBarHeight(context, withCaption: _startBar?.caption != null);
 
   /// A new batch (or route) starts with no building highlighted: a
   /// selection left from the last batch would still dim the pins and
@@ -283,7 +280,9 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         48,
         top,
         48,
-        constraints.maxHeight * kMapSheetInitial + 24,
+        _startBar == null
+            ? constraints.maxHeight * kMapSheetInitial + 24
+            : _startBarReach(context) + 24,
       ),
       tileProviderOverride: widget.mapTileProvider,
     );
@@ -329,14 +328,15 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   /// "Minha posição", at the right just above the sheet (or the start bar);
   /// hidden while the sheet is open past half, where it would sit under the
   /// top bar.
-  Widget _myPositionButton(double height, {required bool hasSheet}) {
+  Widget _myPositionButton(double height) {
+    final hasSheet = _startBar == null;
     return ListenableBuilder(
       listenable: _sheet,
       builder: (context, _) {
         final size = _sheet.isAttached ? _sheet.size : kMapSheetInitial;
         final p =
             Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
-        final above = hasSheet ? height * size : startDayBarHeight(context);
+        final above = hasSheet ? height * size : _startBarReach(context);
         return Positioned(
           right: 16,
           bottom: above + 16,
@@ -365,8 +365,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     String? pinned,
     NextBatchState nextBatch,
   ) {
-    final start = _startLabel(day);
-    if (start != null) return StartDayBar(label: start);
+    final start = _startBar;
+    if (start != null) {
+      return StartDayBar(label: start.label, caption: start.caption);
+    }
     final route = day.route;
     if (route == null) return _panelSheet(const NoServicePanel());
     return switch (route.status) {
@@ -411,10 +413,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         ],
       ),
       body: _floorCard(building),
-      // Nothing left to scan in a finished building.
-      stickyFooter: building.complete
-          ? null
-          : ScanFooter(route: route, building: building),
+      stickyFooter: scanFooterFor(route, buildings, building),
     );
   }
 

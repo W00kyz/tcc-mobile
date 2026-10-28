@@ -72,14 +72,7 @@ class FloorCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            floor.label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: p.ink,
-            ),
-          ),
+          _floorLabel(floor, p),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -90,6 +83,11 @@ class FloorCard extends StatelessWidget {
       ),
     );
   }
+
+  Widget _floorLabel(FloorRow floor, FieldPalette p) => Text(
+    floor.label,
+    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
+  );
 
   Widget _slot(CardSlot slot, FloorRow floor) {
     final animate =

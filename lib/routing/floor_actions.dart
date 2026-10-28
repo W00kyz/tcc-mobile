@@ -41,6 +41,24 @@ class LastStamped extends Notifier<String?> {
   void clear() => state = null;
 }
 
+/// The stops the last floor exit checks out, set before its first
+/// check-out row is written. The full card counts the batch clean with
+/// these rows still unsent: they are this exit's own, not old debt.
+///
+///     ref.read(lastFloorExitProvider); // {'s1', 's2'} after their exit
+final lastFloorExitProvider = NotifierProvider<FloorExit, Set<String>>(
+  FloorExit.new,
+);
+
+class FloorExit extends Notifier<Set<String>> {
+  @override
+  Set<String> build() => const {};
+
+  // A method, not a setter: reads as the action it is at the call site.
+  // ignore: use_setters_to_change_properties
+  void record(Set<String> routeStopIds) => state = routeStopIds;
+}
+
 /// The stop whose task was just reported impossible: the card draws that one
 /// slot as a red stamp, the map home centres on its building. Same shape as
 /// [lastStampedStopProvider].
@@ -210,6 +228,7 @@ Future<void> checkOutFloor(
   if (scan == null) return;
   if (!await _isFloorExitQr(ref, floor, scan, notify)) return;
 
+  ref.read(lastFloorExitProvider.notifier).record(stamped.toSet());
   for (final stopId in stamped) {
     await _checkOutStamped(ref, route, stopId, scan);
   }

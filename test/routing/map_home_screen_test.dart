@@ -82,7 +82,7 @@ void main() {
       );
     });
 
-    testWidgets('a paused route shows only "Retomar", with no sheet', (
+    testWidgets('a paused route shows why and "Retomar", with no sheet', (
       tester,
     ) async {
       final paused = routeWith(
@@ -93,6 +93,14 @@ void main() {
       );
       await pumpHome(tester, homeWith(repositoryWith(paused)));
 
+      expect(
+        find.text(
+          AppStrings.routePausedReason(
+            AppStrings.releaseReasonLabel('LEFT_CAMPUS'),
+          ),
+        ),
+        findsOneWidget,
+      );
       expect(
         find.widgetWithText(FilledButton, AppStrings.dayResumeButton),
         findsOneWidget,

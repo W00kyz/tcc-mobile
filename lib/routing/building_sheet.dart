@@ -63,20 +63,15 @@ class BuildingSheetHeader extends ConsumerWidget {
   }
 
   Widget _titles(FieldPalette p) {
-    final floor = currentFloorOf(building);
+    final label = selected
+        ? AppStrings.buildingSheetSelected
+        : AppStrings.buildingSheetNext;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(label, style: TextStyle(fontSize: 12, color: p.muted)),
         Text(
-          selected
-              ? AppStrings.buildingSheetSelected
-              : AppStrings.buildingSheetNext,
-          style: TextStyle(fontSize: 12, color: p.muted),
-        ),
-        Text(
-          floor == null
-              ? building.name
-              : AppStrings.buildingFloor(building.name, floor.label),
+          _placeText(),
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.w700,
@@ -85,6 +80,13 @@ class BuildingSheetHeader extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  /// `Nome · Andar`, or the name alone once no floor has work left.
+  String _placeText() {
+    final floor = currentFloorOf(building);
+    if (floor == null) return building.name;
+    return AppStrings.buildingFloor(building.name, floor.label);
   }
 
   /// Straight-line metres from the worker's last fix; null without one.
@@ -100,48 +102,90 @@ class BuildingSheetHeader extends ConsumerWidget {
   );
 }
 
+/// A floor with a check-in open, and the building it is in.
+typedef OpenFloor = ({DayBuilding building, FloorRow floor});
+
+/// The floor checked in somewhere other than [building], if any: only one
+/// floor is open at a time, so its exit scan comes before any other entry.
+///
+///     final elsewhere = openFloorElsewhere(buildings, building);
+OpenFloor? openFloorElsewhere(
+  List<DayBuilding> buildings,
+  DayBuilding building,
+) {
+  for (final other in buildings) {
+    if (other.buildingId == building.buildingId) continue;
+    final floor = openFloorOf(other);
+    if (floor != null) return (building: other, floor: floor);
+  }
+  return null;
+}
+
 /// The sheet's fixed footer: "Escanear QR" to check in to a floor of
 /// [building], or "Escanear QR de saída" while a floor is checked in. Off
-/// until the worker is near the building, and the exit also until every task
-/// checked in on the floor is stamped; a caption above says which.
+/// until the worker is near the building, the exit also until every task
+/// checked in on the floor is stamped, and the entry while [openElsewhere]
+/// (another building's floor) still waits for its exit; a caption above
+/// says which.
 ///
 ///     ScanFooter(route: route, building: building)
 class ScanFooter extends ConsumerWidget {
-  const ScanFooter({required this.route, required this.building, super.key});
+  const ScanFooter({
+    required this.route,
+    required this.building,
+    this.openElsewhere,
+    super.key,
+  });
 
   final RouteSummary route;
   final DayBuilding building;
 
+  /// A floor of another building still checked in.
+  final OpenFloor? openElsewhere;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final floor = openFloorOf(building);
     final near = isNearBuilding(
       ref.watch(workerPositionProvider),
       building.position,
     );
-    final floor = openFloorOf(building);
     final caption = _blockedCaption(near: near, floor: floor);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (caption != null) _caption(context, caption),
-        FilledButton.icon(
-          key: const ValueKey('scan-footer-button'),
-          onPressed: caption != null ? null : () => _scan(context, ref, floor),
-          icon: const Icon(Icons.qr_code_scanner),
-          label: Text(
-            floor == null
-                ? AppStrings.scanQrButton
-                : AppStrings.scanExitQrButton,
-          ),
-        ),
+        if (caption != null) _FooterCaption(text: caption),
+        _button(context, ref, floor, enabled: caption == null),
       ],
     );
   }
 
-  /// Why the button is off, or null when it is on. Proximity comes first:
-  /// stamping the rest does not help a worker who is not there.
+  Widget _button(
+    BuildContext context,
+    WidgetRef ref,
+    FloorRow? floor, {
+    required bool enabled,
+  }) => FilledButton.icon(
+    key: const ValueKey('scan-footer-button'),
+    onPressed: enabled ? () => _scan(context, ref, floor) : null,
+    icon: const Icon(Icons.qr_code_scanner),
+    label: Text(
+      floor == null ? AppStrings.scanQrButton : AppStrings.scanExitQrButton,
+    ),
+  );
+
+  /// Why the button is off, or null when it is on. An open floor elsewhere
+  /// comes first (its exit is owed wherever the worker stands), then
+  /// proximity: stamping the rest does not help a worker who is not there.
   String? _blockedCaption({required bool near, required FloorRow? floor}) {
+    final other = openElsewhere;
+    if (floor == null && other != null) {
+      return AppStrings.scanFinishOpenFloor(
+        other.building.name,
+        other.floor.label,
+      );
+    }
     if (!near) return AppStrings.scanNeedsProximity;
     if (floor != null && !floor.readyForCheckOut) {
       return AppStrings.scanExitNeedsAllTasks;
@@ -153,8 +197,33 @@ class ScanFooter extends ConsumerWidget {
     if (floor == null) return checkInFloor(context, ref, route);
     return checkOutFloor(context, ref, route, floor);
   }
+}
 
-  Widget _caption(BuildContext context, String text) {
+/// The footer for [building] among the day's [buildings]; null for a
+/// finished building, which has nothing left to scan.
+///
+///     stickyFooter: scanFooterFor(route, buildings, building)
+ScanFooter? scanFooterFor(
+  RouteSummary route,
+  List<DayBuilding> buildings,
+  DayBuilding building,
+) {
+  if (building.complete) return null;
+  return ScanFooter(
+    route: route,
+    building: building,
+    openElsewhere: openFloorElsewhere(buildings, building),
+  );
+}
+
+/// Why the scan button is off, centred above it in muted 12sp.
+class _FooterCaption extends StatelessWidget {
+  const _FooterCaption({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
     final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),

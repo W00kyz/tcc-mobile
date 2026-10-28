@@ -94,53 +94,21 @@ BatchCard buildBatchCard(
   RouteSummary route,
   Map<String, LocalStopState> local,
   Set<String> pendingSyncStopIds,
-) => _buildCardFor(
-  route,
-  route.currentBatch,
-  local,
-  pendingSyncStopIds,
-  marksNext: true,
-);
-
-/// One card per batch present in [route]'s stops, in ascending batch order
-/// — the map sheet's carousel. Only the current batch's card has a `next`
-/// slot: an earlier batch is finished work, and a later one is not the
-/// worker's to start yet.
-///
-///     final cards = buildBatchCards(route, local, pendingSyncStopIds);
-List<BatchCard> buildBatchCards(
-  RouteSummary route,
-  Map<String, LocalStopState> local,
-  Set<String> pendingSyncStopIds,
-) {
-  final batches = {for (final stop in route.stops) stop.batchNumber}.toList()
-    ..sort();
-  return [
-    for (final batch in batches)
-      _buildCardFor(
-        route,
-        batch,
-        local,
-        pendingSyncStopIds,
-        marksNext: batch == route.currentBatch,
-      ),
-  ];
-}
+) => _buildCardFor(route, route.currentBatch, local, pendingSyncStopIds);
 
 /// The card of [batchNumber]: its stops in route order, grouped by building
-/// in the order each building first appears. With [marksNext], the first
-/// open stop is the `next` slot.
+/// in the order each building first appears. The first open stop is the
+/// `next` slot.
 BatchCard _buildCardFor(
   RouteSummary route,
   int batchNumber,
   Map<String, LocalStopState> local,
-  Set<String> pendingSyncStopIds, {
-  required bool marksNext,
-}) {
+  Set<String> pendingSyncStopIds,
+) {
   final stops = route.stops.where((s) => s.batchNumber == batchNumber).toList()
     ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
 
-  var nextAssigned = !marksNext;
+  var nextAssigned = false;
   final slotsByBuilding = <String, List<CardSlot>>{};
   final stopsByBuilding = <String, List<RouteStopSummary>>{};
   for (final stop in stops) {

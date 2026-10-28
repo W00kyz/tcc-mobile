@@ -5,11 +5,13 @@ import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/ui/map_sheet.dart';
 
+import '../support/fake_connectivity.dart';
 import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
 
@@ -79,9 +81,72 @@ void main() {
       AppStrings.routeStartButton,
     );
     final rect = tester.getRect(button);
+    final width = MediaQuery.sizeOf(tester.element(button)).width;
     expect(rect.height, 56);
     expect(rect.left, 16);
-    expect(rect.right, tester.view.physicalSize.width - 16);
+    expect(rect.right, width - 16);
+  });
+
+  testWidgets('a paused route says why just above "Retomar"', (tester) async {
+    final paused = routeWith(
+      status: 'PAUSED',
+      stops: [
+        stopIn(id: 's1', status: 'RELEASED', releaseReason: 'LEFT_CAMPUS'),
+      ],
+    );
+    await pumpHome(tester, homeWith(repositoryWith(paused)));
+
+    final reason = find.text(
+      AppStrings.routePausedReason(
+        AppStrings.releaseReasonLabel('LEFT_CAMPUS'),
+      ),
+    );
+    final resume = find.widgetWithText(
+      FilledButton,
+      AppStrings.dayResumeButton,
+    );
+    expect(reason, findsOneWidget);
+    expect(
+      tester.getBottomLeft(reason).dy,
+      lessThan(tester.getTopLeft(resume).dy),
+    );
+    expect(find.byType(DraggableScrollableSheet), findsNothing);
+  });
+
+  testWidgets('with no sheet the map keeps clear of the start bar only', (
+    tester,
+  ) async {
+    await pumpHome(tester, homeWith(repositoryWith(null)));
+
+    final map = tester.widget<CampusMap>(find.byType(CampusMap));
+    // 56dp pill + 16dp off the bottom (no system inset) + 24dp air.
+    expect(map.overlayPadding.bottom, 56 + 16 + 24);
+  });
+
+  testWidgets('with no sheet a snackbar sits just above the start bar', (
+    tester,
+  ) async {
+    await pumpHome(
+      tester,
+      homeWith(repositoryWith(null), connectivity: FakeConnectivity()),
+    );
+
+    await tester.tap(
+      find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+    );
+    await tester.pumpAndSettle();
+
+    final snack = find.widgetWithText(SnackBar, AppStrings.routeStartOffline);
+    expect(snack, findsOneWidget);
+    final surface = tester.getRect(
+      find.descendant(of: snack, matching: find.byType(Material)).first,
+    );
+    final bar = tester.getRect(
+      find.widgetWithText(FilledButton, AppStrings.routeStartButton),
+    );
+    expect(surface.bottom, lessThanOrEqualTo(bar.top));
+    expect(bar.top - surface.bottom, lessThan(24));
+    await tester.pumpAndSettle(const Duration(seconds: 6));
   });
 
   testWidgets('IN_PROGRESS shows the next building with its floors in order', (
@@ -160,6 +225,48 @@ void main() {
 
     expect(scanFooterEnabled(tester), isTrue);
     expect(find.text(AppStrings.scanExitNeedsAllTasks), findsNothing);
+  });
+
+  testWidgets('a floor open in another building blocks the entry scan here', (
+    tester,
+  ) async {
+    final route = routeWith(
+      stops: [
+        stopIn(
+          id: 's1',
+          buildingName: 'Central de Aulas',
+          status: 'IN_PROGRESS',
+        ),
+        stopIn(
+          id: 's2',
+          orderIndex: 2,
+          buildingId: 'b2',
+          buildingName: 'Bloco B',
+          floorLabel: '2º andar',
+          latitude: -7.214,
+          longitude: -35.906,
+        ),
+      ],
+    );
+    await pumpHome(
+      tester,
+      homeWith(
+        repositoryWith(route),
+        stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
+      ),
+    );
+    // The sheet stays on the building whose floor is open.
+    expect(shownFloorCard(tester).building.buildingId, 'b1');
+
+    await tester.tap(pinCircle('b2'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.scanQrButton), findsOneWidget);
+    expect(scanFooterEnabled(tester), isFalse);
+    expect(
+      find.text(AppStrings.scanFinishOpenFloor('Central de Aulas', 'Térreo')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a finished building hides the scan button and reads "Prédio '

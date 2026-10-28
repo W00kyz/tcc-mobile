@@ -230,6 +230,48 @@ void main() {
       );
     });
 
+    testWidgets('a two-task floor exit still records a clean card, '
+        'whatever order the tasks were stamped in', (tester) async {
+      final dayLog = RecordingDayLogStore();
+      final route = routeWith(
+        currentBatch: 2,
+        stops: [
+          stopIn(id: 's1', batchNumber: 2, status: 'IN_PROGRESS'),
+          stopIn(
+            id: 's2',
+            batchNumber: 2,
+            status: 'IN_PROGRESS',
+            orderIndex: 2,
+          ),
+        ],
+      );
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(route),
+          stopProgressStore: FakeStopProgressStore({
+            's1': 'exec-1',
+            's2': 'exec-2',
+          }),
+          syncWorker: RecordingSyncWorker(),
+          dayLogStore: dayLog,
+        ),
+      );
+      final ref = tester.element(find.byType(MapHomeScreen)) as WidgetRef;
+
+      // s1 stamped last, yet checked out first by the exit.
+      await concludeTask(ref, route, route.stops[1]);
+      await concludeTask(ref, route, route.stops[0]);
+      await tester.pumpAndSettle();
+      await scanWith(tester, qrOf('Térreo'));
+
+      expect(find.text(AppStrings.fullCardTitle), findsOneWidget);
+      expect(
+        dayLog.calls.where((c) => c.startsWith('cardCompleted')),
+        [endsWith(':true')],
+      );
+    });
+
     testWidgets('a blocked row makes the card not clean', (tester) async {
       final dayLog = await concludeLast(
         tester,

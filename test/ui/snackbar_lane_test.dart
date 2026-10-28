@@ -120,4 +120,29 @@ void main() {
       closeTo(height * 0.22 + 8, 0.01),
     );
   });
+
+  testWidgets('with no sheet attached the margin clears the start bar', (
+    tester,
+  ) async {
+    final sheet = DraggableScrollableController();
+    addTearDown(sheet.dispose);
+    late BuildContext home;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            home = context;
+            return const SizedBox.expand();
+          },
+        ),
+      ),
+    );
+
+    // 56dp pill + 16dp off the bottom edge, then 8dp of air.
+    expect(sheetSnackBarMargin(home, sheet).bottom, 56 + 16 + 8);
+    expect(
+      sheetSnackBarMargin(home, sheet, startBarReach: (_) => 120).bottom,
+      128,
+    );
+  });
 }
