@@ -90,6 +90,8 @@ abstract final class AppStrings {
       'Seu cadastro não foi aprovado.';
   static const String approvalDeactivatedMessage =
       'Seu cadastro foi desativado pelo gestor.';
+  static const String approvalEmptyCard =
+      'Seu cartão chega quando a gestora aprovar o cadastro';
   static const String approvalRefreshButton = 'Atualizar';
   static const String approvalExitButton = 'Sair';
   static const String approvalStillPending =
@@ -322,6 +324,9 @@ abstract final class AppStrings {
   static const String appealsEligibleTitle =
       'Pontos liberados que você pode contestar';
   static const String appealsEligibleEmpty = 'Nenhum ponto para contestar.';
+  static const String appealsEmptyTitle = 'Nenhum recurso por enquanto';
+  static const String appealsEmptyBody =
+      'Quando um ponto seu for liberado, você poderá contestar por aqui.';
   static const String appealsMineTitle = 'Meus recursos';
   static const String appealsMineEmpty = 'Você ainda não enviou recursos.';
   static const String appealsLoadError =
@@ -398,6 +403,8 @@ abstract final class AppStrings {
   static const String notificationsLoadError =
       'Não foi possível carregar as notificações.';
   static const String notificationsEmpty = 'Nenhuma notificação.';
+  static const String notificationsEmptyBody =
+      'Avisos da gestora e alertas da rota aparecem aqui.';
   static const String notificationKindAlert = 'Alerta';
   static const String notificationKindImpedimentReported = 'Impossibilidade';
   static const String notificationKindAppealFiled = 'Recurso';

@@ -131,5 +131,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(AppStrings.notificationsEmpty), findsOneWidget);
+    expect(find.text(AppStrings.notificationsEmptyBody), findsOneWidget);
   });
 }

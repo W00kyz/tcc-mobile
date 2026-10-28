@@ -77,6 +77,10 @@ class _ApprovalScreenState extends ConsumerState<ApprovalScreen> {
                 ),
               ],
               const SizedBox(height: 24),
+              if (isPending) ...[
+                const _EmptyCard(),
+                const SizedBox(height: 24),
+              ],
               if (isPending)
                 FilledButton(
                   onPressed: _isRefreshing ? null : _refresh,
@@ -92,6 +96,59 @@ class _ApprovalScreenState extends ConsumerState<ApprovalScreen> {
       ),
     );
   }
+}
+
+/// The batch card the worker will get, still blank: a card-shaped panel
+/// with a row of empty slots and the line that says when it arrives.
+class _EmptyCard extends StatelessWidget {
+  const _EmptyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      key: const Key('approval-empty-card'),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: scheme.outline),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [for (var i = 0; i < 4; i++) _EmptySlot(scheme.outline)],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            AppStrings.approvalEmptyCard,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptySlot extends StatelessWidget {
+  const _EmptySlot(this.line);
+
+  final Color line;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 48,
+    height: 48,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      border: Border.all(color: line, width: 2),
+    ),
+  );
 }
 
 String _message(WorkerStanding standing) => switch (standing.status) {

@@ -109,6 +109,27 @@ void main() {
     expect(find.text(AppStrings.approvalExitButton), findsOneWidget);
   });
 
+  testWidgets('a pending worker sees an empty card that says it is coming', (
+    tester,
+  ) async {
+    await _pump(tester, standing: _pending);
+
+    expect(
+      find.text('Seu cartão chega quando a gestora aprovar o cadastro'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('approval-empty-card')), findsOneWidget);
+  });
+
+  testWidgets('a rejected worker sees no empty card', (tester) async {
+    await _pump(
+      tester,
+      standing: const WorkerStanding(status: WorkerStatus.rejected),
+    );
+
+    expect(find.byKey(const Key('approval-empty-card')), findsNothing);
+  });
+
   testWidgets('"Atualizar" moves on to the route once approved', (
     tester,
   ) async {
