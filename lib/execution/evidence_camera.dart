@@ -20,8 +20,8 @@ abstract class EvidenceCamera {
   Future<void> close();
 }
 
-/// [EvidenceCamera] over `package:camera`: back camera, high resolution,
-/// flash off.
+/// [EvidenceCamera] over `package:camera`: back camera, very high
+/// resolution, flash off.
 class DeviceEvidenceCamera implements EvidenceCamera {
   CameraController? _controller;
 
@@ -34,7 +34,10 @@ class DeviceEvidenceCamera implements EvidenceCamera {
     );
     final controller = CameraController(
       back,
-      ResolutionPreset.high,
+      // `high` is only 720p on Android; `veryHigh` (1080p) keeps the photo
+      // at least as sharp as the old image_picker path, whose output the
+      // compressor already brings down to a 1600 px side (final review I-3).
+      ResolutionPreset.veryHigh,
       enableAudio: false,
     );
     _controller = controller;
