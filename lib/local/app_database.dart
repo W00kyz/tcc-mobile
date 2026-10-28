@@ -96,15 +96,21 @@ class ReleasedStops extends Table {
 /// How long a statement waits for another connection's lock before failing.
 const Duration appDatabaseBusyTimeout = Duration(seconds: 5);
 
-/// IMPORTANT: the background drain (redesign §6.9, `background_sync.dart`)
-/// opens this same file on a second connection — its own isolate, sometimes
-/// its own engine — while the app may be writing. SQLite's default timeout
-/// is zero: the loser of a lock race would fail at once with "database is
-/// locked", and a failed `markSynced` would even be classified as a hard
-/// error and block a row the server already took. Waiting a few seconds
-/// turns that race into a short queue.
-final String appDatabaseBusyTimeoutPragma =
-    'PRAGMA busy_timeout = ${appDatabaseBusyTimeout.inMilliseconds}';
+/// IMPORTANT: run on every connection to the device file. The background
+/// drain (redesign §6.9, `background_sync.dart`) opens this same file on a
+/// second connection — its own isolate, sometimes its own engine — while the
+/// app may be writing.
+/// - `busy_timeout`: SQLite's default is zero, so the loser of a lock race
+///   failed at once with "database is locked" — a failed `markSynced` would
+///   even be classified hard and block a row the server already took.
+/// - WAL: readers never wait on the writer, and a deferred read-then-write
+///   transaction (`ReleasedStopStore.record`) cannot deadlock against the
+///   other connection the way it can in rollback mode, where the busy
+///   handler is skipped and SQLITE_BUSY comes back at once.
+final List<String> appDatabaseConnectionPragmas = [
+  'PRAGMA busy_timeout = ${appDatabaseBusyTimeout.inMilliseconds}',
+  'PRAGMA journal_mode = WAL',
+];
 
 @DriftDatabase(
   tables: [
@@ -123,7 +129,7 @@ class AppDatabase extends _$AppDatabase {
             driftDatabase(
               name: 'route_monitor',
               native: DriftNativeOptions(
-                setup: (db) => db.execute(appDatabaseBusyTimeoutPragma),
+                setup: (db) => appDatabaseConnectionPragmas.forEach(db.execute),
               ),
             ),
       );

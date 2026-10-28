@@ -21,6 +21,13 @@ String? apiErrorCode(DioException error) {
   return detail is Map ? detail['code'] as String? : null;
 }
 
+/// Every request is bounded in time: a hung socket must fail (a soft sync
+/// error, retried) rather than hold an outbox row's send claim past its lease
+/// — `SyncWorker.sendLease` is sized from these.
+const Duration apiConnectTimeout = Duration(seconds: 20);
+const Duration apiSendTimeout = Duration(seconds: 60);
+const Duration apiReceiveTimeout = Duration(seconds: 60);
+
 /// One seam for base URL and bearer token — every screen builds its Dio
 /// through here instead of constructing one inline (docs/CLAUDE.base.md —
 /// Dependencies).
@@ -54,6 +61,9 @@ Dio buildDio({
   final dio = Dio(
     BaseOptions(
       baseUrl: baseUrl,
+      connectTimeout: apiConnectTimeout,
+      sendTimeout: apiSendTimeout,
+      receiveTimeout: apiReceiveTimeout,
       headers: accessToken != null
           ? {'Authorization': 'Bearer $accessToken'}
           : const {},

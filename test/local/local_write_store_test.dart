@@ -333,4 +333,59 @@ void main() {
       expect(await store.unsyncedForRoute('route-A'), hasLength(1));
     });
   });
+
+  group('claiming a row for one send (two connections, one file)', () {
+    Future<void> enqueueImpediment() => store.enqueue(
+      id: 'op-1',
+      kind: PendingOpKind.impediment,
+      payload: {'x': 1},
+      routeId: 'route-A',
+    );
+
+    test('only the first claim of a due row wins', () async {
+      await enqueueImpediment();
+
+      expect(await store.claim('op-1', now: 10, leaseUntil: 100), isTrue);
+      expect(await store.claim('op-1', now: 10, leaseUntil: 100), isFalse);
+    });
+
+    test('a claimed row is still unsent work, but not due', () async {
+      await enqueueImpediment();
+      await store.claim('op-1', now: 10, leaseUntil: 100);
+
+      expect(
+        (await store.unsyncedForRoute('route-A')).single.state,
+        PendingOpState.sending,
+      );
+      expect(await store.routeIdsWithWork(), ['route-A']);
+      expect(await store.dueForRoute('route-A', now: 50), isEmpty);
+    });
+
+    test('an expired lease makes the row due and claimable again', () async {
+      await enqueueImpediment();
+      await store.claim('op-1', now: 10, leaseUntil: 100);
+
+      expect(await store.dueForRoute('route-A', now: 100), hasLength(1));
+      expect(await store.claim('op-1', now: 100, leaseUntil: 200), isTrue);
+    });
+
+    test('a row in its retry backoff cannot be claimed', () async {
+      await enqueueImpediment();
+      await store.markRetryScheduled('op-1', attempts: 1, nextAttemptAt: 500);
+
+      expect(await store.claim('op-1', now: 10, leaseUntil: 100), isFalse);
+    });
+
+    test('releaseClaim puts the row back as it was', () async {
+      await enqueueImpediment();
+      final before = (await store.unsyncedForRoute('route-A')).single;
+      await store.claim('op-1', now: 10, leaseUntil: 100);
+
+      await store.releaseClaim(before);
+
+      final after = (await store.unsyncedForRoute('route-A')).single;
+      expect(after.state, PendingOpState.pending);
+      expect(after.nextAttemptAt, isNull);
+    });
+  });
 }

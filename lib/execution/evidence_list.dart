@@ -70,7 +70,7 @@ EvidenceListEntry _fromApiItem(EvidenceItem item) => EvidenceListEntry(
 /// evidence count that gates "Concluir" must work in a basement. Synced
 /// photos are then undercounted, which errs on the safe side. Only a
 /// transport failure (a `DioException` with no HTTP response, the same
-/// definition `SyncWorker._classify` uses) is tolerated; an HTTP error or
+/// definition `classifySyncError` uses) is tolerated; an HTTP error or
 /// anything else still propagates.
 Future<List<EvidenceItem>> _syncedItemsOrNone(
   EvidenceApi api,

@@ -316,8 +316,11 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   );
 
   @override
-  Future<void> markSynced(String id) async =>
-      rows[id] = _copy(rows[id]!, state: PendingOpState.synced);
+  Future<void> markSynced(String id) async => rows[id] = _copy(
+    rows[id]!,
+    state: PendingOpState.synced,
+    clearNextAttemptAt: true,
+  );
 
   @override
   Future<void> markFailed(String id, String error) async => rows[id] = _copy(
@@ -331,6 +334,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     rows[id]!,
     state: PendingOpState.blocked,
     lastError: error,
+    clearNextAttemptAt: true,
   );
 
   @override
@@ -343,6 +347,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     state: PendingOpState.blocked,
     lastError: error,
     releasedStopId: routeStopId,
+    clearNextAttemptAt: true,
   );
 
   @override
@@ -378,7 +383,8 @@ class _FakeLocalWriteStore implements LocalWriteStore {
           (r) =>
               r.routeId == routeId &&
               (r.state == PendingOpState.pending ||
-                  r.state == PendingOpState.failed),
+                  r.state == PendingOpState.failed ||
+                  r.state == PendingOpState.sending),
         ),
       );
 
@@ -396,13 +402,40 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     required int now,
   }) async => _sorted(
     rows.values.where(
-      (r) =>
-          r.routeId == routeId &&
-          (r.state == PendingOpState.pending ||
-              r.state == PendingOpState.failed) &&
-          (r.nextAttemptAt == null || r.nextAttemptAt! <= now),
+      (r) => r.routeId == routeId && _isDue(r, now),
     ),
   );
+
+  bool _isDue(PendingOperationRow r, int now) =>
+      (r.state == PendingOpState.pending ||
+          r.state == PendingOpState.failed ||
+          r.state == PendingOpState.sending) &&
+      (r.nextAttemptAt == null || r.nextAttemptAt! <= now);
+
+  /// Like the Drift store's conditional UPDATE: only a due row is taken.
+  @override
+  Future<bool> claim(
+    String id, {
+    required int now,
+    required int leaseUntil,
+  }) async {
+    final row = rows[id];
+    if (row == null || !_isDue(row, now)) return false;
+    rows[id] = _copy(
+      row,
+      state: PendingOpState.sending,
+      nextAttemptAt: leaseUntil,
+    );
+    return true;
+  }
+
+  @override
+  Future<void> releaseClaim(PendingOperationRow row) async {
+    if (rows[row.id]?.state != PendingOpState.sending) return;
+    rows[row.id] = row.state == PendingOpState.sending
+        ? _copy(row, state: PendingOpState.pending, clearNextAttemptAt: true)
+        : row;
+  }
 
   @override
   Future<List<String>> routeIdsWithWork() async => rows.values
@@ -764,6 +797,8 @@ void main() {
       final row = h.store.rows['a']!;
       expect(row.state, PendingOpState.pending);
       expect(row.attempts, 0);
+      // The send claim is given back: due again at once after a login.
+      expect(row.nextAttemptAt, isNull);
       expect(h.log, ['checkIn:a']);
     },
   );
@@ -969,7 +1004,12 @@ void main() {
 
       await h.worker.syncAll();
 
-      expect(seen.map((p) => (p.done, p.total)), [(1, 3), (2, 3), (3, 3)]);
+      expect(seen.map((p) => (p.done, p.total)), [
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+      ]);
     },
   );
 

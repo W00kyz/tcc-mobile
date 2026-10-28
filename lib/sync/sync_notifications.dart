@@ -35,6 +35,47 @@ class SilentSyncNotifications implements SyncNotificationPublisher {
   Future<void> clear() async {}
 }
 
+/// Asks [_appInForeground] before every post. The first time the app is in
+/// the foreground it goes silent for good, clearing once if it had posted
+/// anything — a drain the user opened the app on must not keep updating the
+/// shade (the snackbars report it). Silent from the start, it posts nothing.
+///
+///     final gated =
+///         ForegroundGatedNotifications(local, meta.getAppInForeground);
+class ForegroundGatedNotifications implements SyncNotificationPublisher {
+  ForegroundGatedNotifications(this._inner, this._appInForeground);
+
+  final SyncNotificationPublisher _inner;
+  final Future<bool> Function() _appInForeground;
+  bool _silenced = false;
+  bool _posted = false;
+
+  @override
+  Future<void> progress(int done, int total) =>
+      _post(() => _inner.progress(done, total));
+
+  @override
+  Future<void> finished(int sent) => _post(() => _inner.finished(sent));
+
+  @override
+  Future<void> needsAttention(int blocked) =>
+      _post(() => _inner.needsAttention(blocked));
+
+  @override
+  Future<void> clear() => _post(_inner.clear);
+
+  Future<void> _post(Future<void> Function() call) async {
+    if (_silenced) return;
+    if (await _appInForeground()) {
+      _silenced = true;
+      if (_posted) await _inner.clear();
+      return;
+    }
+    _posted = true;
+    await call();
+  }
+}
+
 /// [SyncNotificationPublisher] over `flutter_local_notifications`. Progress
 /// and result share one low-importance, silent channel ("Envio de
 /// registros"); "needs attention" has its own default-importance channel —

@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:math' as math;
 
-import 'package:dio/dio.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
@@ -13,27 +12,11 @@ import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/stop_release.dart';
+import 'package:route_monitor/sync/sync_error_class.dart';
 import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 
-/// How the worker reacts to a failed dispatch (spec Ruling 6).
-enum SyncErrorClass {
-  /// Transient — retry with exponential backoff, then block after 5 tries.
-  soft,
-
-  /// The server already has this write — treat as a success.
-  alreadyApplied,
-
-  /// Permanent for this payload — block the row and halt the route's queue.
-  hard,
-
-  /// 401 even after the token refresh: the session must be renewed (a new
-  /// login). Nothing is wrong with the row — leave it `pending`, untouched,
-  /// and halt the pass; the next sync after login replays it. Classifying
-  /// this as [hard] blocked every queued write of a route that outlived the
-  /// 15-minute access token.
-  awaitingAuth,
-}
+export 'package:route_monitor/sync/sync_error_class.dart' show SyncErrorClass;
 
 /// Where one dispatch left its row.
 enum _Dispatched { synced, blocked, deferred }
@@ -165,6 +148,9 @@ class SyncWorker {
       );
       for (final row in rows) {
         if (scope.holds(row)) continue;
+        // Not claimed: the other isolate is sending this queue right now —
+        // stop rather than send what comes after the row out of order.
+        if (!await _claim(row)) break;
         final outcome = await _dispatch(row);
         if (outcome == _Dispatched.blocked) {
           scope.add(row);
@@ -179,6 +165,22 @@ class SyncWorker {
     }
   }
 
+  /// How long a claimed row stays the claimant's (`PendingOpState.sending`).
+  /// A send is at most three requests (the call, a token refresh, the retry)
+  /// of at most connect + send + receive timeouts each (`api_client.dart`,
+  /// 140 s) — about 7 min — so the other isolate never re-sends a row that is
+  /// still in flight; a worker killed mid-send frees it after the lease.
+  static const Duration sendLease = Duration(minutes: 10);
+
+  Future<bool> _claim(PendingOperationRow row) {
+    final now = _now().millisecondsSinceEpoch;
+    return _store.claim(
+      row.id,
+      now: now,
+      leaseUntil: now + sendLease.inMilliseconds,
+    );
+  }
+
   /// Drains every route that has queued work. A route that blocks does not
   /// stop the others.
   Future<void> syncAll() async {
@@ -187,6 +189,7 @@ class SyncWorker {
     final total = await countDeliverable(_store, routeIds, now: now);
     final run = SyncProgressRun(total, _emitProgress);
     _run = run;
+    run.start();
     try {
       for (final routeId in routeIds) {
         await syncRoute(routeId);
@@ -253,13 +256,14 @@ class SyncWorker {
     } catch (error) {
       final release = StopRelease.fromError(error);
       if (release != null) return _park(row, release);
-      final classification = _classify(error);
+      final classification = classifySyncError(error);
       if (classification == SyncErrorClass.alreadyApplied) {
         // The server had it already — and counted its scan then.
         await _store.markSynced(row.id);
         return _Dispatched.synced;
       }
       if (classification == SyncErrorClass.awaitingAuth) {
+        await _store.releaseClaim(row);
         return _Dispatched.deferred;
       }
       final message = error.toString();
@@ -439,38 +443,6 @@ class SyncWorker {
     if (serverDate == null) return;
     final offsetSeconds = serverDate.difference(_now()).inMilliseconds / 1000.0;
     await _syncMeta.setClockOffsetSeconds(offsetSeconds);
-  }
-
-  SyncErrorClass _classify(Object error) {
-    // RULING P5: a background drain cannot show a room picker, so an
-    // unresolved-room check-in blocks that stop.
-    if (error is AmbiguousRoomException) return SyncErrorClass.hard;
-    if (error is! DioException) return SyncErrorClass.hard;
-
-    final response = error.response;
-    // No HTTP response at all — a pure transport/network failure (timeout,
-    // DNS blip, TLS handshake abort wrapped as `type: unknown`, a non-socket
-    // IOException mid-request). All recoverable: retry with backoff rather
-    // than block the route forever.
-    if (response == null) return SyncErrorClass.soft;
-
-    final status = response.statusCode;
-    if (status == 401) return SyncErrorClass.awaitingAuth;
-    if (status != null && const {500, 502, 503, 504, 429}.contains(status)) {
-      return SyncErrorClass.soft;
-    }
-    if (status == 409 &&
-        _bodyText(response.data).toLowerCase().contains('already')) {
-      return SyncErrorClass.alreadyApplied;
-    }
-    // 422 / 403 / 404 and every other non-retryable HTTP status: permanent.
-    return SyncErrorClass.hard;
-  }
-
-  String _bodyText(Object? data) {
-    if (data is String) return data;
-    if (data is Map || data is List) return jsonEncode(data);
-    return data?.toString() ?? '';
   }
 
   Future<void> _refresh(String routeId, {bool syncing = false}) async {

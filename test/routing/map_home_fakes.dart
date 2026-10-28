@@ -158,6 +158,14 @@ class FakeMonitoringApi implements MonitoringApi {
 /// `ExecutionRepository` in one test must be visible to it through the same
 /// store instance.
 class InMemoryLocalWriteStore implements LocalWriteStore {
+  @override
+  Future<bool> claim(String id, {required int now, required int leaseUntil}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> releaseClaim(PendingOperationRow row) =>
+      throw UnimplementedError();
+
   final Map<String, PendingOperationRow> _rows = {};
 
   @override

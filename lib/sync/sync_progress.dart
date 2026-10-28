@@ -23,6 +23,12 @@ class SyncProgressRun {
   int _done = 0;
   final void Function(SyncProgress progress) _emit;
 
+  /// Announces the run — `(0, total)`, so the bar shows before the first
+  /// row lands — when it has anything to deliver.
+  void start() {
+    if (_total > 0) _emit(SyncProgress(done: 0, total: _total));
+  }
+
   /// Called once per row the server took.
   void advance() {
     _done++;

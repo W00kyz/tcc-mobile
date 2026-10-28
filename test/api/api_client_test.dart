@@ -15,6 +15,15 @@ void main() {
     expect(dio.options.baseUrl, 'http://localhost:8000');
   });
 
+  test('buildDio bounds every request in time — the sync claim lease is '
+      'sized from these (SyncWorker.sendLease)', () {
+    final options = buildDio(baseUrl: 'http://x').options;
+
+    expect(options.connectTimeout, apiConnectTimeout);
+    expect(options.sendTimeout, apiSendTimeout);
+    expect(options.receiveTimeout, apiReceiveTimeout);
+  });
+
   test('buildDio attaches the bearer token when one is provided', () {
     final dio = buildDio(
       baseUrl: 'http://localhost:8000',

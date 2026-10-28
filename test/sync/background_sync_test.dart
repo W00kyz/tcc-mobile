@@ -83,6 +83,14 @@ const _threeRows = [
   SyncProgress(done: 3, total: 3),
 ];
 
+Future<Set<String>> _noneBlocked() async => const {};
+
+/// Nothing blocked before the drain; one row blocked after it.
+Future<Set<String>> Function() _blockedAfterRun() {
+  var reads = 0;
+  return () async => reads++ == 0 ? const {} : const {'op-9'};
+}
+
 void main() {
   group('runBackgroundDrain', () {
     test('drains and reports progress then finished', () async {
@@ -93,7 +101,7 @@ void main() {
         worker: worker,
         notifications: notifications,
         appInForeground: () async => false,
-        blockedCount: () async => 0,
+        blockedRowIds: _noneBlocked,
       );
 
       expect(worker.syncAllCount, 1);
@@ -113,7 +121,7 @@ void main() {
         worker: worker,
         notifications: notifications,
         appInForeground: () async => false,
-        blockedCount: () async => 1,
+        blockedRowIds: _blockedAfterRun(),
       );
 
       expect(notifications.calls, contains('needsAttention 1'));
@@ -131,7 +139,7 @@ void main() {
         worker: worker,
         notifications: notifications,
         appInForeground: () async => true,
-        blockedCount: () async => 1,
+        blockedRowIds: _blockedAfterRun(),
       );
 
       expect(worker.syncAllCount, 1);
@@ -148,12 +156,85 @@ void main() {
           worker: worker,
           notifications: notifications,
           appInForeground: () async => false,
-          blockedCount: () async => 0,
+          blockedRowIds: _noneBlocked,
         );
 
         expect(notifications.calls, ['progress 1/2', 'clear']);
       },
     );
+  });
+
+  group('runBackgroundDrain, after the review', () {
+    test('goes quiet, clearing once, when the app opens mid-drain', () async {
+      final worker = FakeSyncWorker(_threeRows);
+      final notifications = FakeSyncNotificationPublisher();
+      var reads = 0;
+
+      await runBackgroundDrain(
+        worker: worker,
+        notifications: notifications,
+        // Background for the first post, foreground from the second on.
+        appInForeground: () async => reads++ >= 1,
+        blockedRowIds: _noneBlocked,
+      );
+
+      expect(worker.syncAllCount, 1);
+      expect(notifications.calls, ['progress 1/3', 'clear']);
+    });
+
+    test('a row blocked before this run raises no new alert', () async {
+      final notifications = FakeSyncNotificationPublisher();
+
+      await runBackgroundDrain(
+        worker: FakeSyncWorker(_threeRows),
+        notifications: notifications,
+        appInForeground: () async => false,
+        blockedRowIds: () async => const {'op-old'},
+      );
+
+      expect(notifications.calls.last, 'finished 3');
+      expect(
+        notifications.calls.any((call) => call.startsWith('needsAttention')),
+        isFalse,
+      );
+    });
+  });
+
+  group('hasPendingWork', () {
+    late AppDatabase db;
+    late DriftLocalWriteStore store;
+
+    setUp(() {
+      db = inMemoryDatabase();
+      store = DriftLocalWriteStore(db);
+    });
+
+    tearDown(() => db.close());
+
+    Future<void> enqueue(String id, PendingOpKind kind, String stop) =>
+        store.enqueue(
+          id: id,
+          kind: kind,
+          payload: {'route_stop_id': stop, 'execution_id': 'exec-$id'},
+          routeId: 'route-R',
+        );
+
+    test('rows held behind a blocked row are not pending work — they would '
+        'retry forever', () async {
+      await enqueue('in', PendingOpKind.checkIn, 'stop-1');
+      await store.markBlocked('in', 'hard');
+      await enqueue('out', PendingOpKind.checkOut, 'stop-1');
+
+      expect(await hasPendingWork(store), isFalse);
+    });
+
+    test('a deliverable row of another stop is', () async {
+      await enqueue('in', PendingOpKind.checkIn, 'stop-1');
+      await store.markBlocked('in', 'hard');
+      await enqueue('in-2', PendingOpKind.checkIn, 'stop-2');
+
+      expect(await hasPendingWork(store), isTrue);
+    });
   });
 
   group('SyncTriggers and the background drain', () {

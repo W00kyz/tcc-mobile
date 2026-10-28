@@ -44,6 +44,14 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   final List<PendingOperationRow> rows;
 
   @override
+  Future<bool> claim(String id, {required int now, required int leaseUntil}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> releaseClaim(PendingOperationRow row) =>
+      throw UnimplementedError();
+
+  @override
   Future<bool> deletePendingPhoto(String operationId) =>
       throw UnimplementedError();
 

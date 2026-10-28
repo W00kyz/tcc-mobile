@@ -12,6 +12,7 @@ import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart'
     show silenceWatchdogProvider;
+import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/sync_notifications.dart';
 import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -71,25 +72,26 @@ final appForegroundTrackerProvider = Provider<AppForegroundTracker>(
   ),
 );
 
-/// Whether [store] holds rows still owed to the network (`pending` or
-/// `failed`). Blocked-only routes do not count: no drain can send them.
+/// Whether [store] holds rows a drain can still deliver: owed to the network
+/// and not held back behind a blocked row ([BlockedScope]). A held row never
+/// sends until a person acts, so counting it would retry the task forever.
 ///
 ///     if (await hasPendingWork(store)) await scheduler.scheduleDrain();
 Future<bool> hasPendingWork(LocalWriteStore store) async {
   for (final routeId in await store.routeIdsWithWork()) {
-    if ((await store.unsyncedForRoute(routeId)).isNotEmpty) return true;
+    final scope = BlockedScope(await store.blockedForRoute(routeId));
+    final unsent = await store.unsyncedForRoute(routeId);
+    if (scope.deliverable(unsent).isNotEmpty) return true;
   }
   return false;
 }
 
-/// How many rows sit `blocked` across every route of [store].
-Future<int> blockedRowCount(LocalWriteStore store) async {
-  var count = 0;
-  for (final routeId in await store.routeIdsWithWork()) {
-    count += (await store.blockedForRoute(routeId)).length;
-  }
-  return count;
-}
+/// The ids of every `blocked` row of [store] — compared before and after a
+/// drain, so only rows it blocked raise "needs attention".
+Future<Set<String>> blockedRowIds(LocalWriteStore store) async => {
+  for (final routeId in await store.routeIdsWithWork())
+    for (final row in await store.blockedForRoute(routeId)) row.id,
+};
 
 /// The first route of [store] with a `blocked` row — where the "needs
 /// attention" tap leads.
@@ -140,26 +142,29 @@ class AppForegroundTracker {
 
 /// One background drain: runs [worker]'s `syncAll` and reports it through
 /// [notifications] — progress per delivered row, then "needs attention" when
-/// rows ended blocked ([blockedCount]), "finished" when every due row went,
-/// or a clear otherwise. While [appInForeground] says so, it still drains
-/// but posts nothing (the snackbars cover it — Review Focus 4).
+/// the run blocked rows (compared through [blockedRowIds]), "finished" when
+/// every due row went, or a clear otherwise. Before each post it asks
+/// [appInForeground]: once the app is open it still drains but posts nothing
+/// more, clearing what it had shown (the snackbars cover it — Review Focus 4).
 ///
 ///     await runBackgroundDrain(worker: w, notifications: n,
 ///         appInForeground: meta.getAppInForeground,
-///         blockedCount: () => blockedRowCount(store));
+///         blockedRowIds: () => blockedRowIds(store));
 Future<void> runBackgroundDrain({
   required SyncWorker worker,
   required SyncNotificationPublisher notifications,
   required Future<bool> Function() appInForeground,
-  required Future<int> Function() blockedCount,
+  required Future<Set<String>> Function() blockedRowIds,
 }) async {
-  final publisher = await appInForeground()
-      ? const SilentSyncNotifications()
-      : notifications;
+  final publisher = ForegroundGatedNotifications(
+    notifications,
+    appInForeground,
+  );
+  final blockedBefore = await blockedRowIds();
   final last = await _drainReporting(worker, publisher);
-  final blocked = await blockedCount();
-  if (blocked > 0) return publisher.needsAttention(blocked);
-  if (last != null && last.done == last.total) {
+  final blockedNow = (await blockedRowIds()).difference(blockedBefore);
+  if (blockedNow.isNotEmpty) return publisher.needsAttention(blockedNow.length);
+  if (last != null && last.total > 0 && last.done == last.total) {
     return publisher.finished(last.done);
   }
   await publisher.clear();
@@ -195,7 +200,7 @@ void backgroundSyncDispatcher() {
 }
 
 /// The task body. True tells WorkManager it is done; false asks for a retry
-/// with backoff (rows still owed, or the pass crashed).
+/// with backoff (deliverable rows still owed, or the pass crashed).
 Future<bool> drainOutboxInBackground() async {
   DartPluginRegistrant.ensureInitialized();
   final container = ProviderContainer(
@@ -209,8 +214,12 @@ Future<bool> drainOutboxInBackground() async {
     // No one signed in: nothing this device may send — done, no retry.
     final stored = await container.read(sessionStorageProvider).readSession();
     if (stored == null) return true;
-    if (!await _sessionRestored(container)) return false;
+    // A restore that never lands, or a session that ended mid-drain (the
+    // refresh token was refused): no retry could send anything — give up
+    // until the next pause schedules a drain again.
+    if (!await _sessionRestored(container)) return true;
     await _drainWith(container);
+    if (container.read(sessionProvider) == null) return true;
     return !await hasPendingWork(container.read(localWriteStoreProvider));
     // Deliberately broad: a crash must become a retry, never kill the task.
     // ignore: avoid_catches_without_on_clauses
@@ -231,7 +240,7 @@ Future<void> _drainWith(ProviderContainer container) {
       blockedRouteId: () => firstBlockedRoute(store),
     ),
     appInForeground: meta.getAppInForeground,
-    blockedCount: () => blockedRowCount(store),
+    blockedRowIds: () => blockedRowIds(store),
   );
 }
 
