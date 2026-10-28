@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:route_monitor/execution/evidence_capture.dart';
+import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -16,11 +18,28 @@ import 'package:uuid/uuid.dart';
 /// marks each row's state. Nothing here throws `AmbiguousRoomException` or
 /// `DioException` any more.
 class ExecutionRepository {
-  ExecutionRepository(this._store, this._stopProgress, this._syncWorker);
+  /// [database] must be the one [_store], [_stopProgress] and [dayLog] write
+  /// to: `checkOut` opens its transaction on it, and drift routes every
+  /// statement those stores issue inside that zone through the transaction.
+  ExecutionRepository(
+    this._store,
+    this._stopProgress,
+    this._syncWorker, {
+    required AppDatabase database,
+    required DayLogStore dayLog,
+  }) // Public named params can't be initializing formals for private fields
+    // (same idiom as DioRouteRepository).
+    // ignore: prefer_initializing_formals
+    : _database = database,
+       // Same reason as `_database` above.
+       // ignore: prefer_initializing_formals
+       _dayLog = dayLog;
 
   final LocalWriteStore _store;
   final StopProgressStore _stopProgress;
   final SyncWorker _syncWorker;
+  final AppDatabase _database;
+  final DayLogStore _dayLog;
   static const _uuid = Uuid();
 
   /// [idempotencyKey], when supplied, is reused instead of generating a
@@ -93,29 +112,56 @@ class ExecutionRepository {
     String? complaintsSuggestions,
   }) async {
     final key = checkoutIdempotencyKey ?? _uuid.v4();
-    final executionId = _uuid.v4();
-    final scannedAt = DateTime.now().toUtc();
-
-    await _store.enqueue(
-      id: key,
-      kind: PendingOpKind.checkOut,
-      routeId: routeId,
-      payload: {
-        'execution_id': executionId,
-        'qr_payload': qrPayload,
-        'latitude': latitude,
-        'longitude': longitude,
-        'scanned_at': scannedAt.toIso8601String(),
-        'checkout_idempotency_key': key,
-        'route_stop_id': routeStopId,
-        'complaints_suggestions': ?complaintsSuggestions,
-      },
+    final scannedAt = DateTime.now();
+    final payload = _checkOutPayload(
+      key: key,
+      routeStopId: routeStopId,
+      qrPayload: qrPayload,
+      scannedAt: scannedAt,
+      latitude: latitude,
+      longitude: longitude,
+      complaintsSuggestions: complaintsSuggestions,
     );
-    // Ruling 5 counterpart to checkIn's upsert above; Ruling 3: the row is
-    // marked DONE, not deleted.
-    await _stopProgress.markDone(routeStopId);
+    // IMPORTANT: one transaction (redesign §6.8): the outbox row, the DONE
+    // mark and the day log's point land together or not at all — a point
+    // counted for a check-out that was never queued would be a lie, and a
+    // queued check-out with no DONE mark would re-open the stop. Kept short:
+    // the payload is built above, and the sync kick waits for the commit.
+    await _database.transaction(() async {
+      await _store.enqueue(
+        id: key,
+        kind: PendingOpKind.checkOut,
+        routeId: routeId,
+        payload: payload,
+      );
+      // Ruling 5 counterpart to checkIn's upsert above; Ruling 3: the row is
+      // marked DONE, not deleted.
+      await _stopProgress.markDone(routeStopId);
+      await _dayLog.recordStopDone(scannedAt);
+    });
     unawaited(_syncWorker.syncRoute(routeId));
   }
+
+  /// The `POST /check-outs` body as queued. `execution_id` is a fresh UUID
+  /// the backend accepts and ignores for a check-out.
+  Map<String, dynamic> _checkOutPayload({
+    required String key,
+    required String routeStopId,
+    required String qrPayload,
+    required DateTime scannedAt,
+    required double? latitude,
+    required double? longitude,
+    required String? complaintsSuggestions,
+  }) => {
+    'execution_id': _uuid.v4(),
+    'qr_payload': qrPayload,
+    'latitude': latitude,
+    'longitude': longitude,
+    'scanned_at': scannedAt.toUtc().toIso8601String(),
+    'checkout_idempotency_key': key,
+    'route_stop_id': routeStopId,
+    'complaints_suggestions': ?complaintsSuggestions,
+  };
 
   /// Signals an impossibility to execute through the outbox — same drift-first
   /// shape as [checkIn]: a `pending` [PendingOpKind.impediment] row plus a

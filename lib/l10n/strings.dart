@@ -544,4 +544,46 @@ abstract final class AppStrings {
   /// A building's floor line in the sheet: `<prédio> · <andar>`.
   static String buildingFloor(String building, String floor) =>
       '$building · $floor';
+
+  // --- gamification (redesign §6.8): full card, profile, achievements ---
+  static const String fullCardTitle = 'CARTÃO COMPLETO!';
+  static const String fullCardNextBatch = 'Pegar próximo lote';
+  static const String fullCardSeeMap = 'Ver mapa';
+  static const String profileMenuEntry = 'Perfil';
+  static const String profileTitle = 'Seu perfil';
+  static const String profileAchievements = 'Conquistas';
+  static const String profileStreakNote =
+      'Dia sem serviço não quebra a sequência.';
+  static const String profileSignOut = 'Sair';
+  static const String profileNoServiceDay = 'Sem serviço';
+
+  /// `Lote <n> · <total> pontos em <h> h <min> min` under the full card.
+  static String fullCardSummary(int batch, int total, Duration elapsed) =>
+      'Lote $batch · $total pontos em ${elapsed.inHours} h '
+      '${elapsed.inMinutes.remainder(60)} min';
+
+  /// `<n> dias seguidos` (the streak); singular for one, as R10/R11 did.
+  static String streakDays(int n) =>
+      n == 1 ? '1 dia seguido' : '$n dias seguidos';
+
+  /// Seg..Dom, indexed by `DateTime.weekday - 1`.
+  static const List<String> weekdayShort = [
+    'Seg',
+    'Ter',
+    'Qua',
+    'Qui',
+    'Sex',
+    'Sáb',
+    'Dom',
+  ];
+
+  static const String achievementFirstCard = 'Primeiro cartão completo';
+  static const String achievementStreak5 = '5 dias seguidos';
+  static const String achievementStreak20 = '20 dias seguidos';
+  static const String achievementPoints100 = '100 pontos concluídos';
+  static const String achievementCleanCard = 'Cartão completo sem pendências';
+
+  /// A locked achievement's progress: `12/20`.
+  static String achievementProgress(int current, int target) =>
+      '$current/$target';
 }

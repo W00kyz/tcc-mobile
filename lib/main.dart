@@ -8,6 +8,7 @@ import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/auth/login_screen.dart';
 import 'package:route_monitor/auth/registration_screen.dart';
+import 'package:route_monitor/gamification/profile_screen.dart';
 import 'package:route_monitor/monitoring/position_reporting_trigger.dart';
 import 'package:route_monitor/privacy/consent_screen.dart';
 import 'package:route_monitor/privacy/my_data_screen.dart';
@@ -92,6 +93,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/recursos',
         builder: (context, state) => const AppealsScreen(),
+      ),
+      GoRoute(
+        path: '/perfil',
+        builder: (context, state) => const ProfileScreen(),
       ),
     ],
   );

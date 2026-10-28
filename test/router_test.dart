@@ -5,10 +5,13 @@ import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/appeals/appeals_screen.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
+import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/gamification/profile_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/main.dart';
 
 import 'appeals/fake_appeal_api.dart';
+import 'support/fake_day_log_store.dart';
 
 Session _worker(WorkerStanding standing, {bool consentRequired = false}) =>
     Session(
@@ -130,5 +133,31 @@ void main() {
       appRedirect(_worker(_pending), '/recursos'),
       '/aguardando-aprovacao',
     );
+  });
+
+  testWidgets('"/perfil" opens the profile of an approved worker', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        sessionProvider.overrideWithBuild(
+          (ref, notifier) => _worker(_approved),
+        ),
+        dayLogStoreProvider.overrideWithValue(RecordingDayLogStore()),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = container.read(routerProvider)..go('/perfil');
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ProfileScreen), findsOneWidget);
+    expect(appRedirect(_worker(_pending), '/perfil'), '/aguardando-aprovacao');
   });
 }

@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/appeals/released_stop_listener.dart';
 import 'package:route_monitor/execution/conclude_sheet.dart';
 import 'package:route_monitor/execution/in_progress_block.dart';
+import 'package:route_monitor/gamification/full_card_trigger.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/collection_banner.dart';
 import 'package:route_monitor/monitoring/silence_banner.dart';
@@ -118,16 +119,22 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
           child: SyncSnackbars(
             routeId: route?.id,
             lane: _lane,
-            child: LayoutBuilder(
-              builder: (context, constraints) => Stack(
-                children: [
-                  Positioned.fill(
-                    child: _campusMap(route, card, selected, constraints),
-                  ),
-                  _topOverlay(route, local),
-                  _myPositionButton(constraints.maxHeight),
-                  _sheetFor(dayAsync, local, card, selected, nextBatch),
-                ],
+            // The full card when the batch's last stamp lands, and the day
+            // log (redesign §6.8).
+            child: FullCardTrigger(
+              card: card,
+              routeId: route?.id,
+              child: LayoutBuilder(
+                builder: (context, constraints) => Stack(
+                  children: [
+                    Positioned.fill(
+                      child: _campusMap(route, card, selected, constraints),
+                    ),
+                    _topOverlay(route, local),
+                    _myPositionButton(constraints.maxHeight),
+                    _sheetFor(dayAsync, local, card, selected, nextBatch),
+                  ],
+                ),
               ),
             ),
           ),

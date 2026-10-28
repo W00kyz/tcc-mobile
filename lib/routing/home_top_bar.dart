@@ -132,10 +132,10 @@ class _ProgressDots extends StatelessWidget {
   }
 }
 
-enum _AccountEntry { myData, appeals }
+enum _AccountEntry { profile, myData, appeals }
 
-/// The ink avatar with the worker's initial; its menu holds "Meus dados" and
-/// "Recursos", badged with the points the worker can contest.
+/// The ink avatar with the worker's initial; its menu holds "Perfil", "Meus
+/// dados" and "Recursos", badged with the points the worker can contest.
 class _AccountAvatar extends ConsumerWidget {
   const _AccountAvatar({required this.name});
 
@@ -160,6 +160,10 @@ class _AccountAvatar extends ConsumerWidget {
       onSelected: (entry) => _open(context, entry),
       itemBuilder: (_) => [
         const PopupMenuItem(
+          value: _AccountEntry.profile,
+          child: Text(AppStrings.profileMenuEntry),
+        ),
+        const PopupMenuItem(
           value: _AccountEntry.myData,
           child: Text(AppStrings.myDataTitle),
         ),
@@ -180,6 +184,8 @@ class _AccountAvatar extends ConsumerWidget {
 
   void _open(BuildContext context, _AccountEntry entry) {
     switch (entry) {
+      case _AccountEntry.profile:
+        unawaited(context.push('/perfil'));
       case _AccountEntry.myData:
         unawaited(context.push('/meus-dados'));
       case _AccountEntry.appeals:

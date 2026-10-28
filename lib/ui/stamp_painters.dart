@@ -16,10 +16,19 @@ int seedOf(String stopId) => stopId.codeUnits.fold(7, (a, b) => a * 31 + b);
 
 /// The inked stamp: irregular ring, 13% moss fill and a check.
 class StampPainter extends CustomPainter {
-  StampPainter({required this.seed, required this.palette, this.ink = 1});
+  StampPainter({
+    required this.seed,
+    required this.palette,
+    this.ink = 1,
+    this.showCheck = true,
+  });
 
   final int seed;
   final FieldPalette palette;
+
+  /// False for a stamp that carries its own mark in the middle (an
+  /// achievement's number).
+  final bool showCheck;
 
   /// 0..1, how far the ink has spread.
   final double ink;
@@ -64,6 +73,10 @@ class StampPainter extends CustomPainter {
           ..strokeWidth = 2.5 + 1.5 * (1 - ink)
           ..color = palette.moss.withValues(alpha: 0.4 + 0.6 * ink),
       );
+    if (showCheck) _paintCheck(canvas, size);
+  }
+
+  void _paintCheck(Canvas canvas, Size size) {
     final w = size.width;
     final check = Path()
       ..moveTo(w * 0.34, w * 0.34)
@@ -81,10 +94,13 @@ class StampPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(StampPainter old) => old.seed != seed || old.ink != ink;
+  bool shouldRepaint(StampPainter old) =>
+      old.seed != seed || old.ink != ink || old.showCheck != showCheck;
 }
 
-enum RingKind { pending, next, inProgress, released }
+/// `locked`: an achievement not earned yet — dashed like `next`, but in the
+/// quiet rule colour.
+enum RingKind { pending, next, inProgress, released, locked }
 
 /// Rings of the non-done states: plain, dashed, dashed with a dot, struck.
 class RingPainter extends CustomPainter {
@@ -97,11 +113,11 @@ class RingPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final c = size.center(Offset.zero);
     final r = size.shortestSide / 2 - 2;
-    final dashed = kind == RingKind.next || kind == RingKind.inProgress;
+    final dashed = kind != RingKind.pending && kind != RingKind.released;
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = dashed ? 2 : 1.5
-      ..color = dashed ? palette.ink : palette.rule;
+      ..color = dashed && kind != RingKind.locked ? palette.ink : palette.rule;
     if (dashed) {
       _dashedCircle(canvas, c, r, paint);
     } else {

@@ -4,11 +4,16 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
+import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
+
+import '../support/fake_day_log_store.dart';
+import '../support/in_memory_database.dart';
 
 /// In-memory stand-in for [DriftLocalWriteStore] — real Drift behavior (and
 /// the `insertOrIgnore` semantics reproduced below) is already proven by
@@ -184,13 +189,23 @@ void main() {
   late _FakeLocalWriteStore store;
   late _FakeStopProgressStore stopProgress;
   late _FakeSyncWorker syncWorker;
+  late RecordingDayLogStore dayLog;
   late ExecutionRepository repository;
 
   setUp(() {
     store = _FakeLocalWriteStore();
     stopProgress = _FakeStopProgressStore();
     syncWorker = _FakeSyncWorker();
-    repository = ExecutionRepository(store, stopProgress, syncWorker);
+    dayLog = RecordingDayLogStore();
+    final db = inMemoryDatabase();
+    addTearDown(db.close);
+    repository = ExecutionRepository(
+      store,
+      stopProgress,
+      syncWorker,
+      database: db,
+      dayLog: dayLog,
+    );
   });
 
   test('checkIn enqueues one pending row, marks the stop IN_PROGRESS and '
@@ -310,7 +325,65 @@ void main() {
       (await stopProgress.progressFor('stop-1'))?.status,
       StopLocalStatus.done,
     );
+    expect(dayLog.calls, [startsWith('stopDone:')]);
     expect(syncWorker.syncedRoutes, ['route-A']);
+  });
+
+  group('against the real database', () {
+    late AppDatabase db;
+    late DriftLocalWriteStore realStore;
+    late DriftStopProgressStore realProgress;
+
+    setUp(() {
+      db = inMemoryDatabase();
+      addTearDown(db.close);
+      realStore = DriftLocalWriteStore(db);
+      realProgress = DriftStopProgressStore(db);
+    });
+
+    ExecutionRepository repositoryWith(DayLogStore log) => ExecutionRepository(
+      realStore,
+      realProgress,
+      syncWorker,
+      database: db,
+      dayLog: log,
+    );
+
+    test('checkOut writes outbox, progress and day log atomically', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final failing = RecordingDayLogStore()
+        ..failStopDone = Exception('disk full');
+
+      await expectLater(
+        repositoryWith(failing).checkOut(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          qrPayload: 'q',
+        ),
+        throwsException,
+      );
+
+      expect(await realStore.unsyncedForRoute('route-A'), isEmpty);
+      expect(
+        (await realProgress.progressFor('stop-1'))!.status,
+        StopLocalStatus.inProgress,
+      );
+      expect(syncWorker.syncedRoutes, isEmpty);
+    });
+
+    test('checkOut counts the stop in the real day log', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final log = DriftDayLogStore(db);
+
+      await repositoryWith(log).checkOut(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        qrPayload: 'q',
+      );
+
+      expect((await log.all()).single.pointsDone, 1);
+      expect(await realStore.unsyncedForRoute('route-A'), hasLength(1));
+    });
   });
 
   test('checkOut writes complaints_suggestions into the payload only when '

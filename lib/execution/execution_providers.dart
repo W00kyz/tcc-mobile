@@ -11,6 +11,7 @@ import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -85,11 +86,22 @@ final capturedFileCompressorProvider =
       (ref) => compressCapturedFile,
     );
 
+/// The personal day log behind the streak and achievements (redesign §6.8).
+/// Here, beside the other stores, because the check-out writes it in its own
+/// transaction.
+final dayLogStoreProvider = Provider<DayLogStore>(
+  (ref) => DriftDayLogStore(ref.watch(appDatabaseProvider)),
+);
+
 final executionRepositoryProvider = Provider<ExecutionRepository>(
   (ref) => ExecutionRepository(
     ref.watch(localWriteStoreProvider),
     ref.watch(stopProgressStoreProvider),
     ref.watch(syncWorkerProvider),
+    // The same connection the stores above write through: the check-out's
+    // transaction must cover all three.
+    database: ref.watch(appDatabaseProvider),
+    dayLog: ref.watch(dayLogStoreProvider),
   ),
 );
 

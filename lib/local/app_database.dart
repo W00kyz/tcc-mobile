@@ -93,6 +93,28 @@ class ReleasedStops extends Table {
   Set<Column> get primaryKey => {routeStopId};
 }
 
+/// One row per local day the worker opened the app or concluded a stop on —
+/// the source of the personal streak and achievements (redesign §6.8). It
+/// lives only on this device: reinstalling the app resets it, by design.
+/// `pointsDone` is bumped in the same transaction as the check-out it counts
+/// (`ExecutionRepository.checkOut`).
+class DayLog extends Table {
+  /// Local calendar date, ISO `YYYY-MM-DD`.
+  TextColumn get day => text()();
+
+  /// The server's `service_day` for that date; a day with no service never
+  /// breaks the streak.
+  BoolColumn get serviceDay => boolean().withDefault(const Constant(true))();
+  IntColumn get pointsDone => integer().withDefault(const Constant(0))();
+  IntColumn get cardsCompleted => integer().withDefault(const Constant(0))();
+
+  /// Completed cards that had nothing left to send when recorded.
+  IntColumn get cleanCards => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {day};
+}
+
 /// How long a statement waits for another connection's lock before failing.
 const Duration appDatabaseBusyTimeout = Duration(seconds: 5);
 
@@ -118,6 +140,7 @@ final List<String> appDatabaseConnectionPragmas = [
     StopProgress,
     SyncMeta,
     ReleasedStops,
+    DayLog,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -135,7 +158,7 @@ class AppDatabase extends _$AppDatabase {
       );
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -193,6 +216,11 @@ class AppDatabase extends _$AppDatabase {
         // outbox is untouched: a check-out queued with form fields is sent
         // without them (SyncWorker._performCheckOut).
         await m.deleteTable('form_draft_items');
+      }
+      if (from < 8) {
+        // Personal gamification (redesign §6.8): a new, empty day log. The
+        // streak starts counting from the first day this build runs.
+        await m.createTable(dayLog);
       }
     },
   );

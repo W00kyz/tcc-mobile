@@ -13,6 +13,7 @@ import 'package:route_monitor/execution/evidence_camera.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
@@ -33,7 +34,9 @@ import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
 import '../support/fake_connectivity.dart';
+import '../support/fake_day_log_store.dart';
 import '../support/fake_sync_notification_taps.dart';
+import '../support/in_memory_database.dart';
 import 'map_home_fakes.dart';
 import 'no_tiles_tile_provider.dart';
 
@@ -61,12 +64,20 @@ Widget homeWith(
   AppealApi? appealApi,
   ReleasedStopStore? releasedStopStore,
   SyncNotificationTaps? notificationTaps,
+  DayLogStore? dayLogStore,
 }) {
   final progress = stopProgressStore ?? FakeStopProgressStore();
   final store = localWriteStore ?? InMemoryLocalWriteStore();
   final worker = syncWorker ?? RecordingSyncWorker();
+  final dayLog = dayLogStore ?? RecordingDayLogStore();
+  // In memory, never the device file: the check-out opens its transaction
+  // here, and the full card looks up the batch's first check-in.
+  final db = inMemoryDatabase();
+  addTearDown(db.close);
   return ProviderScope(
     overrides: [
+      appDatabaseProvider.overrideWithValue(db),
+      dayLogStoreProvider.overrideWithValue(dayLog),
       routeRepositoryProvider.overrideWithValue(repository),
       monitoringApiProvider.overrideWithValue(
         monitoringApi ?? FakeMonitoringApi(),
@@ -111,7 +122,13 @@ Widget homeWith(
       // into `store`, updates `progress`, then kicks the recording worker.
       if (realExecutionRepository)
         executionRepositoryProvider.overrideWithValue(
-          ExecutionRepository(store, progress, worker),
+          ExecutionRepository(
+            store,
+            progress,
+            worker,
+            database: db,
+            dayLog: dayLog,
+          ),
         ),
     ],
     child: MaterialApp(

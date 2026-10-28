@@ -1645,6 +1645,383 @@ class ReleasedStopsCompanion extends UpdateCompanion<ReleasedStop> {
   }
 }
 
+class $DayLogTable extends DayLog with TableInfo<$DayLogTable, DayLogData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $DayLogTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _dayMeta = const VerificationMeta('day');
+  @override
+  late final GeneratedColumn<String> day = GeneratedColumn<String>(
+    'day',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _serviceDayMeta = const VerificationMeta(
+    'serviceDay',
+  );
+  @override
+  late final GeneratedColumn<bool> serviceDay = GeneratedColumn<bool>(
+    'service_day',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("service_day" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _pointsDoneMeta = const VerificationMeta(
+    'pointsDone',
+  );
+  @override
+  late final GeneratedColumn<int> pointsDone = GeneratedColumn<int>(
+    'points_done',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _cardsCompletedMeta = const VerificationMeta(
+    'cardsCompleted',
+  );
+  @override
+  late final GeneratedColumn<int> cardsCompleted = GeneratedColumn<int>(
+    'cards_completed',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _cleanCardsMeta = const VerificationMeta(
+    'cleanCards',
+  );
+  @override
+  late final GeneratedColumn<int> cleanCards = GeneratedColumn<int>(
+    'clean_cards',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    day,
+    serviceDay,
+    pointsDone,
+    cardsCompleted,
+    cleanCards,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'day_log';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<DayLogData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('day')) {
+      context.handle(
+        _dayMeta,
+        day.isAcceptableOrUnknown(data['day']!, _dayMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_dayMeta);
+    }
+    if (data.containsKey('service_day')) {
+      context.handle(
+        _serviceDayMeta,
+        serviceDay.isAcceptableOrUnknown(data['service_day']!, _serviceDayMeta),
+      );
+    }
+    if (data.containsKey('points_done')) {
+      context.handle(
+        _pointsDoneMeta,
+        pointsDone.isAcceptableOrUnknown(data['points_done']!, _pointsDoneMeta),
+      );
+    }
+    if (data.containsKey('cards_completed')) {
+      context.handle(
+        _cardsCompletedMeta,
+        cardsCompleted.isAcceptableOrUnknown(
+          data['cards_completed']!,
+          _cardsCompletedMeta,
+        ),
+      );
+    }
+    if (data.containsKey('clean_cards')) {
+      context.handle(
+        _cleanCardsMeta,
+        cleanCards.isAcceptableOrUnknown(data['clean_cards']!, _cleanCardsMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {day};
+  @override
+  DayLogData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return DayLogData(
+      day: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}day'],
+      )!,
+      serviceDay: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}service_day'],
+      )!,
+      pointsDone: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}points_done'],
+      )!,
+      cardsCompleted: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}cards_completed'],
+      )!,
+      cleanCards: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}clean_cards'],
+      )!,
+    );
+  }
+
+  @override
+  $DayLogTable createAlias(String alias) {
+    return $DayLogTable(attachedDatabase, alias);
+  }
+}
+
+class DayLogData extends DataClass implements Insertable<DayLogData> {
+  /// Local calendar date, ISO `YYYY-MM-DD`.
+  final String day;
+
+  /// The server's `service_day` for that date; a day with no service never
+  /// breaks the streak.
+  final bool serviceDay;
+  final int pointsDone;
+  final int cardsCompleted;
+
+  /// Completed cards that had nothing left to send when recorded.
+  final int cleanCards;
+  const DayLogData({
+    required this.day,
+    required this.serviceDay,
+    required this.pointsDone,
+    required this.cardsCompleted,
+    required this.cleanCards,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['day'] = Variable<String>(day);
+    map['service_day'] = Variable<bool>(serviceDay);
+    map['points_done'] = Variable<int>(pointsDone);
+    map['cards_completed'] = Variable<int>(cardsCompleted);
+    map['clean_cards'] = Variable<int>(cleanCards);
+    return map;
+  }
+
+  DayLogCompanion toCompanion(bool nullToAbsent) {
+    return DayLogCompanion(
+      day: Value(day),
+      serviceDay: Value(serviceDay),
+      pointsDone: Value(pointsDone),
+      cardsCompleted: Value(cardsCompleted),
+      cleanCards: Value(cleanCards),
+    );
+  }
+
+  factory DayLogData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return DayLogData(
+      day: serializer.fromJson<String>(json['day']),
+      serviceDay: serializer.fromJson<bool>(json['serviceDay']),
+      pointsDone: serializer.fromJson<int>(json['pointsDone']),
+      cardsCompleted: serializer.fromJson<int>(json['cardsCompleted']),
+      cleanCards: serializer.fromJson<int>(json['cleanCards']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'day': serializer.toJson<String>(day),
+      'serviceDay': serializer.toJson<bool>(serviceDay),
+      'pointsDone': serializer.toJson<int>(pointsDone),
+      'cardsCompleted': serializer.toJson<int>(cardsCompleted),
+      'cleanCards': serializer.toJson<int>(cleanCards),
+    };
+  }
+
+  DayLogData copyWith({
+    String? day,
+    bool? serviceDay,
+    int? pointsDone,
+    int? cardsCompleted,
+    int? cleanCards,
+  }) => DayLogData(
+    day: day ?? this.day,
+    serviceDay: serviceDay ?? this.serviceDay,
+    pointsDone: pointsDone ?? this.pointsDone,
+    cardsCompleted: cardsCompleted ?? this.cardsCompleted,
+    cleanCards: cleanCards ?? this.cleanCards,
+  );
+  DayLogData copyWithCompanion(DayLogCompanion data) {
+    return DayLogData(
+      day: data.day.present ? data.day.value : this.day,
+      serviceDay: data.serviceDay.present
+          ? data.serviceDay.value
+          : this.serviceDay,
+      pointsDone: data.pointsDone.present
+          ? data.pointsDone.value
+          : this.pointsDone,
+      cardsCompleted: data.cardsCompleted.present
+          ? data.cardsCompleted.value
+          : this.cardsCompleted,
+      cleanCards: data.cleanCards.present
+          ? data.cleanCards.value
+          : this.cleanCards,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DayLogData(')
+          ..write('day: $day, ')
+          ..write('serviceDay: $serviceDay, ')
+          ..write('pointsDone: $pointsDone, ')
+          ..write('cardsCompleted: $cardsCompleted, ')
+          ..write('cleanCards: $cleanCards')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(day, serviceDay, pointsDone, cardsCompleted, cleanCards);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is DayLogData &&
+          other.day == this.day &&
+          other.serviceDay == this.serviceDay &&
+          other.pointsDone == this.pointsDone &&
+          other.cardsCompleted == this.cardsCompleted &&
+          other.cleanCards == this.cleanCards);
+}
+
+class DayLogCompanion extends UpdateCompanion<DayLogData> {
+  final Value<String> day;
+  final Value<bool> serviceDay;
+  final Value<int> pointsDone;
+  final Value<int> cardsCompleted;
+  final Value<int> cleanCards;
+  final Value<int> rowid;
+  const DayLogCompanion({
+    this.day = const Value.absent(),
+    this.serviceDay = const Value.absent(),
+    this.pointsDone = const Value.absent(),
+    this.cardsCompleted = const Value.absent(),
+    this.cleanCards = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  DayLogCompanion.insert({
+    required String day,
+    this.serviceDay = const Value.absent(),
+    this.pointsDone = const Value.absent(),
+    this.cardsCompleted = const Value.absent(),
+    this.cleanCards = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : day = Value(day);
+  static Insertable<DayLogData> custom({
+    Expression<String>? day,
+    Expression<bool>? serviceDay,
+    Expression<int>? pointsDone,
+    Expression<int>? cardsCompleted,
+    Expression<int>? cleanCards,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (day != null) 'day': day,
+      if (serviceDay != null) 'service_day': serviceDay,
+      if (pointsDone != null) 'points_done': pointsDone,
+      if (cardsCompleted != null) 'cards_completed': cardsCompleted,
+      if (cleanCards != null) 'clean_cards': cleanCards,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  DayLogCompanion copyWith({
+    Value<String>? day,
+    Value<bool>? serviceDay,
+    Value<int>? pointsDone,
+    Value<int>? cardsCompleted,
+    Value<int>? cleanCards,
+    Value<int>? rowid,
+  }) {
+    return DayLogCompanion(
+      day: day ?? this.day,
+      serviceDay: serviceDay ?? this.serviceDay,
+      pointsDone: pointsDone ?? this.pointsDone,
+      cardsCompleted: cardsCompleted ?? this.cardsCompleted,
+      cleanCards: cleanCards ?? this.cleanCards,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (day.present) {
+      map['day'] = Variable<String>(day.value);
+    }
+    if (serviceDay.present) {
+      map['service_day'] = Variable<bool>(serviceDay.value);
+    }
+    if (pointsDone.present) {
+      map['points_done'] = Variable<int>(pointsDone.value);
+    }
+    if (cardsCompleted.present) {
+      map['cards_completed'] = Variable<int>(cardsCompleted.value);
+    }
+    if (cleanCards.present) {
+      map['clean_cards'] = Variable<int>(cleanCards.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('DayLogCompanion(')
+          ..write('day: $day, ')
+          ..write('serviceDay: $serviceDay, ')
+          ..write('pointsDone: $pointsDone, ')
+          ..write('cardsCompleted: $cardsCompleted, ')
+          ..write('cleanCards: $cleanCards, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1653,6 +2030,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $StopProgressTable stopProgress = $StopProgressTable(this);
   late final $SyncMetaTable syncMeta = $SyncMetaTable(this);
   late final $ReleasedStopsTable releasedStops = $ReleasedStopsTable(this);
+  late final $DayLogTable dayLog = $DayLogTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1662,6 +2040,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     stopProgress,
     syncMeta,
     releasedStops,
+    dayLog,
   ];
 }
 
@@ -2534,6 +2913,208 @@ typedef $$ReleasedStopsTableProcessedTableManager =
       ReleasedStop,
       PrefetchHooks Function()
     >;
+typedef $$DayLogTableCreateCompanionBuilder =
+    DayLogCompanion Function({
+      required String day,
+      Value<bool> serviceDay,
+      Value<int> pointsDone,
+      Value<int> cardsCompleted,
+      Value<int> cleanCards,
+      Value<int> rowid,
+    });
+typedef $$DayLogTableUpdateCompanionBuilder =
+    DayLogCompanion Function({
+      Value<String> day,
+      Value<bool> serviceDay,
+      Value<int> pointsDone,
+      Value<int> cardsCompleted,
+      Value<int> cleanCards,
+      Value<int> rowid,
+    });
+
+class $$DayLogTableFilterComposer
+    extends Composer<_$AppDatabase, $DayLogTable> {
+  $$DayLogTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get day => $composableBuilder(
+    column: $table.day,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get serviceDay => $composableBuilder(
+    column: $table.serviceDay,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pointsDone => $composableBuilder(
+    column: $table.pointsDone,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get cardsCompleted => $composableBuilder(
+    column: $table.cardsCompleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get cleanCards => $composableBuilder(
+    column: $table.cleanCards,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$DayLogTableOrderingComposer
+    extends Composer<_$AppDatabase, $DayLogTable> {
+  $$DayLogTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get day => $composableBuilder(
+    column: $table.day,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get serviceDay => $composableBuilder(
+    column: $table.serviceDay,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pointsDone => $composableBuilder(
+    column: $table.pointsDone,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get cardsCompleted => $composableBuilder(
+    column: $table.cardsCompleted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get cleanCards => $composableBuilder(
+    column: $table.cleanCards,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$DayLogTableAnnotationComposer
+    extends Composer<_$AppDatabase, $DayLogTable> {
+  $$DayLogTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get day =>
+      $composableBuilder(column: $table.day, builder: (column) => column);
+
+  GeneratedColumn<bool> get serviceDay => $composableBuilder(
+    column: $table.serviceDay,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get pointsDone => $composableBuilder(
+    column: $table.pointsDone,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get cardsCompleted => $composableBuilder(
+    column: $table.cardsCompleted,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get cleanCards => $composableBuilder(
+    column: $table.cleanCards,
+    builder: (column) => column,
+  );
+}
+
+class $$DayLogTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $DayLogTable,
+          DayLogData,
+          $$DayLogTableFilterComposer,
+          $$DayLogTableOrderingComposer,
+          $$DayLogTableAnnotationComposer,
+          $$DayLogTableCreateCompanionBuilder,
+          $$DayLogTableUpdateCompanionBuilder,
+          (DayLogData, BaseReferences<_$AppDatabase, $DayLogTable, DayLogData>),
+          DayLogData,
+          PrefetchHooks Function()
+        > {
+  $$DayLogTableTableManager(_$AppDatabase db, $DayLogTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$DayLogTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$DayLogTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$DayLogTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> day = const Value.absent(),
+                Value<bool> serviceDay = const Value.absent(),
+                Value<int> pointsDone = const Value.absent(),
+                Value<int> cardsCompleted = const Value.absent(),
+                Value<int> cleanCards = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DayLogCompanion(
+                day: day,
+                serviceDay: serviceDay,
+                pointsDone: pointsDone,
+                cardsCompleted: cardsCompleted,
+                cleanCards: cleanCards,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String day,
+                Value<bool> serviceDay = const Value.absent(),
+                Value<int> pointsDone = const Value.absent(),
+                Value<int> cardsCompleted = const Value.absent(),
+                Value<int> cleanCards = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => DayLogCompanion.insert(
+                day: day,
+                serviceDay: serviceDay,
+                pointsDone: pointsDone,
+                cardsCompleted: cardsCompleted,
+                cleanCards: cleanCards,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$DayLogTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $DayLogTable,
+      DayLogData,
+      $$DayLogTableFilterComposer,
+      $$DayLogTableOrderingComposer,
+      $$DayLogTableAnnotationComposer,
+      $$DayLogTableCreateCompanionBuilder,
+      $$DayLogTableUpdateCompanionBuilder,
+      (DayLogData, BaseReferences<_$AppDatabase, $DayLogTable, DayLogData>),
+      DayLogData,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2546,4 +3127,6 @@ class $AppDatabaseManager {
       $$SyncMetaTableTableManager(_db, _db.syncMeta);
   $$ReleasedStopsTableTableManager get releasedStops =>
       $$ReleasedStopsTableTableManager(_db, _db.releasedStops);
+  $$DayLogTableTableManager get dayLog =>
+      $$DayLogTableTableManager(_db, _db.dayLog);
 }
