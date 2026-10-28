@@ -28,6 +28,14 @@ Widget host(Widget child, {bool disableAnimations = false}) => MaterialApp(
 );
 
 void main() {
+  testWidgets('released shows its reason on screen', (t) async {
+    await t.pumpWidget(
+      host(StampSlot(slot: slot(SlotState.released, reason: 'LEFT_CAMPUS'))),
+    );
+    expect(find.text('Saiu do campus'), findsOneWidget);
+    expect(find.bySemanticsLabel('Liberado: Saiu do campus'), findsOneWidget);
+  });
+
   testWidgets('done shows hour and label', (t) async {
     await t.pumpWidget(
       host(

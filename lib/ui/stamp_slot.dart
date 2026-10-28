@@ -66,7 +66,7 @@ class _StampSlotState extends State<StampSlot>
 
   String _label() => switch (widget.slot.state) {
     SlotState.done => AppStrings.slotDone(_hour()),
-    SlotState.released => AppStrings.slotReleased(widget.slot.releaseReason),
+    SlotState.released => AppStrings.slotReleased(_reason),
     SlotState.pending => AppStrings.slotPending,
     SlotState.next => AppStrings.slotNext,
     SlotState.inProgress => AppStrings.slotInProgress,
@@ -185,15 +185,36 @@ class _StampSlotState extends State<StampSlot>
     );
     return SizedBox(
       width: widget.size + 12,
-      child: Text(
-        slot.floorLabel,
-        textAlign: TextAlign.center,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: style.copyWith(
-          decoration: released ? TextDecoration.lineThrough : null,
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            slot.floorLabel,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: style.copyWith(
+              decoration: released ? TextDecoration.lineThrough : null,
+            ),
+          ),
+          if (released && _reason != null) _reasonText(p),
+        ],
       ),
+    );
+  }
+
+  String? get _reason {
+    final code = widget.slot.releaseReason;
+    return code == null ? null : AppStrings.releaseReasonLabel(code);
+  }
+
+  Widget _reasonText(FieldPalette p) {
+    return Text(
+      _reason!,
+      textAlign: TextAlign.center,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontSize: 11, height: 12 / 11, color: p.muted),
     );
   }
 }
