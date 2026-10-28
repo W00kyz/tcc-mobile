@@ -408,6 +408,79 @@ void main() {
     expect(camera.closed, isTrue);
   });
 
+  group('app lifecycle (final review I-4)', () {
+    void lifecycle(WidgetTester tester, AppLifecycleState state) =>
+        tester.binding.handleAppLifecycleStateChanged(state);
+
+    testWidgets('inactive closes the camera, resumed re-opens it', (
+      tester,
+    ) async {
+      final camera = FakeEvidenceCamera();
+      await _pump(tester, store: InMemoryLocalWriteStore(), camera: camera);
+      expect(camera.opens, 1);
+
+      lifecycle(tester, AppLifecycleState.inactive);
+      await tester.pumpAndSettle();
+      expect(camera.closed, isTrue);
+      expect(find.byKey(const Key('fake-preview')), findsNothing);
+
+      lifecycle(tester, AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(camera.opens, 2);
+      expect(camera.closed, isFalse);
+      expect(find.byKey(const Key('fake-preview')), findsOneWidget);
+    });
+
+    testWidgets('going inactive twice and back opens the camera once', (
+      tester,
+    ) async {
+      final camera = FakeEvidenceCamera();
+      await _pump(tester, store: InMemoryLocalWriteStore(), camera: camera);
+
+      // Android passes inactive again on its way back from paused.
+      for (final state in [
+        AppLifecycleState.inactive,
+        AppLifecycleState.hidden,
+        AppLifecycleState.paused,
+        AppLifecycleState.hidden,
+        AppLifecycleState.inactive,
+        AppLifecycleState.resumed,
+      ]) {
+        lifecycle(tester, state);
+        await tester.pump();
+      }
+      lifecycle(tester, AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(camera.opens, 2);
+      expect(find.byKey(const Key('fake-preview')), findsOneWidget);
+    });
+
+    testWidgets('a shot in flight keeps the camera until it is written', (
+      tester,
+    ) async {
+      final camera = FakeEvidenceCamera();
+      final store = _GatedStore()..gate = Completer<void>();
+      await _pump(tester, store: store, camera: camera);
+
+      await tester.tap(find.byKey(_shutter));
+      await tester.pump();
+      lifecycle(tester, AppLifecycleState.inactive);
+      await tester.pump();
+      expect(camera.closed, isFalse);
+
+      store.gate!.complete();
+      await tester.pumpAndSettle();
+      expect(await store.localPhotoCountFor('exec-1'), 1);
+      expect(camera.closed, isTrue);
+
+      lifecycle(tester, AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(camera.opens, 2);
+      expect(find.byKey(const Key('fake-preview')), findsOneWidget);
+    });
+  });
+
   testWidgets('a takePicture failure shows the error and the shutter works', (
     tester,
   ) async {

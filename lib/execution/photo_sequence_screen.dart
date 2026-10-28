@@ -56,7 +56,8 @@ class PhotoSequenceScreen extends ConsumerStatefulWidget {
   ConsumerState<PhotoSequenceScreen> createState() => _State();
 }
 
-class _State extends ConsumerState<PhotoSequenceScreen> {
+class _State extends ConsumerState<PhotoSequenceScreen>
+    with WidgetsBindingObserver {
   late final EvidenceCamera _camera = ref.read(evidenceCameraProvider);
   final List<SessionShot> _shots = [];
 
@@ -67,30 +68,78 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
   bool _failed = false;
   bool _busy = false;
 
+  /// An [_open] is in flight: a resume must not start a second one.
+  bool _opening = false;
+
+  /// The camera was let go because the app went inactive; resumed re-opens.
+  bool _released = false;
+
+  /// Went inactive mid-shot: let go of the camera once the shot settles.
+  bool _releaseAfterShot = false;
+
   (String, String) get _query => (widget.routeId, widget.executionId);
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_open());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_camera.close());
     super.dispose();
   }
 
   Future<void> _open() async {
+    _opening = true;
     try {
       await _camera.open();
+      _opening = false;
+      // Went inactive while opening: the camera goes until resumed.
+      if (_released) return await _camera.close();
       if (mounted) setState(() => _ready = true);
       // Deliberately broad: no camera, permission denied or any plugin error
       // all mean the same here — show the message, keep the screen closable.
       // ignore: avoid_catches_without_on_clauses
     } catch (_) {
+      _opening = false;
       if (mounted) setState(() => _failed = true);
     }
+  }
+
+  /// The platform camera is not ours while the app is in the background
+  /// (the `camera` package's own guidance): let it go on `inactive`, take
+  /// it back on `resumed` (final review I-4).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive) _releaseCamera();
+    if (state == AppLifecycleState.resumed) _retakeCamera();
+  }
+
+  /// A shot in flight keeps the camera until it lands in SQLite (RNF06).
+  void _releaseCamera() {
+    if (_busy) {
+      _releaseAfterShot = true;
+      return;
+    }
+    _releaseAfterShot = false;
+    if (_released || (!_ready && !_opening)) return;
+    _released = true;
+    // Still opening: `_open` closes it once `open()` returns.
+    if (_opening) return;
+    setState(() => _ready = false);
+    unawaited(_camera.close());
+  }
+
+  void _retakeCamera() {
+    _releaseAfterShot = false;
+    if (!_released) return;
+    _released = false;
+    // The first open is still running: it shows the preview by itself.
+    if (!_opening) unawaited(_open());
   }
 
   /// Reads every shot's real state: the unsent rows (`pending`, `failed`,
@@ -130,6 +179,7 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
       _showError(AppStrings.photoSequenceSaveError);
     } finally {
       if (mounted) setState(() => _busy = false);
+      if (mounted && _releaseAfterShot) _releaseCamera();
     }
   }
 

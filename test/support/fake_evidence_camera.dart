@@ -13,9 +13,14 @@ class FakeEvidenceCamera implements EvidenceCamera {
   int shots = 0;
   bool closed = false;
 
+  /// How many times [open] was called, to catch a double open.
+  int opens = 0;
+
   @override
   Future<void> open() async {
+    opens++;
     if (openError != null) throw openError!;
+    closed = false;
   }
 
   @override
