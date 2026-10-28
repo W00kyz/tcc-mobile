@@ -29,6 +29,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       throw UnimplementedError();
 
   @override
+  Stream<Set<String>> watchImpededStopIds(String routeId) =>
+      throw UnimplementedError();
+
+  @override
   Future<bool> deletePendingPhoto(String operationId) =>
       throw UnimplementedError();
 
@@ -51,7 +55,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       routeId: routeId,
       payload: payload,
       createdAt: _rows.length,
-      state: PendingOpState.pending,
+      state: initialState,
       lastError: null,
       attempts: 0,
       nextAttemptAt: null,
@@ -451,6 +455,97 @@ void main() {
       expect(await realStore.unsyncedForRoute('route-A'), hasLength(1));
     });
 
+    Future<String> photoFor(ExecutionRepository repo, String executionId) =>
+        repo.addPhoto(
+          routeId: 'route-A',
+          executionId: executionId,
+          photo: CapturedPhoto(bytes: Uint8List.fromList([1]), sha256: 'h'),
+        );
+
+    test('stampTask stamps the stop with its note and moves the held photo '
+        'to pending', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final repository = repositoryWith(RecordingDayLogStore());
+      final key = await photoFor(repository, 'exec-1');
+
+      await repository.stampTask(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        executionId: 'exec-1',
+        observation: 'lampada trocada',
+      );
+
+      final entry = (await realProgress.progressFor('stop-1'))!;
+      expect(entry.status, StopLocalStatus.stamped);
+      expect(entry.observation, 'lampada trocada');
+      final rows = await realStore.unsyncedForRoute('route-A');
+      expect(rows.single.id, key);
+      expect(rows.single.state, PendingOpState.pending);
+      // No check-out yet: that waits for the floor's exit scan.
+      expect(rows.where((r) => r.kind == PendingOpKind.checkOut), isEmpty);
+    });
+
+    test('stampTask releases only the photos of its own execution', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final repository = repositoryWith(RecordingDayLogStore());
+      await photoFor(repository, 'exec-1');
+      await photoFor(repository, 'exec-2');
+
+      await repository.stampTask(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        executionId: 'exec-1',
+      );
+
+      final states = [
+        for (final row in await realStore.unsyncedForRoute('route-A'))
+          (row.payload['execution_id'], row.state),
+      ];
+      expect(states, [
+        ('exec-1', PendingOpState.pending),
+        ('exec-2', PendingOpState.held),
+      ]);
+    });
+
+    test('impedeTask deletes the held photos and enqueues a STOP '
+        'impediment', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final repository = repositoryWith(RecordingDayLogStore());
+      await photoFor(repository, 'exec-1');
+
+      await repository.impedeTask(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        reason: 'ACCESS_BLOCKED',
+        note: 'porta trancada',
+        executionId: 'exec-1',
+      );
+
+      final rows = await realStore.unsyncedForRoute('route-A');
+      expect(rows, hasLength(1));
+      expect(rows.single.kind, PendingOpKind.impediment);
+      expect(rows.single.state, PendingOpState.pending);
+      expect(rows.single.payload['scope'], 'STOP');
+      expect(rows.single.payload['route_stop_id'], 'stop-1');
+      expect(rows.single.payload['reason'], 'ACCESS_BLOCKED');
+      expect(rows.single.payload['note'], 'porta trancada');
+      expect(syncWorker.syncedRoutes, contains('route-A'));
+    });
+
+    test(
+      'impedeTask without an execution still enqueues the impediment',
+      () async {
+        await repositoryWith(RecordingDayLogStore()).impedeTask(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          reason: 'OTHER',
+        );
+
+        final rows = await realStore.unsyncedForRoute('route-A');
+        expect(rows.single.kind, PendingOpKind.impediment);
+      },
+    );
+
     test('checkOut counts the stop in the real day log', () async {
       await realProgress.upsertInProgress('stop-1', 'exec-1');
       final log = DriftDayLogStore(db);
@@ -513,7 +608,7 @@ void main() {
     expect(dayLog.calls.where((c) => c.startsWith('stopDone')), hasLength(1));
   });
 
-  test('addPhoto enqueues one pending evidencePhoto row and kicks the sync '
+  test('addPhoto enqueues one held evidencePhoto row and kicks the sync '
       'worker once', () async {
     final key = await repository.addPhoto(
       routeId: 'route-A',
@@ -526,7 +621,7 @@ void main() {
 
     final rows = await store.unsyncedForRoute('route-A');
     expect(rows, hasLength(1));
-    expect(rows.single.state, PendingOpState.pending);
+    expect(rows.single.state, PendingOpState.held);
     expect(rows.single.kind, PendingOpKind.evidencePhoto);
     expect(rows.single.payload['execution_id'], 'exec-1');
     expect(rows.single.payload['bytes_b64'], isA<String>());

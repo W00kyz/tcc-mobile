@@ -347,6 +347,29 @@ void main() {
     );
 
     test(
+      'a photo held for its stamp is not an undelivered write: it does not '
+      'stall the pull',
+      () async {
+        final h = _Harness(myDayWith(_batchOne()));
+        await h.markDoneLocally('s2');
+        await h.store.enqueue(
+          id: 'photo-s1',
+          kind: PendingOpKind.evidencePhoto,
+          payload: const {'execution_id': 'exec-s1'},
+          routeId: 'r1',
+          initialState: PendingOpState.held,
+        );
+        h.worker.delivers = false;
+        h.repository.allocate = _handsOutBatchTwo(h);
+
+        await h.mount();
+
+        expect(h.repository.allocationCalls, ['nextBatch:r1']);
+        expect(h.state, NextBatchState.idle);
+      },
+    );
+
+    test(
       'waiting on an undelivered write, it pulls as soon as the route '
       'becomes fully synced — no connectivity event needed',
       () async {

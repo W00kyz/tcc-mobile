@@ -11,25 +11,17 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/stop_progress_store.dart'
     show StopLocalStatus;
 import 'package:route_monitor/routing/home_notices.dart';
-import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/scan_and_locate.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:uuid/uuid.dart';
 
 // The stop flows of the map home, with no widget of their own: check-in,
-// check-out, "Sinalizar impossibilidade" and the scan+GPS dance they share.
+// check-out and "Sinalizar impossibilidade".
 // Moved unchanged out of the old `route_screen.dart` (redesign §6.13).
 
 const _uuid = Uuid();
-
-/// A completed scan+GPS read, threaded from `_scanAndLocate` into a
-/// check-in or check-out attempt.
-class _Scan {
-  const _Scan(this.rawValue, this.coordinates);
-  final String rawValue;
-  final Coordinates? coordinates;
-}
 
 /// One route-level "Fazer check-in" action, not a per-stop button: the QR
 /// scan resolves which stop it belongs to (and can be ambiguous, Task 18).
@@ -53,7 +45,7 @@ Future<void> startCheckIn(
   RouteSummary route,
 ) async {
   final notify = homeNotifier(ref, context);
-  final scan = await _scanAndLocate(context, ref, _entryContext(route));
+  final scan = await scanAndLocate(context, ref, entryScanContext(route));
   if (scan == null || !context.mounted) return;
 
   final routeStopId = await _resolveCheckInStop(context, route, scan);
@@ -80,22 +72,12 @@ Future<void> startCheckIn(
   if (context.mounted) notify(AppStrings.routeCheckInDone);
 }
 
-/// The QR resolves the stop only after the scan, so the entry line names the
-/// building of the batch's next pending stop.
-ScanContext _entryContext(RouteSummary route) {
-  final next = route.currentBatchStops.firstWhere(
-    (stop) => stop.status == 'PENDING',
-    orElse: () => route.currentBatchStops.first,
-  );
-  return EntryScan(next.buildingName);
-}
-
 /// The stop a check-in scan belongs to, or null when the worker dismissed
 /// the room picker.
 Future<String?> _resolveCheckInStop(
   BuildContext context,
   RouteSummary route,
-  _Scan scan,
+  ScanResult scan,
 ) async {
   // Since Etapa 6 the room is resolved on the device, before the enqueue
   // (spec Ruling 4) — the check-in flow is offline-first and there is no
@@ -169,7 +151,7 @@ Future<bool> concludeStop(
 
 /// The sheet, then the exit scan, until a QR is read or the worker leaves
 /// the sheet. Null means "abandoned": nothing is enqueued.
-Future<_Scan?> _concludeAndScan(
+Future<ScanResult?> _concludeAndScan(
   BuildContext context,
   WidgetRef ref,
   RouteSummary route,
@@ -190,7 +172,7 @@ Future<_Scan?> _concludeAndScan(
     // The sheet gates its button, but read the photos once more: never scan
     // a stop below its minimum.
     if (!stopMayConclude(ref, route.id, stop, executionId)) return null;
-    final scan = await _scanAndLocate(
+    final scan = await scanAndLocate(
       context,
       ref,
       ExitScan(stop.buildingName, stop.floorLabel),
@@ -216,7 +198,7 @@ Future<void> _recordCheckOut(
   WidgetRef ref,
   RouteSummary route,
   RouteStopSummary stop,
-  _Scan scan,
+  ScanResult scan,
 ) async {
   final draft = observationDraftProvider(stop.id);
   // Check-out is always per-stop — the UI already knows which IN_PROGRESS
@@ -302,49 +284,5 @@ void _forgetObservations(
   final stops = scope == 'ROUTE_REMAINDER' ? route.currentBatchStops : [stop];
   for (final each in stops) {
     ref.invalidate(observationDraftProvider(each.id));
-  }
-}
-
-/// Pushes [ScanScreen] and, if a value came back, pairs it with a
-/// tolerant GPS read — the shared first half of both check-in and
-/// check-out (Ruling 16: check-out reuses check-in's scan+GPS dance).
-/// Returns null when the scan was dismissed or the context is no longer
-/// mounted afterward.
-Future<_Scan?> _scanAndLocate(
-  BuildContext context,
-  WidgetRef ref,
-  ScanContext scanContext,
-) async {
-  final rawValue = await Navigator.of(context).push<String>(
-    MaterialPageRoute<String>(
-      builder: (_) => ScanScreen(context: scanContext),
-    ),
-  );
-  if (rawValue == null || !context.mounted) return null;
-
-  final coordinates = await _tryGetPosition(context, ref);
-  return _Scan(rawValue, coordinates);
-}
-
-/// GPS is tolerated as unavailable here (RF29/RNF13 — a basement has no
-/// signal): the backend's Layer 7 already treats a missing position as
-/// ACCEPT+flag, so a failure here must not block the check-in, only note
-/// it to the field worker.
-Future<Coordinates?> _tryGetPosition(
-  BuildContext context,
-  WidgetRef ref,
-) async {
-  final notify = homeNotifier(ref, context);
-  try {
-    return await ref
-        .read(locationServiceProvider)
-        .getCurrentPosition(purpose: LocationPurpose.checkin);
-    // Deliberately broad: GeolocatorLocationService can fail with a
-    // StateError (permission denied), a platform exception, or a timeout
-    // — all of them mean "proceed without GPS" here, never "block".
-    // ignore: avoid_catches_without_on_clauses
-  } catch (_) {
-    if (context.mounted) notify(AppStrings.routeLocationUnavailableCheckIn);
-    return null;
   }
 }

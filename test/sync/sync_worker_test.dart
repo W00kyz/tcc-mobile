@@ -243,6 +243,10 @@ class _FakeSyncMetaStore implements SyncMetaStore {
 
 class _FakeLocalWriteStore implements LocalWriteStore {
   @override
+  Stream<Set<String>> watchImpededStopIds(String routeId) =>
+      throw UnimplementedError();
+
+  @override
   Future<bool> deletePendingPhoto(String operationId) =>
       throw UnimplementedError();
 

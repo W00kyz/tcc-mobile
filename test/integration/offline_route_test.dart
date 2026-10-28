@@ -289,6 +289,12 @@ void main() {
         executionId: execution1,
         photo: _photo,
       );
+      // Photos leave the device once their task is stamped.
+      await fixture.repo.stampTask(
+        routeId: _routeId,
+        routeStopId: _stop1,
+        executionId: execution1,
+      );
       await fixture.repo.checkOut(
         routeId: _routeId,
         routeStopId: _stop1,
@@ -417,6 +423,12 @@ void main() {
           routeId: _routeId,
           executionId: execution,
           photo: _photo,
+        );
+        // Photos leave the device once their task is stamped.
+        await fixture.repo.stampTask(
+          routeId: _routeId,
+          routeStopId: _stop1,
+          executionId: execution,
         );
       }
       await fixture.repo.checkOut(
@@ -785,6 +797,12 @@ class _Fixture {
       routeId: _routeId,
       executionId: execution1,
       photo: _photo,
+    );
+    // Photos leave the device once their task is stamped.
+    await repo.stampTask(
+      routeId: _routeId,
+      routeStopId: _stop1,
+      executionId: execution1,
     );
 
     times.add(_nowUtc());

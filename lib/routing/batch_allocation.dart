@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/execution/execution_providers.dart'
     show localWriteStoreProvider, stopProgressStoreProvider;
+import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -190,7 +191,11 @@ class BatchAllocation extends Notifier<NextBatchState> {
     if (!ref.mounted) return true;
     final store = ref.read(localWriteStoreProvider);
     final scope = BlockedScope(await store.blockedForRoute(routeId));
-    final unsynced = await store.unsyncedForRoute(routeId);
+    // A `held` photo waits for its stamp, not for the network: no drain will
+    // ever deliver it, so it must not stall the pull.
+    final unsynced = (await store.unsyncedForRoute(routeId)).where(
+      (row) => row.state != PendingOpState.held,
+    );
     return scope.deliverable(unsynced).isNotEmpty;
   }
 

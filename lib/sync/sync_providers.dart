@@ -96,6 +96,15 @@ blockedOperationsProvider =
           ref.watch(localWriteStoreProvider).blockedForRoute(routeId),
     );
 
+/// The stops of a route the worker reported impossible: the `route_stop_id`
+/// of every `STOP` impediment row, whatever its sync state. The day's cards
+/// draw these as impeded at once, offline too.
+final StreamProviderFamily<Set<String>, String> impededStopIdsProvider =
+    StreamProvider.family<Set<String>, String>(
+      (ref, routeId) =>
+          ref.watch(localWriteStoreProvider).watchImpededStopIds(routeId),
+    );
+
 /// Per-stop sync state for the route screen's inline chip (spec Ruling 5).
 enum StopSyncChip { none, pending, blocked }
 

@@ -184,6 +184,12 @@ abstract class LocalWriteStore {
   /// returns whether it did. A `synced` or `sending` row, or a non-photo one,
   /// is left untouched and yields `false`.
   Future<bool> deletePendingPhoto(String operationId);
+
+  /// The `route_stop_id` of every `STOP`-scope impediment row of [routeId], in
+  /// any state (a delivered one included), re-emitted whenever the outbox
+  /// changes. An impeded task is drawn as such from the tap on, long before
+  /// the server releases the stop.
+  Stream<Set<String>> watchImpededStopIds(String routeId);
 }
 
 class DriftLocalWriteStore implements LocalWriteStore {
@@ -316,6 +322,23 @@ class DriftLocalWriteStore implements LocalWriteStore {
     return (_db.delete(
       _db.pendingOperations,
     )..where((row) => row.id.isIn(ids))).go();
+  }
+
+  @override
+  Stream<Set<String>> watchImpededStopIds(String routeId) {
+    final query = _db.select(_db.pendingOperations)
+      ..where(
+        (row) =>
+            row.routeId.equals(routeId) &
+            row.kind.equals(PendingOpKind.impediment.name),
+      );
+    return query.watch().map(
+      (rows) => {
+        for (final row in rows.map(_toRow))
+          if (row.payload['scope'] == 'STOP')
+            if (row.payload['route_stop_id'] case final String stopId) stopId,
+      },
+    );
   }
 
   /// The ids of [executionId]'s `held` photos. The execution id lives inside

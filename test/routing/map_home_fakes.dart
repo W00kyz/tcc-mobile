@@ -175,6 +175,24 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
 
   final Map<String, PendingOperationRow> _rows = {};
 
+  final _changes = StreamController<void>.broadcast(sync: true);
+
+  Set<String> _impededStopIds(String routeId) => {
+    for (final row in _rows.values)
+      if (row.routeId == routeId &&
+          row.kind == PendingOpKind.impediment &&
+          row.payload['scope'] == 'STOP')
+        row.payload['route_stop_id'] as String,
+  };
+
+  @override
+  Stream<Set<String>> watchImpededStopIds(String routeId) async* {
+    yield _impededStopIds(routeId);
+    await for (final _ in _changes.stream) {
+      yield _impededStopIds(routeId);
+    }
+  }
+
   @override
   Future<bool> deletePendingPhoto(String operationId) async {
     final row = _rows[operationId];
@@ -183,6 +201,7 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
         row.kind == PendingOpKind.evidencePhoto &&
         (row.state == PendingOpState.pending ||
             row.state == PendingOpState.failed ||
+            row.state == PendingOpState.held ||
             row.state == PendingOpState.blocked);
     if (deletable) _rows.remove(operationId);
     return deletable;
@@ -209,6 +228,7 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
       attempts: 0,
       nextAttemptAt: null,
     );
+    _changes.add(null);
     return true;
   }
 

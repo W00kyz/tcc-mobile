@@ -484,4 +484,42 @@ void main() {
       },
     );
   });
+
+  group('watchImpededStopIds', () {
+    Future<void> impediment(
+      String id,
+      String? stopId, {
+      String scope = 'STOP',
+      String routeId = 'route-A',
+    }) => store.enqueue(
+      id: id,
+      kind: PendingOpKind.impediment,
+      payload: {'scope': scope, 'route_stop_id': stopId},
+      routeId: routeId,
+    );
+
+    test('lists STOP impediments of the route in any state, and follows '
+        'new ones', () async {
+      await impediment('i1', 's1');
+      await store.markSynced('i1');
+      await impediment('i2', 's2', scope: 'ROUTE_REMAINDER');
+      await impediment('i3', 's3', routeId: 'route-B');
+      await store.enqueue(
+        id: 'ci',
+        kind: PendingOpKind.checkIn,
+        payload: const {'route_stop_id': 's4'},
+        routeId: 'route-A',
+      );
+      final seen = <Set<String>>[];
+      final sub = store.watchImpededStopIds('route-A').listen(seen.add);
+      addTearDown(sub.cancel);
+      await pumpEventQueue();
+      expect(seen.last, {'s1'});
+
+      await impediment('i4', 's5');
+      await pumpEventQueue();
+
+      expect(seen.last, {'s1', 's5'});
+    });
+  });
 }

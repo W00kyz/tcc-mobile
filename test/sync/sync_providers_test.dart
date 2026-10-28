@@ -103,6 +103,33 @@ void main() {
     },
   );
 
+  test('impededStopIdsProvider emits the stop of a pending impediment row, '
+      'live', () async {
+    final store = DriftLocalWriteStore(db);
+    final container = ProviderContainer(
+      overrides: [localWriteStoreProvider.overrideWithValue(store)],
+    );
+    addTearDown(container.dispose);
+    final seen = <Set<String>>[];
+    container.listen(
+      impededStopIdsProvider('route-A'),
+      (_, next) {
+        if (next.hasValue) seen.add(next.requireValue);
+      },
+    );
+    await pumpEventQueue();
+
+    await store.enqueue(
+      id: 'imp-1',
+      kind: PendingOpKind.impediment,
+      payload: const {'scope': 'STOP', 'route_stop_id': 'stop-1'},
+      routeId: 'route-A',
+    );
+    await pumpEventQueue();
+
+    expect(seen.last, {'stop-1'});
+  });
+
   test('a token refresh does not rebuild the sync worker', () {
     final container = ProviderContainer(
       overrides: [

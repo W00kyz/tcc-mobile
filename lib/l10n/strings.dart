@@ -112,6 +112,15 @@ abstract final class AppStrings {
   static const String routeCheckInDone = 'Check-in registrado.';
   static const String routeCheckOutDone = 'Check-out registrado.';
   static const String routeImpedimentReported = 'Impossibilidade sinalizada.';
+
+  // --- route by building · floor and task actions ---
+  static const String floorHasNoOpenTasks =
+      'Este andar não tem tarefas abertas na sua rota';
+  static const String floorCheckOutDone =
+      'Andar concluído · enviado quando houver rede';
+  static const String taskImpededDone = 'Impossibilidade registrada';
+  static String floorCheckInDone(int n) =>
+      'Check-in do andar feito · $n ${n == 1 ? 'tarefa' : 'tarefas'}';
   static const String routeLocationUnavailable =
       'Não foi possível obter sua localização.';
   static const String routeLocationUnavailableCheckIn =

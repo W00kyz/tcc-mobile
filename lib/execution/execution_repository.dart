@@ -185,6 +185,23 @@ class ExecutionRepository {
     required String reason,
     String? note,
   }) async {
+    await _enqueueImpediment(
+      routeId: routeId,
+      routeStopId: routeStopId,
+      scope: scope,
+      reason: reason,
+      note: note,
+    );
+    unawaited(_syncWorker.syncRoute(routeId));
+  }
+
+  Future<void> _enqueueImpediment({
+    required String routeId,
+    required String? routeStopId,
+    required String scope,
+    required String reason,
+    required String? note,
+  }) async {
     final reportedAt = DateTime.now().toUtc();
     final key = _uuid.v4();
     await _store.enqueue(
@@ -202,17 +219,63 @@ class ExecutionRepository {
         'reported_at': reportedAt.toIso8601String(),
       },
     );
+  }
+
+  /// "Concluir tarefa": stamps the task on the device and clears its held
+  /// photos to leave. The stamp and the release land together or not at all —
+  /// a stamp whose photos never leave would lose the evidence, and released
+  /// photos of an unstamped task would send half a task. No check-out yet:
+  /// that waits for the floor's exit scan.
+  ///
+  /// [executionId] is the task's open execution; null when the device has no
+  /// progress row for it (nothing to release).
+  Future<void> stampTask({
+    required String routeId,
+    required String routeStopId,
+    required String? executionId,
+    String? observation,
+  }) async {
+    await _database.transaction(() async {
+      await _stopProgress.markStamped(routeStopId, observation: observation);
+      if (executionId != null) await _store.releaseHeldPhotos(executionId);
+    });
+    unawaited(_syncWorker.syncRoute(routeId));
+  }
+
+  /// Reports one task impossible: enqueues a `STOP` impediment and drops the
+  /// photos still held for it, in one transaction. Photos already released
+  /// (an earlier stamp) are not held any more and stay on their way.
+  Future<void> impedeTask({
+    required String routeId,
+    required String routeStopId,
+    required String reason,
+    String? note,
+    String? executionId,
+  }) async {
+    await _database.transaction(() async {
+      await _enqueueImpediment(
+        routeId: routeId,
+        routeStopId: routeStopId,
+        scope: 'STOP',
+        reason: reason,
+        note: note,
+      );
+      if (executionId != null) await _store.discardHeldPhotos(executionId);
+    });
     unawaited(_syncWorker.syncRoute(routeId));
   }
 
   /// Adds a photo to [executionId]'s evidence list — same drift-first
-  /// discipline as `checkIn`/`checkOut`: enqueued as a `pending` row
-  /// ([PendingOpKind.evidencePhoto]) that the [SyncWorker] uploads later.
+  /// discipline as `checkIn`/`checkOut`: enqueued as a `held` row
+  /// ([PendingOpKind.evidencePhoto]) that the [SyncWorker] uploads once it is
+  /// released.
   /// [photo]'s bytes are base64-encoded into the payload (never a raw
   /// `Uint8List` — `LocalWriteStore.enqueue` `jsonEncode`s the map) so a
   /// `pending`/`failed` row still has what it needs to render a local
   /// thumbnail before the backend has a copy. Returns the photo's
   /// idempotency key, which identifies the upload on the server.
+  ///
+  /// The row starts `held`: [stampTask] releases it, [impedeTask] drops it.
   Future<String> addPhoto({
     required String routeId,
     required String executionId,
@@ -231,6 +294,9 @@ class ExecutionRepository {
         'captured_at': capturedAt.toIso8601String(),
         'idempotency_key': key,
       },
+      // Held until the task is stamped: a photo of a task that may still be
+      // abandoned must not leave the device yet.
+      initialState: PendingOpState.held,
     );
     unawaited(_syncWorker.syncRoute(routeId));
     return key;

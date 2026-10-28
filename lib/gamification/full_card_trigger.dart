@@ -116,7 +116,10 @@ class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
   ) async {
     final store = ref.read(localWriteStoreProvider);
     final dayLog = ref.read(dayLogStoreProvider);
-    final pending = await store.unsyncedForRoute(routeId);
+    // A `held` photo is not a write yet: it waits for its stamp.
+    final pending = (await store.unsyncedForRoute(routeId)).where(
+      (row) => row.state != PendingOpState.held,
+    );
     final blocked = await store.blockedForRoute(routeId);
     final otherPending = pending.where(
       (row) => !_isCheckOutOf(row, stampedStopId),
