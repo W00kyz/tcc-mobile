@@ -360,6 +360,10 @@ class _CampusBaseLayerState extends State<_CampusBaseLayer> {
           theme: tiles.theme,
           tileProviders: TileProviders({'campus': tiles.provider}),
           fileCacheTtl: Duration.zero,
+          // The archive stops at z15 while the map zooms to z19; raster mode
+          // would upscale z15 images (blocky shapes, labels sized for z15).
+          // Vector mode re-renders at each zoom: sharp roads and street names.
+          layerMode: VectorTileLayerMode.vector,
         );
       },
     );
