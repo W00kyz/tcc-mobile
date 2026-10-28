@@ -15,6 +15,7 @@ class BatchCardView extends StatelessWidget {
     required this.card,
     this.highlightBuildingId,
     this.stampingStopId,
+    this.onSlotTap,
     super.key,
   });
 
@@ -23,6 +24,10 @@ class BatchCardView extends StatelessWidget {
 
   /// The one stop whose stamp falls (animates) once its slot reads done.
   final String? stampingStopId;
+
+  /// A slot tapped: the map sheet opens that stop's actions. Null leaves
+  /// the slots as marks only.
+  final ValueChanged<CardSlot>? onSlotTap;
 
   @override
   Widget build(BuildContext context) {
@@ -164,5 +169,6 @@ class BatchCardView extends StatelessWidget {
   Widget _slot(CardSlot slot) => StampSlot(
     slot: slot,
     animateStamp: slot.stopId == stampingStopId && slot.state == SlotState.done,
+    onTap: onSlotTap == null ? null : () => onSlotTap!(slot),
   );
 }

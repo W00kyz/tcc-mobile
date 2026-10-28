@@ -43,6 +43,7 @@ import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
+import '../routing/map_home_harness.dart' show closeStopSheet, openStopSheet;
 import '../routing/no_tiles_tile_provider.dart';
 import '../support/fake_sync_notification_taps.dart';
 import '../support/in_memory_database.dart';
@@ -191,9 +192,12 @@ void main() {
 
       // The second batch is on screen and the slot flips to all-clear.
       expect(find.text(AppStrings.dayProgress(2, 2, 3)), findsOneWidget);
-      expect(find.text('Sala 201'), findsOneWidget);
       expect(_nextBatchOfflinePanel(), findsNothing);
       expect(find.byTooltip(AppStrings.routeAllSynced), findsOneWidget);
+      // Its stop reads on the sheet its card slot opens.
+      await openStopSheet(tester, 's3');
+      expect(find.text('Sala 201'), findsOneWidget);
+      await closeStopSheet(tester);
 
       // ---- Idempotent re-drain -----------------------------------------
       await fixture.worker.syncAll();

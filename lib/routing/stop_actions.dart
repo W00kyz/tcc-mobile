@@ -146,10 +146,11 @@ class LastStamped extends Notifier<String?> {
 
 /// "Concluir" on an `IN_PROGRESS` stop: the conclusion sheet (one optional
 /// observation, redesign §6.6), the exit scan, then the enqueued check-out
-/// carrying the observation as `complaints_suggestions`.
+/// carrying the observation as `complaints_suggestions`. True once the
+/// check-out is written; false when the worker abandoned it.
 ///
 ///     onPressed: () => concludeStop(context, ref, route, stop)
-Future<void> concludeStop(
+Future<bool> concludeStop(
   BuildContext context,
   WidgetRef ref,
   RouteSummary route,
@@ -157,12 +158,13 @@ Future<void> concludeStop(
 ) async {
   final notify = homeNotifier(ref, context);
   final scan = await _concludeAndScan(context, ref, route, stop);
-  if (scan == null || !context.mounted) return;
+  if (scan == null || !context.mounted) return false;
 
   await _recordCheckOut(ref, route, stop, scan);
   // Not gated on [context]: the in-progress block that asked is gone once
   // its stop is done, the home's lane is not.
   notify(AppStrings.routeCheckOutDone);
+  return true;
 }
 
 /// The sheet, then the exit scan, until a QR is read or the worker leaves
@@ -254,10 +256,11 @@ void _showStopDone(WidgetRef ref, RouteStopSummary stop) {
 /// non-null result, enqueues it via `ExecutionRepository.reportImpediment`
 /// (spec RF16-RF17, alocação automática §7.1). Same shape as [concludeStop]:
 /// read the repo, call it, then a confirmation snackbar; the dialog stays
-/// ref-free (pure input collection).
+/// ref-free (pure input collection). True once the impediment is written;
+/// false when the worker cancelled the sheet.
 ///
 ///     onPressed: () => signalImpossibility(context, ref, route, stop)
-Future<void> signalImpossibility(
+Future<bool> signalImpossibility(
   BuildContext context,
   WidgetRef ref,
   RouteSummary route,
@@ -265,7 +268,7 @@ Future<void> signalImpossibility(
 ) async {
   final notify = homeNotifier(ref, context);
   final choice = await showImpedimentSheet(context);
-  if (choice == null || !context.mounted) return;
+  if (choice == null || !context.mounted) return false;
 
   await ref
       .read(executionRepositoryProvider)
@@ -277,7 +280,7 @@ Future<void> signalImpossibility(
         note: choice.note,
       );
   _forgetObservations(ref, route, stop, choice.scope);
-  if (!context.mounted) return;
+  if (!context.mounted) return true;
   notify(AppStrings.routeImpedimentReported);
   // Once the impediment reached the server its stop comes back RELEASED;
   // reloading the day then is what lets an impediment on the last open
@@ -285,6 +288,7 @@ Future<void> signalImpossibility(
   // the reload serves the device snapshot.
   await ref.read(syncWorkerProvider).syncRoute(route.id);
   if (context.mounted) ref.invalidate(myDayProvider);
+  return true;
 }
 
 /// An impeded stop will not be concluded by this worker: its observation

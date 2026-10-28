@@ -211,6 +211,7 @@ void main() {
           ),
         ),
       );
+      await openStopSheet(tester, 's1');
 
       expect(find.text('Liberado'), findsOneWidget);
       expect(find.textContaining('Liberado · '), findsNothing);

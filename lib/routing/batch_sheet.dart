@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,11 +11,13 @@ import 'package:route_monitor/routing/stop_actions.dart';
 import 'package:route_monitor/routing/stop_row.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
-import 'package:route_monitor/ui/batch_card.dart';
+import 'package:route_monitor/ui/batch_card_carousel.dart';
 
 // The home sheet's content while a batch is being worked (redesign §6.2):
-// the next stop, the batch card and the stops grouped by building — or, with
-// a pin selected, that building's stops alone.
+// the next stop, then the day's batch cards in a carousel (product owner,
+// 2026-10-28: no stop list). A slot tapped opens that stop's actions in a
+// modal sheet; a pin selected brings the current card back with its
+// building highlighted.
 
 /// What this device knows about each stop of [route], from its local
 /// progress rows (watched, so a check-in/out redraws the card).
@@ -36,9 +40,11 @@ CardSlot? inProgressSlotOf(BatchCard card) => card.groups
     .where((slot) => slot.state == SlotState.inProgress)
     .firstOrNull;
 
-/// The current batch's stops with an outbox row not yet delivered.
+/// The route's stops with an outbox row not yet delivered — every batch's,
+/// since the carousel shows them all (a batch just finished may still be
+/// uploading).
 Set<String> watchPendingSyncStops(WidgetRef ref, RouteSummary route) => {
-  for (final stop in route.currentBatchStops)
+  for (final stop in route.stops)
     if ((ref.watch(stopSyncChipProvider((route.id, stop.id))).asData?.value ??
             StopSyncChip.none) !=
         StopSyncChip.none)
@@ -111,87 +117,104 @@ class NextStopRow extends StatelessWidget {
   }
 }
 
-/// The half/open sheet with no building selected: the card, then every
-/// building of the batch with its stops and their actions.
+/// The half/open sheet's body: the day's batch cards, one per page, opening
+/// on the current batch. A tapped slot opens its stop's actions.
 class BatchOverview extends ConsumerWidget {
-  const BatchOverview({required this.route, required this.card, super.key});
+  const BatchOverview({
+    required this.route,
+    required this.cards,
+    this.highlightBuildingId,
+    super.key,
+  });
 
   final RouteSummary route;
-  final BatchCard card;
+  final List<BatchCard> cards;
+
+  /// The building whose pin was tapped: the carousel goes back to the
+  /// current batch and underlines it there.
+  final String? highlightBuildingId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SizedBox(height: 8),
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: BatchCardCarousel(
+        cards: cards,
+        currentBatch: route.currentBatch,
+        highlightBuildingId: highlightBuildingId,
         // The stamp falls only on the stop just checked out (redesign §6.6).
-        BatchCardView(
-          card: card,
-          stampingStopId: ref.watch(lastStampedStopProvider),
-        ),
-        for (final group in card.groups) ...[
-          const SizedBox(height: 16),
-          BuildingHeader(group: group),
-          BuildingStops(route: route, group: group),
-        ],
-      ],
+        stampingStopId: ref.watch(lastStampedStopProvider),
+        onSlotTap: (slot) => unawaited(showStopSheet(context, route, slot)),
+      ),
     );
   }
 }
 
-/// A building's name (whole, unlike the pin's label) and its `done/total`.
-class BuildingHeader extends StatelessWidget {
-  const BuildingHeader({required this.group, super.key});
-
-  final BuildingGroup group;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            group.buildingName,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+/// One stop's actions, in a modal sheet over the map: its building and
+/// floor, then its [StopRow] — every action and state rule the stop list
+/// had, released and done stops included (they read their state, with no
+/// action). The sheet closes once an action has written; one abandoned
+/// (the camera or a dialog cancelled) leaves it open.
+///
+///     onSlotTap: (slot) => showStopSheet(context, route, slot)
+Future<void> showStopSheet(
+  BuildContext context,
+  RouteSummary route,
+  CardSlot slot,
+) {
+  final stop = _stopOf(route, slot.stopId);
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      key: const ValueKey('stop-sheet'),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _StopSheetHeader(stop: stop),
+            StopRow(
+              key: ValueKey('stop-row-${slot.stopId}'),
+              route: route,
+              stop: stop,
+              slot: slot,
+              onActionDone: () => _closeStopSheet(sheetContext),
+            ),
+          ],
         ),
-        Text(
-          '${group.done}/${group.total}',
-          style: TextStyle(fontWeight: FontWeight.w700, color: p.ink),
-        ),
-      ],
-    );
-  }
+      ),
+    ),
+  );
 }
 
-/// One building's stops, in route order, each with its actions. The whole
-/// batch, in order: a stop released since (an impediment that reached the
-/// server, say) shows as such, with no action left on it — nothing on it is
-/// the worker's any more (spec §7).
-class BuildingStops extends StatelessWidget {
-  const BuildingStops({required this.route, required this.group, super.key});
+/// Removes the stop sheet itself, not whatever is on top: the full card
+/// may already have opened over it once the batch's last stamp fell.
+void _closeStopSheet(BuildContext sheetContext) {
+  if (!sheetContext.mounted) return;
+  final route = ModalRoute.of(sheetContext);
+  if (route == null || !route.isActive) return;
+  final navigator = Navigator.of(sheetContext);
+  if (route.isCurrent) return navigator.pop();
+  navigator.removeRoute(route);
+}
 
-  final RouteSummary route;
-  final BuildingGroup group;
+/// The stop sheet's title: building and floor, as "Próxima parada" reads.
+class _StopSheetHeader extends StatelessWidget {
+  const _StopSheetHeader({required this.stop});
+
+  final RouteStopSummary stop;
 
   @override
   Widget build(BuildContext context) {
-    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final (i, slot) in group.slots.indexed) ...[
-          if (i > 0) Divider(height: 1, color: p.rule),
-          StopRow(
-            key: ValueKey('stop-row-${slot.stopId}'),
-            route: route,
-            stop: _stopOf(route, slot.stopId),
-            slot: slot,
-          ),
-        ],
-      ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        AppStrings.buildingFloor(stop.buildingName, stop.floorLabel),
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
     );
   }
 }

@@ -51,13 +51,6 @@ BuildingPin _pinOf(WidgetTester tester, String buildingId) =>
       ),
     );
 
-/// The pin's `done/total` count, inside its circle (the label may hang
-/// off-screen to the right).
-Finder _pinCircle(String buildingId) => find.descendant(
-  of: find.byKey(ValueKey('pin-$buildingId')),
-  matching: find.textContaining('/'),
-);
-
 /// The top bar's progress dots, filled (`on`) or empty (`off`).
 Finder _dots(String state) => find.byWidgetPredicate(
   (widget) =>
@@ -190,16 +183,16 @@ void main() {
   testWidgets('tapping a pin selects the building', (tester) async {
     await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
 
-    await tester.tap(_pinCircle('b2'));
+    await tester.tap(pinCircle('b2'));
     await tester.pumpAndSettle();
 
     final container = ProviderScope.containerOf(
       tester.element(find.byType(MapHomeScreen)),
     );
     expect(container.read(selectedBuildingProvider), 'b2');
-    expect(find.text('2º andar'), findsWidgets);
-    expect(find.text('Térreo'), findsNothing);
-    expect(find.text('1º andar'), findsNothing);
+    // The card stays, with the building highlighted (product owner,
+    // 2026-10-28: no building-only list).
+    expect(shownCard(tester).highlightBuildingId, 'b2');
     expect(_pinOf(tester, 'b1').dimmed, isTrue);
     expect(_pinOf(tester, 'b2').selected, isTrue);
 
@@ -208,12 +201,12 @@ void main() {
 
     expect(container.read(selectedBuildingProvider), isNull);
     expect(_pinOf(tester, 'b1').dimmed, isFalse);
-    expect(find.byType(BatchCardView), findsOneWidget);
+    expect(shownCard(tester).highlightBuildingId, isNull);
   });
 
   testWidgets(
-    'the building panel offers Sinalizar impossibilidade on PENDING and '
-    'IN_PROGRESS stops only',
+    'with a building selected, its stops offer Sinalizar impossibilidade on '
+    'PENDING and IN_PROGRESS stops only',
     (tester) async {
       final route = routeWith(
         stops: [
@@ -230,13 +223,20 @@ void main() {
       );
       await pumpHome(tester, homeWith(repositoryWith(route)));
 
-      await tester.tap(_pinCircle('b1'));
+      await tester.tap(pinCircle('b1'));
       await tester.pumpAndSettle();
 
-      expect(
-        find.text(AppStrings.routeSignalImpossibilityButton),
-        findsNWidgets(2),
-      );
+      final signal = find.text(AppStrings.routeSignalImpossibilityButton);
+      for (final (stopId, offered) in [
+        ('s1', false),
+        ('s2', true),
+        ('s3', true),
+        ('s4', false),
+      ]) {
+        await openStopSheet(tester, stopId);
+        expect(signal, offered ? findsOneWidget : findsNothing, reason: stopId);
+        await closeStopSheet(tester);
+      }
     },
   );
 
@@ -329,7 +329,7 @@ void main() {
   testWidgets('a selected building still offers Escanear QR', (tester) async {
     await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
 
-    await tester.tap(_pinCircle('b2'));
+    await tester.tap(pinCircle('b2'));
     await tester.pumpAndSettle();
 
     expect(scanQrButton().hitTestable(), findsOneWidget);
@@ -357,6 +357,10 @@ void main() {
         ],
       );
       await pumpHome(tester, homeWith(repositoryWith(route)));
+      // The stamp's hour, on the card.
+      expect(find.text('10:05'), findsOneWidget);
+
+      await openStopSheet(tester, 's1');
 
       expect(find.text(AppStrings.slotDone('10:05')), findsOneWidget);
       expect(find.text('10:05'), findsOneWidget);
@@ -370,7 +374,7 @@ void main() {
         ),
       );
       await pumpHome(tester, homeWith(repository));
-      await tester.tap(_pinCircle('b1'));
+      await tester.tap(pinCircle('b1'));
       await tester.pumpAndSettle();
       final container = ProviderScope.containerOf(
         tester.element(find.byType(MapHomeScreen)),
@@ -390,7 +394,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(container.read(selectedBuildingProvider), isNull);
-      expect(find.byType(BatchCardView), findsOneWidget);
+      expect(shownCard(tester).card.batchNumber, 2);
+      expect(shownCard(tester).highlightBuildingId, isNull);
     });
 
     testWidgets('on a small phone the closed sheet still shows the next stop '

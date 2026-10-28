@@ -21,8 +21,9 @@ String? formatLeg(double? distanceM, double? durationS) {
   return '$distance · ${(durationS / 60).round()} min';
 }
 
-/// One stop of the sheet's lists: floor, service point, state (in words —
-/// never by colour alone) and the actions the state allows.
+/// One stop, as the stop sheet opened from its card slot shows it: floor,
+/// service point, state (in words — never by colour alone) and the actions
+/// the state allows.
 ///
 /// The stop is drawn with its *effective* state (spec Ruling 5), the one
 /// [slot] carries: a local `done` beats a local `inProgress` beats the
@@ -34,12 +35,18 @@ class StopRow extends ConsumerWidget {
     required this.route,
     required this.stop,
     required this.slot,
+    this.onActionDone,
     super.key,
   });
 
   final RouteSummary route;
   final RouteStopSummary stop;
   final CardSlot slot;
+
+  /// Called once an action has written ("Concluir" checked out, an
+  /// impediment enqueued) — never when it was abandoned. The stop sheet
+  /// closes on it.
+  final VoidCallback? onActionDone;
 
   bool get _inProgress => slot.state == SlotState.inProgress;
   bool get _open =>
@@ -128,17 +135,23 @@ class StopRow extends ConsumerWidget {
         if (_inProgress)
           TextButton(
             onPressed: _canConclude(ref)
-                ? () => concludeStop(context, ref, route, stop)
+                ? () => _afterWrite(concludeStop(context, ref, route, stop))
                 : null,
             child: const Text(AppStrings.routeConcludeButton),
           ),
         if (canSignal)
           TextButton(
-            onPressed: () => signalImpossibility(context, ref, route, stop),
+            onPressed: () => _afterWrite(
+              signalImpossibility(context, ref, route, stop),
+            ),
             child: const Text(AppStrings.routeSignalImpossibilityButton),
           ),
       ],
     );
+  }
+
+  Future<void> _afterWrite(Future<bool> action) async {
+    if (await action) onActionDone?.call();
   }
 
   /// An evidence stop may conclude only with its photos; the count is the

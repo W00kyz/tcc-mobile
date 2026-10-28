@@ -62,9 +62,12 @@ void main() {
         expect(repository.allocationCalls, ['start']);
         expect(repository.lastPosition, (lat: -7.23, lng: -35.88));
         expect(find.text(AppStrings.dayProgress(1, 0, 2)), findsOneWidget);
-        expect(find.text('Sala 101'), findsOneWidget);
-        expect(find.text('Sala 102'), findsOneWidget);
         expect(startButton(), findsNothing);
+        await openStopSheet(tester, 's1');
+        expect(find.text('Sala 101'), findsOneWidget);
+        await closeStopSheet(tester);
+        await openStopSheet(tester, 's2');
+        expect(find.text('Sala 102'), findsOneWidget);
       },
     );
 
@@ -231,7 +234,7 @@ void main() {
 
   group('route states', () {
     testWidgets(
-      'shows only the current batch under the done count of the whole day, a '
+      'opens on the current batch under the done count of the whole day, a '
       'released stop as released and with no action',
       (tester) async {
         final route = routeWith(
@@ -257,8 +260,16 @@ void main() {
         await pumpHome(tester, homeWith(repositoryWith(route)));
 
         expect(find.text('Lote 2 · 1 de 2 pontos hoje'), findsOneWidget);
-        expect(find.text('Sala Nova'), findsOneWidget);
+        // The carousel opens on batch 2, the second card.
+        expect(carouselPage(tester), 1);
+        // The stops are read from their sheets, not a list on the home.
         expect(find.text('Sala Velha'), findsNothing);
+        final signal = find.widgetWithText(
+          TextButton,
+          AppStrings.routeSignalImpossibilityButton,
+        );
+
+        await openStopSheet(tester, 'b');
         expect(find.text('Sala Impedida'), findsOneWidget);
         expect(
           find.text(
@@ -268,14 +279,13 @@ void main() {
           ),
           findsOneWidget,
         );
+        expect(signal, findsNothing);
+        await closeStopSheet(tester);
+
         // Only "Sala Nova" can still be signalled.
-        expect(
-          find.widgetWithText(
-            TextButton,
-            AppStrings.routeSignalImpossibilityButton,
-          ),
-          findsOneWidget,
-        );
+        await openStopSheet(tester, 'c');
+        expect(find.text('Sala Nova'), findsOneWidget);
+        expect(signal, findsOneWidget);
       },
     );
 
@@ -373,8 +383,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(repository.allocationCalls, ['start']);
-      expect(find.text('Sala 205'), findsOneWidget);
       expect(checkAgainButton(), findsNothing);
+      await openStopSheet(tester, 's2');
+      expect(find.text('Sala 205'), findsOneWidget);
     });
 
     testWidgets('"Verificar de novo" with the pool still empty says so', (
@@ -415,6 +426,9 @@ void main() {
         ),
       ),
     );
+
+    // s1 is the next stop and has no leg; s2's reads on its sheet.
+    await openStopSheet(tester, 's2');
 
     expect(find.textContaining('120 m'), findsOneWidget);
     expect(find.textContaining('3 min'), findsOneWidget);

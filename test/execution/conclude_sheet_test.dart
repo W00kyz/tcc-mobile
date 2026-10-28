@@ -245,6 +245,7 @@ void main() {
     final container = _container(tester);
     container.read(observationDraftProvider('s1').notifier).write('pia');
 
+    await openStopSheet(tester, 's1');
     await tapInSheet(
       tester,
       find.widgetWithText(

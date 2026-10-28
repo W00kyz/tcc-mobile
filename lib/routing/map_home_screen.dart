@@ -29,8 +29,9 @@ import 'package:route_monitor/ui/map_sheet.dart';
 import 'package:route_monitor/ui/snackbar_lane.dart';
 import 'package:route_monitor/ui/sync_indicator.dart';
 
-/// The building whose pin the worker tapped: the sheet lists its stops
-/// alone and the other pins dim (redesign §6.3). Null shows the whole batch.
+/// The building whose pin the worker tapped: the other pins dim (redesign
+/// §6.3) and the sheet's carousel comes back to the current batch with that
+/// building highlighted. Null highlights none.
 ///
 ///     ref.read(selectedBuildingProvider.notifier).select('b2');
 final selectedBuildingProvider = NotifierProvider<SelectedBuilding, String?>(
@@ -53,7 +54,7 @@ const double _topOverlayHeight = 150;
 
 /// The home (`/rota`, redesign §6.2): the campus map edge to edge, the top
 /// bar and chips floating over it, and the three-height sheet with the day's
-/// state — the batch card and its stops while a batch is worked.
+/// state — the batch cards in a carousel while a batch is worked.
 ///
 ///     GoRoute(path: '/rota', builder: (_, _) => const MapHomeScreen())
 class MapHomeScreen extends ConsumerStatefulWidget {
@@ -112,8 +113,11 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     final local = route == null
         ? const <String, LocalStopState>{}
         : watchLocalStates(ref, route);
+    final pendingSync = _isWorked(route)
+        ? watchPendingSyncStops(ref, route!)
+        : const <String>{};
     final card = _isWorked(route)
-        ? buildBatchCard(route!, local, watchPendingSyncStops(ref, route))
+        ? buildBatchCard(route!, local, pendingSync)
         : null;
     _card = card;
     final selected = _selectedGroup(card, ref.watch(selectedBuildingProvider));
@@ -143,7 +147,13 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
                     ),
                     _topOverlay(route, local),
                     _myPositionButton(constraints.maxHeight),
-                    _sheetFor(dayAsync, local, card, selected, nextBatch),
+                    _sheetFor(
+                      dayAsync,
+                      local,
+                      pendingSync,
+                      selected,
+                      nextBatch,
+                    ),
                   ],
                 ),
               ),
@@ -160,19 +170,22 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   Widget _sheetFor(
     AsyncValue<MyDay> dayAsync,
     Map<String, LocalStopState> local,
-    BatchCard? card,
+    Set<String> pendingSync,
     BuildingGroup? selected,
     NextBatchState nextBatch,
   ) {
     final day = dayAsync.value;
-    if (day != null) return _daySheet(day, local, card, selected, nextBatch);
+    if (day != null) {
+      return _daySheet(day, local, pendingSync, selected, nextBatch);
+    }
     if (dayAsync.hasError) return _panelSheet(const LoadErrorPanel());
     return _panelSheet(const _CardSkeleton());
   }
 
-  /// A new batch (or route) starts with the whole card: a selection left
-  /// from the last batch would reopen in building mode — with no card — when
-  /// the next batch is in the same building (the common case).
+  /// A new batch (or route) starts with no building highlighted: a
+  /// selection left from the last batch would still dim the pins and
+  /// underline a building when the next batch is in the same one (the
+  /// common case).
   void _clearSelectionOnNewBatch() {
     ref.listen<AsyncValue<MyDay>>(myDayProvider, (previous, next) {
       _forgetReleasedObservations(next.value?.route);
@@ -305,7 +318,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   Widget _daySheet(
     MyDay day,
     Map<String, LocalStopState> local,
-    BatchCard? card,
+    Set<String> pendingSync,
     BuildingGroup? selected,
     NextBatchState nextBatch,
   ) {
@@ -322,7 +335,12 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       // Not final before the workday ends: points released later go back to
       // the pool, and "Verificar de novo" asks for them (spec §1).
       'DONE' => _panelSheet(DonePanel(doneToday: dayDoneCount(route, local))),
-      _ => _batchSheet(route, card!, selected, nextBatch),
+      _ => _batchSheet(
+        route,
+        buildBatchCards(route, local, pendingSync),
+        selected,
+        nextBatch,
+      ),
     };
   }
 
@@ -332,34 +350,15 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     body: const SizedBox.shrink(),
   );
 
+  /// The batch being worked: the stop in progress or the next one, then
+  /// the day's cards. A selected building keeps this layout — the carousel
+  /// comes back to the current card and highlights it there.
   Widget _batchSheet(
     RouteSummary route,
-    BatchCard card,
+    List<BatchCard> cards,
     BuildingGroup? selected,
     NextBatchState nextBatch,
   ) {
-    final footer = canCheckIn(route.currentBatchStops)
-        ? FilledButton.icon(
-            onPressed: () => startCheckIn(context, ref, route),
-            icon: const Icon(Icons.qr_code_scanner),
-            label: const Text(AppStrings.scanQrButton),
-          )
-        : null;
-    final inProgress = _inProgressBlock(route, card);
-    if (selected != null) {
-      return MapSheet(
-        controller: _sheet,
-        header: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            ?inProgress,
-            BuildingHeader(group: selected),
-          ],
-        ),
-        body: BuildingStops(route: route, group: selected),
-        stickyFooter: footer,
-      );
-    }
     return MapSheet(
       controller: _sheet,
       header: Column(
@@ -367,17 +366,32 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         children: [
           if (nextBatch == NextBatchState.waitingForNetwork)
             const NextBatchOfflinePanel(),
-          inProgress ?? NextStopRow(route: route, card: card),
+          _inProgressBlock(route, _card!) ??
+              NextStopRow(route: route, card: _card!),
         ],
       ),
-      body: BatchOverview(route: route, card: card),
-      stickyFooter: footer,
+      body: BatchOverview(
+        route: route,
+        cards: cards,
+        highlightBuildingId: selected?.buildingId,
+      ),
+      stickyFooter: _scanQrFooter(route),
+    );
+  }
+
+  /// "Escanear QR", while the batch has a stop to check in.
+  Widget? _scanQrFooter(RouteSummary route) {
+    if (!canCheckIn(route.currentBatchStops)) return null;
+    return FilledButton.icon(
+      onPressed: () => startCheckIn(context, ref, route),
+      icon: const Icon(Icons.qr_code_scanner),
+      label: const Text(AppStrings.scanQrButton),
     );
   }
 
   /// The stop in progress, in place of "Próxima parada" (redesign §6.2);
-  /// also over a selected building's list, so its photos and "Concluir"
-  /// never hide behind a pin tap.
+  /// also while a building is selected, so its photos and "Concluir" never
+  /// hide behind a pin tap.
   Widget? _inProgressBlock(RouteSummary route, BatchCard card) {
     final slot = inProgressSlotOf(card);
     if (slot == null) return null;
@@ -391,8 +405,9 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   /// After a written check-out (redesign §6.6): the map centres on the
   /// stop's building and the sheet comes to half height, where the card —
-  /// and the stamp falling on it — shows. A selected building would keep
-  /// the card off the sheet, so the selection goes first (final review I-5).
+  /// and the stamp falling on it — shows (the carousel comes back to the
+  /// current batch for it). The selection goes first, so the highlight of
+  /// a building tapped before does not linger (final review I-5).
   void _onStamped(String stopId) {
     _clearSelection();
     final group = _card?.groups
@@ -410,7 +425,8 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   }
 
   /// Pin tap: select the building, centre the map on it and bring the sheet
-  /// to half height with that building's stops.
+  /// to half height, the current card showing with that building
+  /// highlighted.
   void _selectBuilding(BuildingGroup group) {
     ref.read(selectedBuildingProvider.notifier).select(group.buildingId);
     _forgetStamp();

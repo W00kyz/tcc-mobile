@@ -16,12 +16,17 @@ class StampSlot extends StatefulWidget {
     required this.slot,
     this.size = 48,
     this.animateStamp = false,
+    this.onTap,
     super.key,
   });
 
   final CardSlot slot;
   final double size;
   final bool animateStamp;
+
+  /// Opens the stop's actions. The slot and its caption are the target —
+  /// never under 48dp (the circle alone is [size]).
+  final VoidCallback? onTap;
 
   @override
   State<StampSlot> createState() => _StampSlotState();
@@ -88,19 +93,31 @@ class _StampSlotState extends State<StampSlot>
   @override
   Widget build(BuildContext context) {
     final p = Theme.of(context).extension<FieldPalette>()!;
-    return Column(
+    final body = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Semantics(
           label: _label(),
           container: true,
+          button: widget.onTap != null,
+          onTap: widget.onTap,
           child: ExcludeSemantics(child: _circle(p)),
         ),
         const SizedBox(height: 3),
         _caption(context, p),
       ],
     );
+    return widget.onTap == null ? body : _tappable(body);
   }
+
+  /// A circular ink, like the slot; the tap reaches assistive technology
+  /// through the label's own node above, not a second one here.
+  Widget _tappable(Widget body) => InkResponse(
+    onTap: widget.onTap,
+    radius: widget.size / 2 + 8,
+    excludeFromSemantics: true,
+    child: body,
+  );
 
   Widget _circle(FieldPalette p) {
     final s = widget.size;

@@ -18,6 +18,7 @@ import 'map_home_harness.dart';
 // Ported from the deleted route_screen_test.dart: an IN_PROGRESS stop's
 // "Concluir" (check-out) and its photos, now through the in-progress block
 // (redesign §6.2) and the conclusion sheet (§6.6, conclude_sheet_test.dart).
+// A stop's own row lives in its stop sheet, opened from its card slot.
 
 RouteSummary _inProgressStopRoute() => routeWith(
   stops: [
@@ -40,6 +41,7 @@ void main() {
       tester,
       homeWith(repositoryWith(routeWith(stops: [stopIn(id: 's1')]))),
     );
+    await openStopSheet(tester, 's1');
 
     expect(_concluir(), findsNothing);
   });
@@ -52,6 +54,7 @@ void main() {
         stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
       ),
     );
+    await openStopSheet(tester, 's1');
 
     expect(tester.widget<TextButton>(_concluir()).onPressed, isNotNull);
   });
@@ -83,6 +86,7 @@ void main() {
   ) async {
     await pumpHome(tester, homeWith(repositoryWith(_inProgressStopRoute())));
 
+    await openStopSheet(tester, 's1');
     await tapInSheet(tester, _concluir());
 
     expect(find.text(AppStrings.concludeScanExitButton), findsOneWidget);
@@ -141,24 +145,38 @@ void main() {
         ),
       );
 
-      expect(find.text('Sala 101'), findsOneWidget);
-      expect(find.text('Sala 102'), findsOneWidget);
-      expect(find.text('Sala 103'), findsOneWidget);
-      // DONE (s1) reads done, by word as well as by stamp.
-      expect(find.text(AppStrings.slotDoneNoHour), findsOneWidget);
-      // IN_PROGRESS (s2): one row "Concluir" and one block, with its photos
+      final signal = find.widgetWithText(
+        TextButton,
+        AppStrings.routeSignalImpossibilityButton,
+      );
+      // IN_PROGRESS (s2) has its block on the home sheet, with its photos
       // action.
-      expect(_concluir(), findsOneWidget);
       expect(blockConcludeButton(), findsOneWidget);
       expect(_addPhoto(), findsOneWidget);
-      // s2 and s3 can be signalled, s1 cannot.
-      expect(
-        find.widgetWithText(
-          TextButton,
-          AppStrings.routeSignalImpossibilityButton,
-        ),
-        findsNWidgets(2),
-      );
+
+      // DONE (s1) reads done, by word as well as by stamp, and cannot be
+      // signalled.
+      await openStopSheet(tester, 's1');
+      expect(find.text('Sala 101'), findsOneWidget);
+      expect(find.text(AppStrings.slotDoneNoHour), findsOneWidget);
+      expect(_concluir(), findsNothing);
+      expect(signal, findsNothing);
+      await closeStopSheet(tester);
+
+      // IN_PROGRESS (s2): the row's "Concluir", and it can be signalled.
+      await openStopSheet(tester, 's2');
+      expect(find.text('Sala 102'), findsOneWidget);
+      expect(_concluir(), findsOneWidget);
+      expect(signal, findsOneWidget);
+      await closeStopSheet(tester);
+
+      // PENDING (s3): only "Sinalizar".
+      await openStopSheet(tester, 's3');
+      expect(find.text('Sala 103'), findsOneWidget);
+      expect(_concluir(), findsNothing);
+      expect(signal, findsOneWidget);
+      await closeStopSheet(tester);
+
       // PENDING has a sheet-level entry point, not a per-stop button.
       expect(scanQrButton(), findsOneWidget);
     },
@@ -175,6 +193,7 @@ void main() {
           stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
         ),
       );
+      await openStopSheet(tester, 's1');
 
       expect(_concluir(), findsOneWidget);
       expect(_addPhoto(), findsOneWidget);

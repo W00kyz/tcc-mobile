@@ -31,6 +31,8 @@ import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:route_monitor/ui/app_theme.dart';
+import 'package:route_monitor/ui/batch_card.dart';
+import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../appeals/fake_appeal_api.dart';
 import '../support/fake_connectivity.dart';
@@ -176,6 +178,54 @@ Future<void> tapInSheet(WidgetTester tester, Finder finder) async {
   await tester.ensureVisible(finder);
   await tester.pumpAndSettle();
   await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
+/// The card slot of [stopId] in the sheet's carousel.
+Finder slotOf(String stopId) => find.byWidgetPredicate(
+  (widget) => widget is StampSlot && widget.slot.stopId == stopId,
+);
+
+/// Taps [stopId]'s slot on the card and lets its stop sheet open: the
+/// stop's actions live there now, not in a list under the card.
+Future<void> openStopSheet(WidgetTester tester, String stopId) async {
+  await tapInSheet(tester, slotOf(stopId));
+  expect(stopSheet(), findsOneWidget, reason: 'stop sheet of $stopId');
+}
+
+/// The carousel's page, settled: the index of the batch card shown.
+double? carouselPage(WidgetTester tester) => tester
+    .widget<PageView>(find.byKey(const ValueKey('batch-card-carousel')))
+    .controller
+    ?.page;
+
+/// The pin's `done/total` count, inside its circle (the label may hang
+/// off-screen to the right).
+Finder pinCircle(String buildingId) => find.descendant(
+  of: find.byKey(ValueKey('pin-$buildingId')),
+  matching: find.textContaining('/'),
+);
+
+/// The carousel's card nearest the centre of the screen: the one shown.
+BatchCardView shownCard(WidgetTester tester) {
+  final centre = tester.getCenter(find.byType(MapHomeScreen)).dx;
+  final cards = find.byType(BatchCardView).evaluate().toList()
+    ..sort(
+      (a, b) => (tester.getCenter(find.byWidget(a.widget)).dx - centre)
+          .abs()
+          .compareTo(
+            (tester.getCenter(find.byWidget(b.widget)).dx - centre).abs(),
+          ),
+    );
+  return cards.first.widget as BatchCardView;
+}
+
+/// The open stop sheet (a modal bottom sheet over the home).
+Finder stopSheet() => find.byKey(const ValueKey('stop-sheet'));
+
+/// Closes the open stop sheet the way a worker would: back.
+Future<void> closeStopSheet(WidgetTester tester) async {
+  await tester.binding.handlePopRoute();
   await tester.pumpAndSettle();
 }
 

@@ -10,7 +10,8 @@ import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
 
 // Final review I-5: the stamp falls on the batch card, so a check-out made
-// with a building selected brings the card back first.
+// with a building selected clears the selection first (the card no longer
+// leaves the sheet for a building's list, but its highlight would linger).
 
 /// s1 in progress in "Central de Aulas" (b1), s2 pending in "Bloco B".
 RouteSummary _inProgressInB1() => routeWith(
@@ -48,12 +49,24 @@ void main() {
       tester.element(find.byType(MapHomeScreen)),
     );
     expect(container.read(selectedBuildingProvider), 'b1');
-    expect(find.byType(BatchCardView), findsNothing);
+    // The card stays on the sheet, the building highlighted on it.
+    expect(
+      tester
+          .widget<BatchCardView>(find.byType(BatchCardView))
+          .highlightBuildingId,
+      'b1',
+    );
 
     await concludeWith(tester, 'v1.floor.1.sig');
 
     expect(container.read(selectedBuildingProvider), isNull);
     expect(find.byType(BatchCardView), findsOneWidget);
+    expect(
+      tester
+          .widget<BatchCardView>(find.byType(BatchCardView))
+          .highlightBuildingId,
+      isNull,
+    );
     final animating = tester
         .widgetList<StampSlot>(find.byType(StampSlot))
         .where((slot) => slot.animateStamp);

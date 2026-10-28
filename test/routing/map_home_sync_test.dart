@@ -41,7 +41,8 @@ RouteSyncStatus _statusOf({
   blocked: blocked,
 );
 
-/// The outbox chip of a stop row — not the "Pendente" state word.
+/// The outbox chip of a stop row — not the "Pendente" state word. The row
+/// is on the stop's sheet, opened from its card slot.
 Finder _chip(String label) => find.widgetWithText(Chip, label);
 
 void main() {
@@ -170,8 +171,13 @@ void main() {
           ),
         );
 
+        await openStopSheet(tester, 's1');
         expect(_chip(AppStrings.routeChipPending), findsOneWidget);
         expect(_chip(AppStrings.routeChipBlocked), findsNothing);
+        await closeStopSheet(tester);
+
+        await openStopSheet(tester, 's2');
+        expect(find.byType(Chip), findsNothing);
       },
     );
 
@@ -198,6 +204,7 @@ void main() {
             localWriteStore: store,
           ),
         );
+        await openStopSheet(tester, 's1');
 
         expect(_chip(AppStrings.routeChipPending), findsOneWidget);
       },
@@ -218,6 +225,7 @@ void main() {
         tester,
         homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
       );
+      await openStopSheet(tester, 's1');
 
       expect(_chip(AppStrings.routeChipBlocked), findsOneWidget);
       expect(_chip(AppStrings.routeChipPending), findsNothing);
@@ -250,6 +258,7 @@ void main() {
           localWriteStore: store,
         ),
       );
+      await openStopSheet(tester, 's1');
 
       expect(_chip(AppStrings.routeChipBlocked), findsOneWidget);
       expect(_chip(AppStrings.routeChipPending), findsNothing);
@@ -306,6 +315,7 @@ void main() {
         expect(repository.allocationCalls, ['nextBatch:r1']);
         expect(await store.unsyncedForRoute('r1'), isEmpty);
         expect(find.text(AppStrings.dayProgress(2, 1, 2)), findsOneWidget);
+        await openStopSheet(tester, 's2');
         expect(find.text('Sala 202'), findsOneWidget);
       },
     );
@@ -337,6 +347,7 @@ void main() {
 
         expect(repository.allocationCalls, ['nextBatch:r1']);
         expect(nextBatchOfflinePanel(), findsNothing);
+        await openStopSheet(tester, 's2');
         expect(find.text('Sala 202'), findsOneWidget);
       },
     );
@@ -444,6 +455,7 @@ void main() {
 
         expect(worker.syncAllCount, 1);
         expect(repository.allocationCalls, ['nextBatch:r1']);
+        await openStopSheet(tester, 's2');
         expect(find.text('Sala 202'), findsOneWidget);
       },
     );

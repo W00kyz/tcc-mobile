@@ -83,69 +83,134 @@ class BatchCard {
 
 /// Builds the card of the route's current batch: stops grouped by building in
 /// the order each building first appears.
+///
+///     final card = buildBatchCard(route, local, pendingSyncStopIds);
 BatchCard buildBatchCard(
   RouteSummary route,
   Map<String, LocalStopState> local,
   Set<String> pendingSyncStopIds,
-) {
-  final stops =
-      route.stops.where((s) => s.batchNumber == route.currentBatch).toList()
-        ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+) => _buildCardFor(
+  route,
+  route.currentBatch,
+  local,
+  pendingSyncStopIds,
+  marksNext: true,
+);
 
-  var nextAssigned = false;
+/// One card per batch present in [route]'s stops, in ascending batch order
+/// — the map sheet's carousel. Only the current batch's card has a `next`
+/// slot: an earlier batch is finished work, and a later one is not the
+/// worker's to start yet.
+///
+///     final cards = buildBatchCards(route, local, pendingSyncStopIds);
+List<BatchCard> buildBatchCards(
+  RouteSummary route,
+  Map<String, LocalStopState> local,
+  Set<String> pendingSyncStopIds,
+) {
+  final batches = {for (final stop in route.stops) stop.batchNumber}.toList()
+    ..sort();
+  return [
+    for (final batch in batches)
+      _buildCardFor(
+        route,
+        batch,
+        local,
+        pendingSyncStopIds,
+        marksNext: batch == route.currentBatch,
+      ),
+  ];
+}
+
+/// The card of [batchNumber]: its stops in route order, grouped by building
+/// in the order each building first appears. With [marksNext], the first
+/// open stop is the `next` slot.
+BatchCard _buildCardFor(
+  RouteSummary route,
+  int batchNumber,
+  Map<String, LocalStopState> local,
+  Set<String> pendingSyncStopIds, {
+  required bool marksNext,
+}) {
+  final stops = route.stops.where((s) => s.batchNumber == batchNumber).toList()
+    ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+
+  var nextAssigned = !marksNext;
   final slotsByBuilding = <String, List<CardSlot>>{};
   final stopsByBuilding = <String, List<RouteStopSummary>>{};
   for (final stop in stops) {
-    final localState = local[stop.id];
-    final SlotState state;
-    DateTime? stampedAt;
-    if (stop.status == 'RELEASED') {
-      state = SlotState.released;
-    } else if (localState?.status == StopLocalStatus.done ||
-        stop.status == 'DONE') {
-      state = SlotState.done;
-      stampedAt = localState?.status == StopLocalStatus.done
-          ? localState!.updatedAt
-          : stop.doneAt;
-    } else if (localState?.status == StopLocalStatus.inProgress ||
-        stop.status == 'IN_PROGRESS') {
-      state = SlotState.inProgress;
-    } else if (!nextAssigned) {
-      nextAssigned = true;
-      state = SlotState.next;
-    } else {
-      state = SlotState.pending;
-    }
-    slotsByBuilding
-        .putIfAbsent(stop.buildingId, () => [])
-        .add(
-          CardSlot(
-            stopId: stop.id,
-            state: state,
-            floorLabel: stop.floorLabel,
-            stampedAt: stampedAt,
-            pendingSync: pendingSyncStopIds.contains(stop.id),
-            releaseReason: stop.releaseReason,
-            stampRotationDeg: stampRotationFor(stop.id),
-          ),
-        );
+    final slot = _slotOf(
+      stop,
+      local[stop.id],
+      pendingSyncStopIds,
+      mayBeNext: !nextAssigned,
+    );
+    if (slot.state == SlotState.next) nextAssigned = true;
+    slotsByBuilding.putIfAbsent(stop.buildingId, () => []).add(slot);
     stopsByBuilding.putIfAbsent(stop.buildingId, () => []).add(stop);
   }
-
-  final groups = [
-    for (final entry in stopsByBuilding.entries)
-      BuildingGroup(
-        buildingId: entry.key,
-        buildingName: entry.value.first.buildingName,
-        slots: slotsByBuilding[entry.key]!,
-        position: LatLng(
-          _mean(entry.value.map((s) => s.latitude)),
-          _mean(entry.value.map((s) => s.longitude)),
-        ),
-      ),
-  ];
-  return BatchCard(batchNumber: route.currentBatch, groups: groups);
+  return BatchCard(
+    batchNumber: batchNumber,
+    groups: _groupsOf(stopsByBuilding, slotsByBuilding),
+  );
 }
+
+CardSlot _slotOf(
+  RouteStopSummary stop,
+  LocalStopState? localState,
+  Set<String> pendingSyncStopIds, {
+  required bool mayBeNext,
+}) {
+  final localDone = localState?.status == StopLocalStatus.done;
+  final state = _slotStateOf(stop, localState, mayBeNext: mayBeNext);
+  return CardSlot(
+    stopId: stop.id,
+    state: state,
+    floorLabel: stop.floorLabel,
+    // When the stop was done: the local check-out beats the server's.
+    stampedAt: state != SlotState.done
+        ? null
+        : (localDone ? localState!.updatedAt : stop.doneAt),
+    pendingSync: pendingSyncStopIds.contains(stop.id),
+    releaseReason: stop.releaseReason,
+    stampRotationDeg: stampRotationFor(stop.id),
+  );
+}
+
+/// The stop's effective state: released, then a local or server done, then
+/// a local or server in-progress; otherwise the first open stop is `next`
+/// when [mayBeNext], and the rest are pending.
+SlotState _slotStateOf(
+  RouteStopSummary stop,
+  LocalStopState? localState, {
+  required bool mayBeNext,
+}) {
+  if (stop.status == 'RELEASED') return SlotState.released;
+  if (localState?.status == StopLocalStatus.done || stop.status == 'DONE') {
+    return SlotState.done;
+  }
+  if (localState?.status == StopLocalStatus.inProgress ||
+      stop.status == 'IN_PROGRESS') {
+    return SlotState.inProgress;
+  }
+  return mayBeNext ? SlotState.next : SlotState.pending;
+}
+
+List<BuildingGroup> _groupsOf(
+  Map<String, List<RouteStopSummary>> stopsByBuilding,
+  Map<String, List<CardSlot>> slotsByBuilding,
+) => [
+  for (final entry in stopsByBuilding.entries)
+    BuildingGroup(
+      buildingId: entry.key,
+      buildingName: entry.value.first.buildingName,
+      slots: slotsByBuilding[entry.key]!,
+      position: LatLng(
+        _mean(entry.value.map((s) => s.latitude)),
+        _mean(entry.value.map((s) => s.longitude)),
+      ),
+    ),
+];
 
 double _mean(Iterable<double> values) =>
     values.fold<double>(0, (a, b) => a + b) / values.length;
