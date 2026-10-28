@@ -42,7 +42,11 @@ class TaskPhotos extends ConsumerWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _cameraButton(context, ref, mayAdd ? id : null),
-        for (final photo in photos) _thumbnail(ref, id!, photo),
+        for (final photo in photos)
+          _Thumbnail(
+            photo,
+            onRemove: () => _remove(ref, id!, photo.idempotencyKey!),
+          ),
       ],
     );
   }
@@ -103,18 +107,30 @@ class TaskPhotos extends ConsumerWidget {
     ..invalidate(stopEvidenceProvider((route.id, executionId)))
     ..invalidate(localPhotoCountProvider(executionId));
 
-  /// A 64 dp thumbnail; a removable one carries a 24 dp ✕ in a 48 dp target
-  /// at its top-right corner.
-  Widget _thumbnail(
-    WidgetRef ref,
-    String executionId,
-    EvidenceListEntry photo,
-  ) {
-    final key = photo.idempotencyKey;
-    final removable = key != null && _isOnDevice(photo.syncState);
-    return SizedBox(
-      width: 76,
-      height: 76,
+  Future<void> _remove(WidgetRef ref, String executionId, String key) async {
+    await ref.read(localWriteStoreProvider).deletePendingPhoto(key);
+    _refreshPhotos(ref, executionId);
+  }
+}
+
+/// A 64 dp thumbnail; one still on the device carries a 24 dp ✕ in a 48 dp
+/// target at its top-right corner.
+class _Thumbnail extends StatelessWidget {
+  const _Thumbnail(this.photo, {required this.onRemove});
+
+  final EvidenceListEntry photo;
+  final VoidCallback onRemove;
+
+  /// The states `LocalWriteStore.deletePendingPhoto` accepts.
+  bool get _removable =>
+      photo.idempotencyKey != null &&
+      photo.syncState != PendingOpState.synced &&
+      photo.syncState != PendingOpState.sending;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 76,
       child: Stack(
         children: [
           Positioned(
@@ -125,26 +141,15 @@ class TaskPhotos extends ConsumerWidget {
               child: EvidenceThumbnail(photo, size: 64),
             ),
           ),
-          if (removable)
+          if (_removable)
             Positioned(
               top: 0,
               right: 0,
-              child: _RemovePhotoButton(
-                onPressed: () => _remove(ref, executionId, key),
-              ),
+              child: _RemovePhotoButton(onPressed: onRemove),
             ),
         ],
       ),
     );
-  }
-
-  /// The states `LocalWriteStore.deletePendingPhoto` accepts.
-  static bool _isOnDevice(PendingOpState state) =>
-      state != PendingOpState.synced && state != PendingOpState.sending;
-
-  Future<void> _remove(WidgetRef ref, String executionId, String key) async {
-    await ref.read(localWriteStoreProvider).deletePendingPhoto(key);
-    _refreshPhotos(ref, executionId);
   }
 }
 

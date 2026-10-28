@@ -11,6 +11,7 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/floor_actions.dart';
+import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -67,10 +68,32 @@ Future<void> showTaskDialog(
     builder: (_) => TaskDialog(route: route, stop: stop),
   );
   if (decision == null || !context.mounted) return;
-  await _carryOut(context, ref, route, stop, decision);
+  final notify = homeNotifier(ref, context);
+  try {
+    await _carryOut(context, ref, route, stop, decision);
+  } on Exception {
+    // After a landed write only the sync pass that follows can throw: the
+    // outbox retries it, so it is not this task's failure.
+    if (context.mounted && _writeLanded(ref, stop, decision)) return;
+    // No stamp falls, and the draft (cleared only after a write) is still
+    // there for the next try.
+    notify(AppStrings.taskSaveFailed);
+  }
 }
 
-/// [showTaskDialog] for a tapped floor-card [slot] of [route].
+/// Whether [decision]'s write reached SQLite: its stamp provider is set only
+/// once it did (RNF06).
+bool _writeLanded(WidgetRef ref, RouteStopSummary stop, TaskDecision decision) {
+  final stamped = switch (decision) {
+    TaskConcluded() => ref.read(lastStampedStopProvider),
+    TaskImpossible() => ref.read(lastImpededStopProvider),
+  };
+  return stamped == stop.id;
+}
+
+/// [showTaskDialog] for a tapped floor-card [slot] of [route]. A slot whose
+/// stop left the route (a reload between the build and the tap) opens
+/// nothing.
 ///
 ///     onSlotTap: (slot, _) => showSlotTask(context, ref, route, slot)
 Future<void> showSlotTask(
@@ -78,13 +101,11 @@ Future<void> showSlotTask(
   WidgetRef ref,
   RouteSummary route,
   CardSlot slot,
-) => showTaskDialog(
-  context,
-  ref,
-  route: route,
-  stop: route.stops.firstWhere((stop) => stop.id == slot.stopId),
-  slot: slot,
-);
+) async {
+  final stop = route.stops.where((s) => s.id == slot.stopId).firstOrNull;
+  if (stop == null) return;
+  await showTaskDialog(context, ref, route: route, stop: stop, slot: slot);
+}
 
 Future<void> _carryOut(
   BuildContext context,
@@ -110,12 +131,16 @@ Future<void> _carryOut(
 };
 
 /// The observation as an impediment note: trimmed, null when blank, and cut
-/// to [_impedimentNoteLimit] code points (what the backend counts).
+/// to [_impedimentNoteLimit] code points (what the backend counts). The
+/// reason dialog says so beforehand ([_noteWillBeTrimmed]).
 String? _impedimentNoteOf(String draft) {
   final note = observationToSend(draft);
-  if (note == null || note.runes.length <= _impedimentNoteLimit) return note;
+  if (note == null || !_noteWillBeTrimmed(draft)) return note;
   return String.fromCharCodes(note.runes.take(_impedimentNoteLimit)).trim();
 }
+
+bool _noteWillBeTrimmed(String draft) =>
+    (observationToSend(draft)?.runes.length ?? 0) > _impedimentNoteLimit;
 
 /// The task dialog's body. Pure input collection apart from the photos: it
 /// never writes a stamp or an impediment, it pops a [TaskDecision] and
@@ -143,7 +168,7 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
   }
 
   /// The open execution of the task: set from the floor check-in until the
-  /// stamp; null before the check-in.
+  /// stamp; null before the check-in and while the progress row loads.
   String? _openExecutionId() {
     final entry = ref.watch(stopProgressForProvider(widget.stop.id)).value;
     if (entry == null || entry.status != StopLocalStatus.inProgress) {
@@ -151,6 +176,11 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
     }
     return entry.executionId;
   }
+
+  /// Whether the progress row was read: until then no hint says "faça o
+  /// check-in", which would flash on a task already checked in.
+  bool get _progressKnown =>
+      ref.watch(stopProgressForProvider(widget.stop.id)).hasValue;
 
   @override
   Widget build(BuildContext context) {
@@ -305,6 +335,7 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
 
   /// Why "Concluir tarefa" is closed, or null when it is open.
   String? _concludeHint(String? executionId) {
+    if (!_progressKnown) return null;
     if (executionId == null) return AppStrings.taskNeedsFloorCheckIn;
     if (!widget.stop.requiresEvidence) return null;
     final count = ref.watch(
@@ -331,7 +362,10 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
 
   /// The reason dialog over this one; a cancel there leaves the task open.
   Future<void> _signalImpossible() async {
-    final reason = await showImpossibilityReasonDialog(context);
+    final reason = await showImpossibilityReasonDialog(
+      context,
+      noteTrimmed: _noteWillBeTrimmed(_observation.text),
+    );
     if (reason == null || !mounted) return;
     Navigator.of(context).pop(
       TaskImpossible(

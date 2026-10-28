@@ -132,6 +132,10 @@ abstract final class AppStrings {
   static const String taskConclude = 'Concluir tarefa';
   static const String taskRequiresPhotos = 'Exige pelo menos 2 fotos';
   static const String impossibilityReasonTitle = 'Por que não é possível?';
+  static const String impossibilityNoteTrimmed =
+      'A observação será enviada com os primeiros 500 caracteres';
+  static const String taskSaveFailed =
+      'Não foi possível salvar. Tente de novo.';
 
   // --- building sheet: header, floor card, scan footer ---
   static const String buildingSheetNext = 'Próximo ponto';

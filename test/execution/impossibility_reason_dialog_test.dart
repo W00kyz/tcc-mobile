@@ -6,7 +6,10 @@ import 'package:route_monitor/ui/app_theme.dart';
 
 void main() {
   /// Opens the reason dialog from a button; [results] gets what it returns.
-  Future<List<String?>> pumpHost(WidgetTester tester) async {
+  Future<List<String?>> pumpHost(
+    WidgetTester tester, {
+    bool noteTrimmed = false,
+  }) async {
     final results = <String?>[];
     await tester.pumpWidget(
       MaterialApp(
@@ -14,8 +17,12 @@ void main() {
         home: Scaffold(
           body: Builder(
             builder: (context) => TextButton(
-              onPressed: () async =>
-                  results.add(await showImpossibilityReasonDialog(context)),
+              onPressed: () async => results.add(
+                await showImpossibilityReasonDialog(
+                  context,
+                  noteTrimmed: noteTrimmed,
+                ),
+              ),
               child: const Text('go'),
             ),
           ),
@@ -64,5 +71,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(results, [null]);
+  });
+
+  testWidgets('it warns about a trimmed note only when told to', (
+    tester,
+  ) async {
+    await pumpHost(tester);
+    expect(find.text(AppStrings.impossibilityNoteTrimmed), findsNothing);
+    await tester.tap(find.text(AppStrings.commonCancel));
+    await tester.pumpAndSettle();
+
+    await pumpHost(tester, noteTrimmed: true);
+
+    expect(find.text(AppStrings.impossibilityNoteTrimmed), findsOneWidget);
   });
 }

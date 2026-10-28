@@ -18,16 +18,21 @@ const impossibilityReasons = <(String, String)>[
 /// Asks why a task cannot be done and returns the picked reason's wire value,
 /// or null when the worker cancelled — nothing should be reported then. A
 /// dialog, not a sheet: it sits over the task dialog that opened it.
+/// [noteTrimmed] warns that the observation goes out cut to the note limit.
 ///
 ///     final reason = await showImpossibilityReasonDialog(context);
-Future<String?> showImpossibilityReasonDialog(BuildContext context) =>
-    showDialog<String>(
-      context: context,
-      builder: (_) => const ImpossibilityReasonDialog(),
-    );
+Future<String?> showImpossibilityReasonDialog(
+  BuildContext context, {
+  bool noteTrimmed = false,
+}) => showDialog<String>(
+  context: context,
+  builder: (_) => ImpossibilityReasonDialog(noteTrimmed: noteTrimmed),
+);
 
 class ImpossibilityReasonDialog extends StatefulWidget {
-  const ImpossibilityReasonDialog({super.key});
+  const ImpossibilityReasonDialog({this.noteTrimmed = false, super.key});
+
+  final bool noteTrimmed;
 
   @override
   State<ImpossibilityReasonDialog> createState() =>
@@ -43,7 +48,13 @@ class _ImpossibilityReasonDialogState extends State<ImpossibilityReasonDialog> {
     return AlertDialog(
       backgroundColor: p.paper,
       title: const Text(AppStrings.impossibilityReasonTitle),
-      content: SingleChildScrollView(child: _reasons()),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [_reasons(), if (widget.noteTrimmed) _trimmedLine(p)],
+        ),
+      ),
       actions: _actions(),
     );
   }
@@ -64,6 +75,14 @@ class _ImpossibilityReasonDialogState extends State<ImpossibilityReasonDialog> {
       child: const Text(AppStrings.commonConfirm),
     ),
   ];
+
+  Widget _trimmedLine(FieldPalette p) => Padding(
+    padding: const EdgeInsets.only(top: 8),
+    child: Text(
+      AppStrings.impossibilityNoteTrimmed,
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: p.muted),
+    ),
+  );
 
   Widget _reasons() {
     return RadioGroup<String>(

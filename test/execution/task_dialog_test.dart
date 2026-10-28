@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,8 +46,8 @@ RouteSummary _route(RouteStopSummary stop) => RouteSummary(
   stops: [stop],
 );
 
-CardSlot _slot(SlotState state) => CardSlot(
-  stopId: 's1',
+CardSlot _slot(SlotState state, {String stopId = 's1'}) => CardSlot(
+  stopId: stopId,
   state: state,
   floorLabel: 'Térreo',
   stampedAt: null,
@@ -75,11 +77,15 @@ void main() {
   });
 
   /// A host whose button opens the task dialog for [stop] on a [state]
-  /// slot, and taps it.
+  /// slot, and taps it. With [tappedStopId], it goes through `showSlotTask`
+  /// for a slot of that stop instead; [progressStore] replaces the
+  /// in-memory progress rows the dialog reads.
   Future<void> openDialog(
     WidgetTester tester, {
     RouteStopSummary? stop,
     SlotState state = SlotState.inProgress,
+    String? tappedStopId,
+    StopProgressStore? progressStore,
   }) async {
     final shown = stop ?? _stop();
     tester.view
@@ -91,7 +97,9 @@ void main() {
         overrides: [
           appDatabaseProvider.overrideWithValue(db),
           localWriteStoreProvider.overrideWithValue(store),
-          stopProgressStoreProvider.overrideWithValue(progress),
+          stopProgressStoreProvider.overrideWithValue(
+            progressStore ?? progress,
+          ),
           syncWorkerProvider.overrideWithValue(RecordingSyncWorker()),
           executionRepositoryProvider.overrideWithValue(repository),
           evidenceApiProvider.overrideWithValue(FakeEvidenceApi()),
@@ -101,13 +109,20 @@ void main() {
           home: Scaffold(
             body: Consumer(
               builder: (context, ref, _) => TextButton(
-                onPressed: () => showTaskDialog(
-                  context,
-                  ref,
-                  route: _route(shown),
-                  stop: shown,
-                  slot: _slot(state),
-                ),
+                onPressed: () => tappedStopId == null
+                    ? showTaskDialog(
+                        context,
+                        ref,
+                        route: _route(shown),
+                        stop: shown,
+                        slot: _slot(state),
+                      )
+                    : showSlotTask(
+                        context,
+                        ref,
+                        _route(shown),
+                        _slot(state, stopId: tappedStopId),
+                      ),
                 child: const Text('go'),
               ),
             ),
@@ -300,4 +315,119 @@ void main() {
 
     expect(find.byType(Dialog), findsNothing);
   });
+
+  testWidgets('the reason dialog warns only when the observation is over '
+      'the note limit', (tester) async {
+    await openDialog(tester);
+    await tester.enterText(find.byType(TextField), 'a' * 500);
+    await tester.tap(find.text(AppStrings.routeSignalImpossibilityButton));
+    await tester.pumpAndSettle();
+    expect(find.text(AppStrings.impossibilityNoteTrimmed), findsNothing);
+    await tester.tap(find.text(AppStrings.commonCancel));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'a' * 501);
+    await tester.tap(find.text(AppStrings.routeSignalImpossibilityButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.impossibilityNoteTrimmed), findsOneWidget);
+  });
+
+  testWidgets('a slot whose stop left the route opens nothing', (
+    tester,
+  ) async {
+    await openDialog(tester, tappedStopId: 'gone');
+
+    expect(find.byType(Dialog), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a slot of the route opens its dialog through showSlotTask', (
+    tester,
+  ) async {
+    await openDialog(tester, tappedStopId: 's1');
+
+    expect(find.text('Banheiro masculino'), findsOneWidget);
+  });
+
+  testWidgets('a stamp that fails to save says so and keeps the draft', (
+    tester,
+  ) async {
+    store = FailingTaskWriteStore();
+    repository = ExecutionRepository(
+      store,
+      progress,
+      RecordingSyncWorker(),
+      database: db,
+      dayLog: RecordingDayLogStore(),
+    );
+    await progress.upsertInProgress('s1', 'exec-1');
+    await openDialog(tester, stop: _stop(requiresEvidence: false));
+    await tester.enterText(find.byType(TextField), 'pia ok');
+
+    await tester.tap(find.text(AppStrings.taskConclude));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.taskSaveFailed), findsOneWidget);
+    expect(
+      (await progress.progressFor('s1'))?.status,
+      StopLocalStatus.inProgress,
+    );
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(find.text('pia ok'), findsOneWidget);
+  });
+
+  testWidgets('an impossibility that fails to save says so', (tester) async {
+    store = FailingTaskWriteStore();
+    repository = ExecutionRepository(
+      store,
+      progress,
+      RecordingSyncWorker(),
+      database: db,
+      dayLog: RecordingDayLogStore(),
+    );
+    await openDialog(tester);
+
+    await signalImpossibleWith(tester, AppStrings.impedimentReasonOther);
+    await tester.tap(find.text(AppStrings.commonConfirm));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.taskSaveFailed), findsOneWidget);
+    expect(await store.unsyncedForRoute('r1'), isEmpty);
+  });
+
+  testWidgets('while the progress row loads no check-in hint flashes and '
+      'Concluir stays off', (tester) async {
+    await openDialog(tester, progressStore: NeverLoadingProgressStore());
+
+    expect(find.text(AppStrings.taskNeedsFloorCheckIn), findsNothing);
+    expect(concludeButton(tester).onPressed, isNull);
+    expect(cameraButton(tester).onPressed, isNull);
+  });
+}
+
+/// A write store that fails the writes behind a stamp (releasing the held
+/// photos) and an impediment (enqueuing it), as a full disk would.
+class FailingTaskWriteStore extends InMemoryLocalWriteStore {
+  @override
+  Future<int> releaseHeldPhotos(String executionId) async =>
+      throw Exception('release of $executionId failed');
+
+  @override
+  Future<bool> enqueue({
+    required String id,
+    required PendingOpKind kind,
+    required Map<String, dynamic> payload,
+    required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
+  }) async => throw Exception('enqueue of $kind failed');
+}
+
+/// A progress store whose read never completes: the dialog stays in its
+/// loading state.
+class NeverLoadingProgressStore extends FakeStopProgressStore {
+  @override
+  Future<StopProgressEntry?> progressFor(String routeStopId) =>
+      Completer<StopProgressEntry?>().future;
 }
