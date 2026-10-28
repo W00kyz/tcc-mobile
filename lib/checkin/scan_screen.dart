@@ -133,39 +133,62 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
     final p = Theme.of(context).extension<FieldPalette>()!;
     return Scaffold(
       backgroundColor: p.ink,
-      body: LayoutBuilder(
-        builder: (context, box) {
-          final cutout = scanCutout(box.biggest);
-          return Stack(
-            fit: StackFit.expand,
-            children: [
-              MobileScanner(
-                controller: _controller,
-                scanWindow: cutout,
-                onDetect: _handleDetection,
-                errorBuilder: (_, error) => _errorView(error),
-              ),
-              IgnorePointer(
-                child: CustomPaint(
-                  painter: ScanOverlayPainter(
-                    cutout: cutout,
-                    bracketColor: _bracketColor(p),
-                  ),
-                ),
-              ),
-              ..._copy(cutout, box.maxHeight, p),
-              _Footer(controller: _controller, onTorch: _toggleTorch),
-            ],
-          );
+      body: ValueListenableBuilder<MobileScannerState>(
+        valueListenable: _controller,
+        builder: (context, state, _) {
+          final denied =
+              state.error?.errorCode == MobileScannerErrorCode.permissionDenied;
+          return denied ? _deniedBody(p) : _cameraBody(p);
         },
       ),
     );
   }
 
+  /// No camera: the explanation and "Abrir configurações" with nothing
+  /// dimmed on top, plus "Cancelar".
+  Widget _deniedBody(FieldPalette p) => Stack(
+    fit: StackFit.expand,
+    children: [
+      const ScanPermissionDenied(),
+      _Footer(controller: _controller, onTorch: _toggleTorch, tint: p.ink),
+    ],
+  );
+
+  Widget _cameraBody(FieldPalette p) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        final cutout = scanCutout(box.biggest);
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            MobileScanner(
+              controller: _controller,
+              scanWindow: cutout,
+              onDetect: _handleDetection,
+              errorBuilder: (_, error) => _errorView(error),
+            ),
+            IgnorePointer(
+              child: CustomPaint(
+                painter: ScanOverlayPainter(
+                  cutout: cutout,
+                  bracketColor: _bracketColor(p),
+                ),
+              ),
+            ),
+            ..._copy(cutout, box.maxHeight, p),
+            _Footer(
+              controller: _controller,
+              onTorch: _toggleTorch,
+              tint: kScanOverlayWhite,
+              showTorch: true,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _errorView(MobileScannerException error) {
-    if (error.errorCode == MobileScannerErrorCode.permissionDenied) {
-      return const ScanPermissionDenied();
-    }
     return const _OverlayText(AppStrings.scanCameraError);
   }
 
@@ -214,29 +237,39 @@ class _InvalidStrip extends StatelessWidget {
   final Color color;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    color: color,
-    child: Text(
-      AppStrings.scanInvalidQr,
-      textAlign: TextAlign.center,
-      style: Theme.of(
-        context,
-      ).textTheme.bodyLarge?.copyWith(color: kScanOverlayWhite),
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      color: color,
+      child: Text(
+        AppStrings.scanInvalidQr,
+        textAlign: TextAlign.center,
+        style: Theme.of(
+          context,
+        ).textTheme.bodyLarge?.copyWith(color: kScanOverlayWhite),
+      ),
     ),
   );
 }
 
 class _Footer extends StatelessWidget {
-  const _Footer({required this.controller, required this.onTorch});
+  const _Footer({
+    required this.controller,
+    required this.onTorch,
+    required this.tint,
+    this.showTorch = false,
+  });
   final MobileScannerController controller;
   final VoidCallback onTorch;
+  final Color tint;
+  final bool showTorch;
 
   @override
   Widget build(BuildContext context) {
     final style = TextButton.styleFrom(
-      foregroundColor: kScanOverlayWhite,
+      foregroundColor: tint,
       minimumSize: const Size(48, 48),
     );
     return Positioned(
@@ -249,20 +282,21 @@ class _Footer extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              ValueListenableBuilder<MobileScannerState>(
-                valueListenable: controller,
-                builder: (_, state, _) => TextButton.icon(
-                  key: const Key('scan-torch'),
-                  style: style,
-                  onPressed: onTorch,
-                  icon: Icon(
-                    state.torchState == TorchState.on
-                        ? Icons.flashlight_on
-                        : Icons.flashlight_off,
+              if (showTorch)
+                ValueListenableBuilder<MobileScannerState>(
+                  valueListenable: controller,
+                  builder: (_, state, _) => TextButton.icon(
+                    key: const Key('scan-torch'),
+                    style: style,
+                    onPressed: onTorch,
+                    icon: Icon(
+                      state.torchState == TorchState.on
+                          ? Icons.flashlight_on
+                          : Icons.flashlight_off,
+                    ),
+                    label: const Text(AppStrings.scanTorch),
                   ),
-                  label: const Text(AppStrings.scanTorch),
                 ),
-              ),
               TextButton(
                 style: style,
                 onPressed: () => Navigator.of(context).pop(),

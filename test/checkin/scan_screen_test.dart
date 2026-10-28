@@ -20,15 +20,25 @@ const _validPayload =
 BarcodeCapture _captureWith(String rawValue) =>
     BarcodeCapture(barcodes: [Barcode(rawValue: rawValue)]);
 
+class _PopCounter extends NavigatorObserver {
+  _PopCounter({required this.onPop});
+  final VoidCallback onPop;
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => onPop();
+}
+
 void main() {
   late MobileScannerController controller;
   late String? poppedValue;
+  var pops = 0;
 
   Future<void> pumpPusher(
     WidgetTester tester, {
     ScanContext scanContext = const EntryScan('Central de Aulas'),
   }) async {
     poppedValue = 'not-popped-yet';
+    pops = 0;
     // autoStart: false — a widget test must never touch the camera platform
     // channel (QR doesn't work in an emulator either, see CLAUDE.md); the
     // detection itself is driven directly through MobileScanner.onDetect
@@ -43,6 +53,7 @@ void main() {
         ],
         child: MaterialApp(
           theme: buildAppTheme(),
+          navigatorObservers: [_PopCounter(onPop: () => pops++)],
           home: Builder(
             builder: (context) => Scaffold(
               body: ElevatedButton(
@@ -175,5 +186,71 @@ void main() {
 
     expect(find.text('Abrir configurações'), findsOneWidget);
     expect(find.textContaining('câmera'), findsWidgets);
+  });
+
+  Color bracketColor(WidgetTester tester) => tester
+      .widgetList<CustomPaint>(find.byType(CustomPaint))
+      .map((w) => w.painter)
+      .whereType<ScanOverlayPainter>()
+      .single
+      .bracketColor;
+
+  testWidgets('brackets turn moss on a valid QR', (tester) async {
+    await pumpPusher(tester);
+
+    final scanner = tester.widget<MobileScanner>(find.byType(MobileScanner));
+    scanner.onDetect!(_captureWith(_validPayload));
+    await tester.pump();
+    await tester.pump();
+
+    expect(bracketColor(tester), FieldPalette.light.moss);
+  });
+
+  testWidgets('brackets turn brick on an invalid QR', (tester) async {
+    await pumpPusher(tester);
+
+    final scanner = tester.widget<MobileScanner>(find.byType(MobileScanner));
+    scanner.onDetect!(_captureWith('not-a-qr-payload'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(bracketColor(tester), FieldPalette.light.brick);
+    await tester.pump(const Duration(seconds: 3));
+  });
+
+  testWidgets('duplicate valid detections pop once', (tester) async {
+    await pumpPusher(tester);
+
+    final scanner = tester.widget<MobileScanner>(find.byType(MobileScanner));
+    scanner.onDetect!(_captureWith(_validPayload));
+    scanner.onDetect!(_captureWith(_validPayload));
+    await tester.pumpAndSettle();
+
+    expect(pops, 1);
+    expect(poppedValue, _validPayload);
+  });
+
+  testWidgets('permission denied hides the framing UI and offers settings', (
+    tester,
+  ) async {
+    await pumpPusher(tester);
+    controller.value = controller.value.copyWith(
+      isInitialized: true,
+      error: const MobileScannerException(
+        errorCode: MobileScannerErrorCode.permissionDenied,
+      ),
+    );
+    await tester.pump();
+
+    final painters = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((w) => w.painter)
+        .whereType<ScanOverlayPainter>();
+    expect(painters, isEmpty);
+    expect(find.text('Aponte para o QR Code do andar'), findsNothing);
+    expect(find.text('Entrada · Central de Aulas'), findsNothing);
+    expect(find.text('Lanterna'), findsNothing);
+    expect(find.text('Cancelar'), findsOneWidget);
+    expect(find.text('Abrir configurações').hitTestable(), findsOneWidget);
   });
 }
