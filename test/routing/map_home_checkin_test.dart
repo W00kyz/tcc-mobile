@@ -348,4 +348,19 @@ void main() {
       expect(find.text(AppStrings.silenceChip(32)), findsOneWidget);
     });
   });
+
+  testWidgets('the in-progress block shows after an offline check-in', (
+    tester,
+  ) async {
+    // RecordingSyncWorker never delivers: the server still says PENDING,
+    // only the device's own progress row says the stop is open.
+    await pumpHome(tester, homeWith(repositoryWith(_oneRoomInRadiusRoute())));
+    expect(blockConcludeButton(), findsNothing);
+
+    await scanWith(tester, 'v1.floor.1.sig');
+    await tester.pumpAndSettle();
+
+    expect(blockConcludeButton(), findsOneWidget);
+    expect(blockTakePhotosButton(), findsOneWidget);
+  });
 }

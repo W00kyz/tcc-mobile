@@ -1,11 +1,17 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
+import 'package:route_monitor/execution/conclude_sheet.dart';
+import 'package:route_monitor/execution/evidence_photo_count.dart';
+import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/photo_sequence_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
+import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
 import '../routing/map_home_harness.dart';
@@ -73,6 +79,13 @@ Future<List<PendingOperationRow>> _checkOuts(
   'r1',
 )).where((row) => row.kind == PendingOpKind.checkOut).toList();
 
+ProviderContainer _container(WidgetTester tester) =>
+    ProviderScope.containerOf(tester.element(find.byType(MapHomeScreen)));
+
+VoidCallback? _scanExitPressed(WidgetTester tester) => tester
+    .widget<ButtonStyleButton>(find.byKey(const ValueKey('conclude-scan-exit')))
+    .onPressed;
+
 void main() {
   for (final requiresEvidence in [true, false]) {
     testWidgets(
@@ -129,26 +142,77 @@ void main() {
     expect(checkOut.payload.containsKey('complaints_suggestions'), isFalse);
   });
 
-  testWidgets('cancelling the exit QR enqueues nothing and keeps the text', (
-    tester,
-  ) async {
+  testWidgets('cancelling the exit QR enqueues nothing and brings the sheet '
+      'back with the text (ruling R12)', (tester) async {
     final store = await _pump(tester);
 
+    // concludeWith pops the scanner with null and settles: no tap after.
     await concludeWith(tester, null, observation: 'pia entupida');
 
-    expect(await _checkOuts(store), isEmpty);
-    await tapInSheet(tester, blockConcludeButton());
+    expect(find.byType(ScanScreen), findsNothing);
+    expect(find.text(AppStrings.concludeScanExitButton), findsOneWidget);
     final field = tester.widget<TextField>(find.byType(TextField));
     expect(field.controller?.text, 'pia entupida');
+    expect(await _checkOuts(store), isEmpty);
+
+    // The loop goes on: scan again from the same sheet, now with a QR.
+    await tester.tap(find.text(AppStrings.concludeScanExitButton));
+    await tester.pumpAndSettle();
+    Navigator.of(tester.element(find.byType(ScanScreen))).pop('v1.floor.1.s');
+    await tester.pumpAndSettle();
+    final sent = (await _checkOuts(store)).single;
+    expect(sent.payload['complaints_suggestions'], 'pia entupida');
   });
 
   testWidgets('a successful check-out clears the observation', (tester) async {
     await _pump(tester);
-    await concludeWith(tester, null, observation: 'pia entupida');
+    final container = _container(tester);
 
-    await concludeWith(tester, 'v1.floor.1.sig');
+    await concludeWith(tester, 'v1.floor.1.sig', observation: 'pia entupida');
 
-    expect(find.text('pia entupida'), findsNothing);
+    expect(container.read(observationDraftProvider('s1')), isEmpty);
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('the sent text never exceeds 2000 code points', (tester) async {
+    final store = await _pump(tester);
+    // One grapheme, seven code points (four emoji and three joiners): the
+    // field's own limit counts graphemes, the backend counts code points.
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}';
+    expect(family.runes.length, 7);
+
+    await tapInSheet(tester, blockConcludeButton());
+    await tester.enterText(find.byType(TextField), family * 400);
+    await tester.pump();
+    expect(find.text('2000/2000'), findsOneWidget);
+    await tester.tap(find.text(AppStrings.concludeScanExitButton));
+    await tester.pumpAndSettle();
+    Navigator.of(tester.element(find.byType(ScanScreen))).pop('v1.floor.1.s');
+    await tester.pumpAndSettle();
+
+    final sent = (await _checkOuts(store)).single;
+    expect(
+      (sent.payload['complaints_suggestions'] as String).runes.length,
+      2000,
+    );
+  });
+
+  testWidgets('a requires_evidence stop that drops to 1 photo closes '
+      '"Escanear QR de saída" with "Falta 1 foto"', (tester) async {
+    final store = await _pump(tester, requiresEvidence: true);
+    await tapInSheet(tester, blockConcludeButton());
+    expect(_scanExitPressed(tester), isNotNull);
+
+    // A photo goes while the sheet is open (as "Tirar mais" → "Apagar"
+    // would); the count is re-read the way the photo sequence does it.
+    await store.deletePendingPhoto('p2');
+    _container(tester)
+      ..invalidate(localPhotoCountProvider('exec-1'))
+      ..invalidate(stopEvidenceProvider(('r1', 'exec-1')));
+    await tester.pumpAndSettle();
+
+    expect(_scanExitPressed(tester), isNull);
+    expect(find.text('Falta 1 foto'), findsWidgets);
   });
 
   testWidgets('cancelling the sheet enqueues nothing', (tester) async {
@@ -172,5 +236,50 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(PhotoSequenceScreen), findsOneWidget);
+  });
+
+  testWidgets('signalling the stop impeded forgets its observation', (
+    tester,
+  ) async {
+    await _pump(tester);
+    final container = _container(tester);
+    container.read(observationDraftProvider('s1').notifier).write('pia');
+
+    await tapInSheet(
+      tester,
+      find.widgetWithText(
+        TextButton,
+        AppStrings.routeSignalImpossibilityButton,
+      ),
+    );
+    await tester.tap(find.text(AppStrings.impedimentReasonSiteRefusal));
+    // "Confirmar" opens only once the chosen reason is drawn.
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirmar'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.routeImpedimentReported), findsOneWidget);
+    expect(container.read(observationDraftProvider('s1')), isEmpty);
+  });
+
+  testWidgets('a stop that comes back released forgets its observation', (
+    tester,
+  ) async {
+    final repository = repositoryWith(_route());
+    await pumpHome(tester, homeWith(repository));
+    final container = _container(tester);
+    container.read(observationDraftProvider('s1').notifier).write('pia');
+
+    repository.day = myDayWith(
+      routeWith(
+        stops: [
+          stopIn(id: 's1', status: 'RELEASED', releaseReason: 'IMPEDIMENT'),
+        ],
+      ),
+    );
+    container.invalidate(myDayProvider);
+    await tester.pumpAndSettle();
+
+    expect(container.read(observationDraftProvider('s1')), isEmpty);
   });
 }

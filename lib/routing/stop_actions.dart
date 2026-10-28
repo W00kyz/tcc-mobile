@@ -69,7 +69,11 @@ Future<void> startCheckIn(
         latitude: scan.coordinates?.latitude,
         longitude: scan.coordinates?.longitude,
       );
-  ref.invalidate(myDayProvider);
+  ref
+    // The cached read of this stop's row still says "no row": re-read it so
+    // the in-progress block mounts after an offline check-in too.
+    ..invalidate(stopProgressForProvider(routeStopId))
+    ..invalidate(myDayProvider);
   if (context.mounted) {
     ScaffoldMessenger.of(
       context,
@@ -152,23 +156,7 @@ Future<void> concludeStop(
   RouteSummary route,
   RouteStopSummary stop,
 ) async {
-  // Before the QR, so the worker never scans and only then finds one more
-  // step (spec 2026-10-26-exige-evidencias §6.4). Cancelling abandons the
-  // check-out: nothing is enqueued.
-  final scanExit = await showConcludeSheet(
-    context,
-    routeId: route.id,
-    stop: stop,
-    executionId: _openExecutionOf(ref, stop),
-  );
-  if (!scanExit || !context.mounted) return;
-  final scan = await _scanAndLocate(
-    context,
-    ref,
-    ExitScan(stop.buildingName, stop.floorLabel),
-  );
-  // A cancelled camera writes nothing; the observation stays in its draft
-  // for the next "Concluir" (Review Focus 3).
+  final scan = await _concludeAndScan(context, ref, route, stop);
   if (scan == null || !context.mounted) return;
 
   await _recordCheckOut(ref, route, stop, scan);
@@ -177,6 +165,41 @@ Future<void> concludeStop(
       context,
     ).showSnackBar(const SnackBar(content: Text(AppStrings.routeCheckOutDone)));
   }
+}
+
+/// The sheet, then the exit scan, until a QR is read or the worker leaves
+/// the sheet. Null means "abandoned": nothing is enqueued.
+Future<_Scan?> _concludeAndScan(
+  BuildContext context,
+  WidgetRef ref,
+  RouteSummary route,
+  RouteStopSummary stop,
+) async {
+  while (context.mounted) {
+    // Before the QR, so the worker never scans and only then finds one more
+    // step (spec 2026-10-26-exige-evidencias §6.4). Cancelling abandons the
+    // check-out: nothing is enqueued.
+    final executionId = _openExecutionOf(ref, stop);
+    final scanExit = await showConcludeSheet(
+      context,
+      routeId: route.id,
+      stop: stop,
+      executionId: executionId,
+    );
+    if (!scanExit || !context.mounted) return null;
+    // The sheet gates its button, but read the photos once more: never scan
+    // a stop below its minimum.
+    if (!stopMayConclude(ref, route.id, stop, executionId)) return null;
+    final scan = await _scanAndLocate(
+      context,
+      ref,
+      ExitScan(stop.buildingName, stop.floorLabel),
+    );
+    // A cancelled camera writes nothing and brings the sheet back with the
+    // observation still in its draft (Review Focus 3, ruling R12).
+    if (scan != null || !context.mounted) return scan;
+  }
+  return null;
 }
 
 /// The stop's open execution on this device, if its progress row is read.
@@ -254,6 +277,7 @@ Future<void> signalImpossibility(
         reason: choice.reason,
         note: choice.note,
       );
+  _forgetObservations(ref, route, stop, choice.scope);
   if (!context.mounted) return;
   ScaffoldMessenger.of(context).showSnackBar(
     const SnackBar(content: Text(AppStrings.routeImpedimentReported)),
@@ -264,6 +288,20 @@ Future<void> signalImpossibility(
   // the reload serves the device snapshot.
   await ref.read(syncWorkerProvider).syncRoute(route.id);
   if (context.mounted) ref.invalidate(myDayProvider);
+}
+
+/// An impeded stop will not be concluded by this worker: its observation
+/// draft goes (every open stop's, for the rest of the route).
+void _forgetObservations(
+  WidgetRef ref,
+  RouteSummary route,
+  RouteStopSummary stop,
+  String scope,
+) {
+  final stops = scope == 'ROUTE_REMAINDER' ? route.currentBatchStops : [stop];
+  for (final each in stops) {
+    ref.invalidate(observationDraftProvider(each.id));
+  }
 }
 
 /// Pushes [ScanScreen] and, if a value came back, pairs it with a

@@ -171,9 +171,10 @@ abstract final class AppStrings {
   /// `<n> de 2 fotos obrigatórias` on a stop that requires evidence.
   static String requiredPhotosProgress(int n) => '$n de 2 fotos obrigatórias';
 
-  /// Under a closed "Concluir": `Falta <n> foto(s)`.
+  /// Under a closed "Concluir": `Falta 1 foto` / `Faltam <n> fotos`
+  /// (ruling R11).
   static String missingPhotos(int n) =>
-      n == 1 ? 'Falta 1 foto' : 'Falta $n fotos';
+      n == 1 ? 'Falta 1 foto' : 'Faltam $n fotos';
 
   // --- conclusion sheet (redesign §6.6) ---
   static const String concludeTakeMore = 'Tirar mais';

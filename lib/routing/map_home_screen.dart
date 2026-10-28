@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'package:route_monitor/appeals/released_stop_listener.dart';
+import 'package:route_monitor/execution/conclude_sheet.dart';
 import 'package:route_monitor/execution/in_progress_block.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/collection_banner.dart';
@@ -144,6 +145,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   /// the next batch is in the same building (the common case).
   void _clearSelectionOnNewBatch() {
     ref.listen<AsyncValue<MyDay>>(myDayProvider, (previous, next) {
+      _forgetReleasedObservations(next.value?.route);
       final before = previous?.value?.route;
       final after = next.value?.route;
       if (before?.id == after?.id &&
@@ -153,6 +155,16 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       _clearSelection();
       _forgetStamp();
     });
+  }
+
+  /// A released stop is no longer the worker's: its observation draft goes.
+  /// `invalidate` on a draft never opened is a no-op, so nothing is created.
+  void _forgetReleasedObservations(RouteSummary? route) {
+    for (final stop in route?.stops ?? const <RouteStopSummary>[]) {
+      if (stop.status == 'RELEASED') {
+        ref.invalidate(observationDraftProvider(stop.id));
+      }
+    }
   }
 
   /// A route whose batch is on the map: anything but paused or done.

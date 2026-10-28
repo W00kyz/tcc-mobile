@@ -114,6 +114,15 @@ void main() {
       expect(_onPressed(tester, _concluir()), isNull);
     });
 
+    testWidgets('with no photo says "Faltam 2 fotos" (ruling R11)', (
+      tester,
+    ) async {
+      await pumpWith(tester);
+
+      expect(find.text('Faltam 2 fotos'), findsOneWidget);
+      expect(_onPressed(tester, _concluir()), isNull);
+    });
+
     // The gate reads the device's own outbox: no network answer, good or
     // bad, may stall or undercount it (spec §6.4, SQLite is the truth).
     testWidgets('offline, 1 delivered + 1 pending photo enable "Concluir"', (

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show NotifierProviderFamily;
 
@@ -20,6 +21,57 @@ import 'package:route_monitor/ui/app_theme.dart';
 /// What the backend takes in `complaints_suggestions` (and what the old
 /// note dialog allowed).
 const int maxObservationLength = 2000;
+
+/// Truncates the text to [maxCodePoints] Unicode code points.
+///
+/// The field's own `maxLength` counts grapheme clusters, but the backend
+/// (pydantic) counts code points: a family emoji is one cluster and seven code
+/// points, so emoji-heavy text could pass the field and be refused with a 422
+/// that blocks the queued check-out.
+class _CodePointLimiter extends TextInputFormatter {
+  const _CodePointLimiter(this.maxCodePoints);
+
+  final int maxCodePoints;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.runes.length <= maxCodePoints) return newValue;
+    final kept = String.fromCharCodes(newValue.text.runes.take(maxCodePoints));
+    return TextEditingValue(
+      text: kept,
+      selection: TextSelection.collapsed(offset: kept.length),
+    );
+  }
+}
+
+/// Whether [stop] may conclude now: an evidence stop needs its photos, read
+/// from the device outbox first ([stopPhotoCountProvider]); with no open
+/// execution there is no photo to count, so only a stop without the flag
+/// passes. [watch] false reads once (a flow), true rebuilds on change (a
+/// widget).
+///
+///     if (!stopMayConclude(ref, routeId, stop, executionId)) return;
+bool stopMayConclude(
+  WidgetRef ref,
+  String routeId,
+  RouteStopSummary stop,
+  String? executionId, {
+  bool watch = false,
+}) {
+  final provider = executionId == null
+      ? null
+      : stopPhotoCountProvider((routeId, executionId));
+  final photoCount = provider == null
+      ? null
+      : (watch ? ref.watch(provider) : ref.read(provider));
+  return canConcludeWithEvidence(
+    requiresEvidence: stop.requiresEvidence,
+    photoCount: photoCount,
+  );
+}
 
 /// The thumbnails the sheet's summary shows at most.
 const int _summaryThumbnails = 3;
@@ -159,6 +211,15 @@ class _ConcludeSheetState extends ConsumerState<ConcludeSheet> {
     return TextField(
       controller: _observation,
       maxLength: maxObservationLength,
+      inputFormatters: const [_CodePointLimiter(maxObservationLength)],
+      // Counts code points too, so the counter matches what is enforced.
+      buildCounter:
+          (
+            context, {
+            required currentLength,
+            required isFocused,
+            required maxLength,
+          }) => Text('${_observation.text.runes.length}/$maxLength'),
       minLines: 3,
       maxLines: 5,
       textCapitalization: TextCapitalization.sentences,
@@ -177,14 +238,25 @@ class _ConcludeSheetState extends ConsumerState<ConcludeSheet> {
 
   Widget _actions(BuildContext context) {
     final navigator = Navigator.of(context);
+    // "Tirar mais" can delete photos too: the gate is read again here, not
+    // only on the block's "Concluir" that opened the sheet.
+    final allowed = stopMayConclude(
+      ref,
+      widget.routeId,
+      widget.stop,
+      widget.executionId,
+      watch: true,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         FilledButton.icon(
-          onPressed: () => navigator.pop(true),
+          key: const ValueKey('conclude-scan-exit'),
+          onPressed: allowed ? () => navigator.pop(true) : null,
           icon: const Icon(Icons.qr_code_scanner),
           label: const Text(AppStrings.concludeScanExitButton),
         ),
+        ..._missingLine(allowed),
         const SizedBox(height: 8),
         TextButton(
           style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
@@ -193,6 +265,25 @@ class _ConcludeSheetState extends ConsumerState<ConcludeSheet> {
         ),
       ],
     );
+  }
+
+  /// "Falta {n} foto(s)" under a closed primary button.
+  List<Widget> _missingLine(bool allowed) {
+    final executionId = widget.executionId;
+    if (allowed || executionId == null) return const [];
+    final count =
+        ref.watch(stopPhotoCountProvider((widget.routeId, executionId))) ?? 0;
+    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    return [
+      Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          AppStrings.missingPhotos(missingEvidencePhotos(count)),
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 12, color: p.muted),
+        ),
+      ),
+    ];
   }
 }
 
