@@ -36,11 +36,22 @@ class _Shown {
   late final ScaffoldFeatureController<SnackBar, SnackBarClosedReason>
   controller;
 
-  /// On screen: the messenger's current snackbar, safe to `close()`.
-  bool visible = false;
+  /// The messenger's current snackbar (its content was built — the
+  /// Scaffold builds only that one), so `close()` is safe.
+  bool current = false;
 
   /// Superseded before it showed: closed as soon as it does.
   bool stale = false;
+
+  bool _closing = false;
+
+  /// Closes it once: a second `close()` with accessible navigation on would
+  /// complete the messenger's completer twice.
+  void close() {
+    if (_closing) return;
+    _closing = true;
+    controller.close();
+  }
 }
 
 /// The home's one snackbar line: only one is ever handed to the messenger,
@@ -75,7 +86,7 @@ class SnackbarLane {
   /// (scaffold.dart, `hideCurrentSnackBar`). Otherwise it goes the moment it
   /// shows.
   void _retire(_Shown shown) {
-    if (shown.visible) return shown.controller.close();
+    if (shown.current) return shown.close();
     shown.stale = true;
   }
 
@@ -87,21 +98,23 @@ class SnackbarLane {
     final shown = _Shown(kind);
     shown.controller = ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(text),
+        content: _CurrentMark(
+          onCurrent: () => _onCurrent(shown),
+          child: Text(text),
+        ),
         // A margin needs a floating snackbar; the theme says so too.
         behavior: SnackBarBehavior.floating,
         margin: sheetSnackBarMargin(context, sheet),
         action: action,
-        onVisible: () => _onVisible(shown),
       ),
     );
     _current = shown;
     unawaited(shown.controller.closed.then((_) => _onClosed(shown)));
   }
 
-  void _onVisible(_Shown shown) {
-    shown.visible = true;
-    if (shown.stale) shown.controller.close();
+  void _onCurrent(_Shown shown) {
+    shown.current = true;
+    if (shown.stale && _current == shown) shown.close();
   }
 
   void _onClosed(_Shown shown) {
@@ -109,4 +122,29 @@ class SnackbarLane {
     _current = null;
     _next();
   }
+}
+
+/// Tells the lane its snackbar became the messenger's current one: the
+/// Scaffold builds the content of that snackbar alone, never of a queued
+/// one.
+class _CurrentMark extends StatefulWidget {
+  const _CurrentMark({required this.onCurrent, required this.child});
+
+  final VoidCallback onCurrent;
+  final Widget child;
+
+  @override
+  State<_CurrentMark> createState() => _CurrentMarkState();
+}
+
+class _CurrentMarkState extends State<_CurrentMark> {
+  @override
+  void initState() {
+    super.initState();
+    // After this frame: a stale notice closes outside the build.
+    WidgetsBinding.instance.addPostFrameCallback((_) => widget.onCurrent());
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
