@@ -6,6 +6,9 @@ import 'package:route_monitor/ui/stamp_slot.dart';
 
 const int _slotsPerRow = 4;
 
+/// Spec 6.8: past 12 stops (3 rows) the grid scrolls inside the card.
+const double _maxGridHeight = 300;
+
 /// The batch's stamp card: title, score, then one grid per building.
 class BatchCardView extends StatelessWidget {
   const BatchCardView({
@@ -41,8 +44,21 @@ class BatchCardView extends StatelessWidget {
             ),
           ),
           _subtitle(p),
-          for (final g in card.groups) _group(g, p),
+          _groups(p),
         ],
+      ),
+    );
+  }
+
+  Widget _groups(FieldPalette p) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: _maxGridHeight),
+      child: SingleChildScrollView(
+        key: const ValueKey('batch-card-scroll'),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [for (final g in card.groups) _group(g, p)],
+        ),
       ),
     );
   }
@@ -92,6 +108,8 @@ class BatchCardView extends StatelessWidget {
         children: [
           Text(
             g.buildingName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 13,
               fontWeight: highlighted ? FontWeight.w800 : FontWeight.w600,

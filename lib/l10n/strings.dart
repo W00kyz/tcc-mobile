@@ -453,7 +453,7 @@ abstract final class AppStrings {
   static const String slotPending = 'Pendente';
   static const String slotNext = 'Próximo';
   static const String slotInProgress = 'Em andamento';
-  static const String slotPendingSync = 'Aguardando sincronização';
+  static const String slotPendingSync = 'aguardando envio';
   static String batchCardTitle(int n) => 'CARTÃO DO LOTE $n';
   static String batchCardSubtitle(int total) => 'Junte os $total carimbos';
   static String batchReleasedCount(int n) =>

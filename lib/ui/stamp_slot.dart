@@ -39,16 +39,24 @@ class _StampSlotState extends State<StampSlot>
       duration: _stampDuration,
       value: 1,
     );
+    if (widget.animateStamp) _scheduleStamp();
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    if (widget.animateStamp && !reduce && _controller.value == 1) {
+  void didUpdateWidget(StampSlot old) {
+    super.didUpdateWidget(old);
+    if (widget.animateStamp && !old.animateStamp) _scheduleStamp();
+  }
+
+  /// Plays the stamp once, after the first frame so MediaQuery is readable.
+  void _scheduleStamp() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+      if (reduce) return;
       unawaited(HapticFeedback.lightImpact());
       unawaited(_controller.forward(from: 0));
-    }
+    });
   }
 
   @override
@@ -64,7 +72,14 @@ class _StampSlotState extends State<StampSlot>
     return '${two(at.hour)}:${two(at.minute)}';
   }
 
-  String _label() => switch (widget.slot.state) {
+  String _label() {
+    final base = _stateLabel();
+    return widget.slot.pendingSync
+        ? '$base, ${AppStrings.slotPendingSync}'
+        : base;
+  }
+
+  String _stateLabel() => switch (widget.slot.state) {
     SlotState.done => AppStrings.slotDone(_hour()),
     SlotState.released => AppStrings.slotReleased(_reason),
     SlotState.pending => AppStrings.slotPending,

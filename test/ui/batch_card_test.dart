@@ -57,4 +57,46 @@ void main() {
     expect(find.text('2º andar'), findsOneWidget);
     expect(find.text('6º andar'), findsOneWidget);
   });
+
+  testWidgets('more than 12 stops scroll inside the card', (t) async {
+    final card = BatchCard(
+      batchNumber: 1,
+      groups: [
+        g('a', 'Central', [
+          for (var i = 0; i < 16; i++) s('$i', SlotState.pending, 'Andar $i'),
+        ]),
+      ],
+    );
+    await t.pumpWidget(
+      MaterialApp(
+        theme: buildAppTheme(),
+        home: Scaffold(
+          body: Column(children: [BatchCardView(card: card)]),
+        ),
+      ),
+    );
+    final scroll = find.byKey(const ValueKey('batch-card-scroll'));
+    final state = t.state<ScrollableState>(
+      find.descendant(of: scroll, matching: find.byType(Scrollable)),
+    );
+    expect(state.position.maxScrollExtent, greaterThan(0));
+  });
+
+  testWidgets('building subtitle is one line with ellipsis', (t) async {
+    final card = BatchCard(
+      batchNumber: 1,
+      groups: [
+        g('a', 'N' * 80, [s('1', SlotState.pending, 'T')]),
+      ],
+    );
+    await t.pumpWidget(
+      MaterialApp(
+        theme: buildAppTheme(),
+        home: Scaffold(body: BatchCardView(card: card)),
+      ),
+    );
+    final text = t.widget<Text>(find.text('N' * 80));
+    expect(text.maxLines, 1);
+    expect(text.overflow, TextOverflow.ellipsis);
+  });
 }
