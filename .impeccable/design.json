@@ -1,0 +1,360 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-28T06:29:19Z",
+  "title": "Design System: Cartão do Lote (Field App)",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Stone Paper",
+        "canonical": "#EDEDEA",
+        "tonalRamp": [
+          "#343433",
+          "#696968",
+          "#9E9E9C",
+          "#D3D3D0",
+          "#EFEFED",
+          "#F4F4F2",
+          "#F9F9F8",
+          "#FDFDFD"
+        ]
+      },
+      "card": {
+        "role": "neutral",
+        "displayName": "Card Grey",
+        "canonical": "#DEDED9",
+        "tonalRamp": [
+          "#313130",
+          "#626260",
+          "#949490",
+          "#C5C5C1",
+          "#E2E2DE",
+          "#EBEBE8",
+          "#F3F3F1",
+          "#FCFCFB"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "Chalk White",
+        "canonical": "#FAFAF8",
+        "tonalRamp": [
+          "#373737",
+          "#6F6F6E",
+          "#A6A6A5",
+          "#DEDEDC",
+          "#FBFBF9",
+          "#FCFCFB",
+          "#FDFDFC",
+          "#FEFEFE"
+        ]
+      },
+      "ink": {
+        "role": "primary",
+        "displayName": "Graphite Ink",
+        "canonical": "#1F1F1D",
+        "tonalRamp": [
+          "#070706",
+          "#0E0E0D",
+          "#151513",
+          "#1C1C1A",
+          "#3C3C3A",
+          "#757574",
+          "#AFAFAE",
+          "#E9E9E8"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Graphite",
+        "canonical": "#55554F",
+        "tonalRamp": [
+          "#131311",
+          "#262623",
+          "#393935",
+          "#4C4C46",
+          "#6B6B66",
+          "#979793",
+          "#C2C2C0",
+          "#EEEEED"
+        ]
+      },
+      "moss": {
+        "role": "secondary",
+        "displayName": "Moss Stamp Ink",
+        "canonical": "#3E5C4A",
+        "tonalRamp": [
+          "#0E1410",
+          "#1B2921",
+          "#293D31",
+          "#375242",
+          "#577161",
+          "#889B90",
+          "#BAC5BE",
+          "#ECEFED"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule Grey",
+        "canonical": "#BDBDB6",
+        "tonalRamp": [
+          "#2A2A28",
+          "#545451",
+          "#7E7E79",
+          "#A8A8A2",
+          "#C5C5BF",
+          "#D6D6D2",
+          "#E7E7E5",
+          "#F8F8F8"
+        ]
+      },
+      "brick": {
+        "role": "tertiary",
+        "displayName": "Brick Alert",
+        "canonical": "#B5452F",
+        "tonalRamp": [
+          "#280F0A",
+          "#501F15",
+          "#782E1F",
+          "#A13D2A",
+          "#BF5D4A",
+          "#D28D7F",
+          "#E5BDB5",
+          "#F8ECEA"
+        ]
+      },
+      "map-ground": {
+        "role": "neutral",
+        "displayName": "Map Ground",
+        "canonical": "#E3E3DF",
+        "tonalRamp": [
+          "#323231",
+          "#656563",
+          "#979794",
+          "#CACAC6",
+          "#E7E7E3",
+          "#EEEEEB",
+          "#F5F5F4",
+          "#FCFCFC"
+        ]
+      },
+      "map-road": {
+        "role": "neutral",
+        "displayName": "Map Road",
+        "canonical": "#F4F4F1",
+        "tonalRamp": [
+          "#363635",
+          "#6C6C6B",
+          "#A2A2A0",
+          "#D9D9D6",
+          "#F5F5F3",
+          "#F8F8F6",
+          "#FBFBFA",
+          "#FEFEFE"
+        ]
+      },
+      "map-building": {
+        "role": "neutral",
+        "displayName": "Map Building",
+        "canonical": "#D6D6D1",
+        "tonalRamp": [
+          "#2F2F2E",
+          "#5F5F5D",
+          "#8E8E8B",
+          "#BEBEBA",
+          "#DBDBD7",
+          "#E6E6E3",
+          "#F0F0EF",
+          "#FBFBFA"
+        ]
+      },
+      "inverse-surface": {
+        "role": "neutral",
+        "displayName": "Inverse Surface",
+        "canonical": "#2F2F2C",
+        "tonalRamp": [
+          "#0A0A0A",
+          "#151513",
+          "#1F1F1D",
+          "#2A2A27",
+          "#4A4A47",
+          "#7F7F7D",
+          "#B5B5B4",
+          "#EAEAEA"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display-card": {
+        "displayName": "Display",
+        "purpose": "Card title and full-card headline only (Bowlby One SC)."
+      },
+      "title-count": {
+        "displayName": "Title",
+        "purpose": "done/total count."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Hanken Grotesk, Material 3 default scale."
+      },
+      "label-chip": {
+        "displayName": "Label",
+        "purpose": "Map chip and pin labels."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Muted subtitles."
+      },
+      "label-stamp": {
+        "displayName": "Stamp label",
+        "purpose": "Slot hour and badges."
+      }
+    },
+    "shadows": [
+      {
+        "name": "sheet-lift",
+        "value": "Material elevation 8, shadowColor ink",
+        "purpose": "Only the map sheet is lifted; everything else is tonal with rule hairlines."
+      }
+    ],
+    "motion": [
+      {
+        "name": "stamp-press",
+        "value": "220ms, scale 1.15 to 1, light haptic",
+        "purpose": "Slot receives the moss stamp; instant under reduced motion."
+      },
+      {
+        "name": "sheet-snap",
+        "value": "200ms easeOut",
+        "purpose": "Sheet settles on nearest snap."
+      },
+      {
+        "name": "pin-state",
+        "value": "120ms",
+        "purpose": "Building pin state change."
+      }
+    ],
+    "breakpoints": [],
+    "sheetSnaps": [
+      0.22,
+      0.5,
+      0.9
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Full-width 56dp graphite pill, the scan/confirm action.",
+      "html": "<button class=\"ds-btn-primary\">Escanear QR</button>",
+      "css": ".ds-btn-primary{width:100%;height:56px;border:none;border-radius:9999px;background:#1F1F1D;color:#FAFAF8;font:600 16px 'Hanken Grotesk',sans-serif;} .ds-btn-primary:focus-visible{outline:2px solid #3E5C4A;outline-offset:2px;} .ds-btn-primary:active{opacity:.88;}"
+    },
+    {
+      "name": "Stamp Slot (done)",
+      "kind": "custom",
+      "refersTo": "stamp-slot-done",
+      "description": "Moss disc with check and hour, rotated off-axis.",
+      "html": "<span class=\"ds-slot-done\">&#10003;<small>09:42</small></span>",
+      "css": ".ds-slot-done{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:50%;flex-direction:column;background:#3E5C4A;color:#FAFAF8;font:700 14px 'Hanken Grotesk',sans-serif;transform:rotate(-6deg);} .ds-slot-done small{font-size:11px;}"
+    },
+    {
+      "name": "Stamp Slot (next)",
+      "kind": "custom",
+      "refersTo": "stamp-slot-pending",
+      "description": "Dashed ink ring marks the next stop.",
+      "html": "<span class=\"ds-slot-next\"></span>",
+      "css": ".ds-slot-next{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:50%;border:2px dashed #1F1F1D;box-sizing:border-box;}"
+    },
+    {
+      "name": "Stamp Slot (pending)",
+      "kind": "custom",
+      "refersTo": "stamp-slot-pending",
+      "description": "Empty rule-grey ring.",
+      "html": "<span class=\"ds-slot-pending\"></span>",
+      "css": ".ds-slot-pending{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:50%;border:1.5px solid #BDBDB6;box-sizing:border-box;}"
+    },
+    {
+      "name": "Batch Card",
+      "kind": "card",
+      "refersTo": "batch-card",
+      "description": "Card grey container with Display title and count.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-title\">CARTÃO DO LOTE 2</div><div class=\"ds-card-sub\"><span>8 pontos</span><b>3/8</b></div></div>",
+      "css": ".ds-card{background:#DEDED9;border:1px solid #BDBDB6;border-radius:16px;padding:12px;color:#1F1F1D;font-family:'Hanken Grotesk',sans-serif;} .ds-card-title{font:400 17px/22px 'Bowlby One SC','Hanken Grotesk',sans-serif;letter-spacing:.03em;} .ds-card-sub{display:flex;justify-content:space-between;margin-top:2px;padding-bottom:8px;border-bottom:1px solid #BDBDB6;font-size:12px;color:#55554F;} .ds-card-sub b{font-size:15px;color:#1F1F1D;}"
+    },
+    {
+      "name": "Building Pin",
+      "kind": "custom",
+      "refersTo": "building-pin",
+      "description": "40dp circle; moss fill when every point is done.",
+      "html": "<span class=\"ds-pin\">CAA</span>",
+      "css": ".ds-pin{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:50%;box-sizing:border-box;background:#FAFAF8;border:1.5px solid #BDBDB6;color:#1F1F1D;font:700 11px 'Hanken Grotesk',sans-serif;}"
+    },
+    {
+      "name": "Map Sheet",
+      "kind": "custom",
+      "refersTo": "map-sheet",
+      "description": "Paper sheet, 28dp top corners, grip, elevation 8.",
+      "html": "<div class=\"ds-sheet\"><i></i></div>",
+      "css": ".ds-sheet{height:120px;background:#EDEDEA;border-radius:28px 28px 0 0;box-shadow:0 -4px 16px rgba(31,31,29,.25);padding-top:10px;} .ds-sheet i{display:block;width:32px;height:4px;border-radius:2px;background:#BDBDB6;margin:0 auto;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Bakery Loyalty Card",
+    "overview": "Each batch of service points is a stamp card: one circle per point, stamped moss with the hour on conclusion, a full card when the batch closes. The ground is stone-grey paper, the ink is graphite, and a single moss stamp ink marks what is done. Material 3 supplies navigation and controls; the world lends only type, palette, density and the stamp gesture.",
+    "keyCharacteristics": [
+      "Monochrome stone and graphite, one moss accent, brick only for alerts.",
+      "The circle is the only form for pins, slots, progress dots and avatar.",
+      "State is read by mark (stamp, dashed ring, empty, struck), never by colour alone.",
+      "Stamps sit a few degrees off-axis (-9 to +9 deg) with an irregular ink edge drawn in a CustomPainter.",
+      "Light theme only."
+    ],
+    "rules": [
+      {
+        "name": "The Scarce Moss Rule",
+        "body": "Moss means a point or building is done. It is not an accent for buttons or links.",
+        "section": "colors"
+      },
+      {
+        "name": "The Brick Is Alarm Rule",
+        "body": "Brick appears only when something is wrong or blocked.",
+        "section": "colors"
+      },
+      {
+        "name": "The Theme-Only Colour Rule",
+        "body": "Screens read colour from FieldPalette / ColorScheme. A raw Colors.* or Color(0x...) outside lib/ui/app_theme.dart fails test/ui/no_raw_colors_test.dart.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Display Rule",
+        "body": "Bowlby One SC is for the card title and full-card headline. Everything else is Hanken Grotesk.",
+        "section": "typography"
+      },
+      {
+        "name": "The Hairline Over Shadow Rule",
+        "body": "Separate content with a rule border or tone step; only the map sheet carries a shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Mark-Not-Colour Rule",
+        "body": "Slot and pin states are distinguished by mark: stamped is done; dashed ink ring is next; dashed ring with pulsing dot is in progress; empty rule ring is pending; struck circle is released; cloud icon marks pending sync.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do take every colour from FieldPalette or ColorScheme; add a named constant in app_theme.dart for anything new.",
+      "Do keep touch targets at 48dp or more, and the primary action a 56dp pill.",
+      "Do express state by mark and semantic label, with colour as reinforcement only.",
+      "Do keep the \"Escanear QR\" action reachable at all three sheet heights.",
+      "Do honour reduced motion by swapping instantly."
+    ],
+    "donts": [
+      "Don't use Colors.* or hex literals in screens.",
+      "Don't use moss as a decorative accent or brick for anything but alerts.",
+      "Don't set Bowlby One SC outside the card title and full-card headline.",
+      "Don't convey state with colour alone.",
+      "Don't download fonts at runtime."
+    ]
+  }
+}
