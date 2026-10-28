@@ -265,15 +265,20 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
 /// executionId); every seeded stop starts `inProgress`. Empty, it reports no
 /// progress, so a plain check-in test never opens the evidence section.
 class FakeStopProgressStore implements StopProgressStore {
-  FakeStopProgressStore([Map<String, String> seed = const {}]) {
+  /// [checkedInAt] is the check-in time every seeded stop reports.
+  FakeStopProgressStore([
+    Map<String, String> seed = const {},
+    DateTime? checkedInAt,
+  ]) : _checkedInAt = checkedInAt ?? DateTime(2026) {
     seed.forEach(upsertInProgressNow);
   }
 
   final Map<String, StopProgressEntry> _rows = {};
+  final DateTime _checkedInAt;
 
   void upsertInProgressNow(String routeStopId, String executionId) {
     _rows[routeStopId] = StopProgressEntry(
-      updatedAt: DateTime(2026),
+      updatedAt: _checkedInAt,
       routeStopId: routeStopId,
       executionId: executionId,
       status: StopLocalStatus.inProgress,

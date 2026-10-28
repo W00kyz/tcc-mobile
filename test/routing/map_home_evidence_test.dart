@@ -16,8 +16,8 @@ import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
 
 // Ported from the deleted route_screen_test.dart: an IN_PROGRESS stop's
-// "Concluir" (check-out), evidence buttons and list. Tasks 8 and 9 replace
-// this block with the photo sequence and the conclusion sheet.
+// "Concluir" (check-out) and its photos, now through the in-progress block
+// (redesign §6.2) and the conclusion sheet (§6.6, conclude_sheet_test.dart).
 
 RouteSummary _inProgressStopRoute() => routeWith(
   stops: [
@@ -28,11 +28,10 @@ RouteSummary _inProgressStopRoute() => routeWith(
 Finder _concluir() =>
     find.widgetWithText(TextButton, AppStrings.routeConcludeButton);
 
-Finder _addPhoto() =>
-    find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton);
+Finder _addPhoto() => blockTakePhotosButton();
 
-Finder _addNote() =>
-    find.widgetWithText(TextButton, AppStrings.routeAddNoteButton);
+VoidCallback? _onPressed(WidgetTester tester, Finder button) =>
+    tester.widget<ButtonStyleButton>(button).onPressed;
 
 void main() {
   testWidgets('shows "Concluir" only for an IN_PROGRESS stop, not a PENDING '
@@ -79,30 +78,29 @@ void main() {
     },
   );
 
-  testWidgets('a stop without the flag concludes with no dialog', (
+  testWidgets('"Concluir" opens the conclusion sheet, not the scanner', (
     tester,
   ) async {
     await pumpHome(tester, homeWith(repositoryWith(_inProgressStopRoute())));
 
     await tapInSheet(tester, _concluir());
 
-    expect(find.text(AppStrings.complaintsDialogTitle), findsNothing);
-    expect(find.byType(ScanScreen), findsOneWidget);
+    expect(find.text(AppStrings.concludeScanExitButton), findsOneWidget);
+    expect(find.byType(ScanScreen), findsNothing);
   });
 
   testWidgets(
-    'hides the evidence buttons for an IN_PROGRESS stop with no '
+    'disables "Tirar fotos" for an IN_PROGRESS stop with no '
     'OpenExecutions row (Ruling 17 cold-start gap)',
     (tester) async {
       await pumpHome(tester, homeWith(repositoryWith(_inProgressStopRoute())));
 
-      expect(find.text(AppStrings.routeAddPhotoButton), findsNothing);
-      expect(find.text(AppStrings.routeAddNoteButton), findsNothing);
+      expect(_onPressed(tester, _addPhoto()), isNull);
     },
   );
 
   testWidgets(
-    'shows the evidence buttons for an IN_PROGRESS stop once its '
+    'enables "Tirar fotos" for an IN_PROGRESS stop once its '
     'OpenExecutions row resolves',
     (tester) async {
       await pumpHome(
@@ -113,15 +111,14 @@ void main() {
         ),
       );
 
-      expect(_addPhoto(), findsOneWidget);
-      expect(_addNote(), findsOneWidget);
+      expect(_onPressed(tester, _addPhoto()), isNotNull);
     },
   );
 
   testWidgets(
     'renders all three stop states side by side with the right affordances: '
-    'DONE reads done and has no action, IN_PROGRESS gets "Concluir" plus '
-    'evidence actions, PENDING gets only "Sinalizar" and the sheet-level '
+    'DONE reads done and has no action, IN_PROGRESS gets "Concluir" and '
+    'the in-progress block, PENDING gets only "Sinalizar" and the sheet-level '
     '"Escanear QR"',
     (tester) async {
       final route = routeWith(
@@ -149,11 +146,11 @@ void main() {
       expect(find.text('Sala 103'), findsOneWidget);
       // DONE (s1) reads done, by word as well as by stamp.
       expect(find.text(AppStrings.slotDoneNoHour), findsOneWidget);
-      // IN_PROGRESS (s2): "Concluir" plus both evidence actions, exactly one
-      // of each across the whole list.
+      // IN_PROGRESS (s2): one row "Concluir" and one block, with its photos
+      // action.
       expect(_concluir(), findsOneWidget);
+      expect(blockConcludeButton(), findsOneWidget);
       expect(_addPhoto(), findsOneWidget);
-      expect(_addNote(), findsOneWidget);
       // s2 and s3 can be signalled, s1 cannot.
       expect(
         find.widgetWithText(
@@ -169,7 +166,7 @@ void main() {
 
   testWidgets(
     'a local IN_PROGRESS StopProgress overrides a server PENDING stop — the '
-    'row renders the in-progress affordances (Concluir + evidence)',
+    'row renders the in-progress affordances (Concluir + the block)',
     (tester) async {
       await pumpHome(
         tester,
@@ -186,7 +183,7 @@ void main() {
   );
 
   testWidgets(
-    'tapping "Adicionar foto" opens the photo sequence for the stop',
+    'tapping "Tirar fotos" opens the photo sequence for the stop',
     (tester) async {
       final camera = FakeEvidenceCamera();
       await pumpHome(
@@ -205,106 +202,40 @@ void main() {
     },
   );
 
-  testWidgets(
-    'tapping "Adicionar observação" opens a dialog and "Salvar" enqueues the '
-    'note',
-    (tester) async {
-      final store = InMemoryLocalWriteStore();
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(_inProgressStopRoute()),
-          stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
-          localWriteStore: store,
-        ),
-      );
-
-      await tapInSheet(tester, _addNote());
-
-      expect(find.byType(TextField), findsOneWidget);
-      await tester.enterText(find.byType(TextField), 'Sala trancada.');
-      await tester.tap(find.widgetWithText(FilledButton, 'Salvar'));
-      await tester.pumpAndSettle();
-
-      final rows = await store.unsyncedForRoute('r1');
-      expect(rows, hasLength(1));
-      expect(rows.single.kind, PendingOpKind.evidenceNote);
-      expect(rows.single.payload['text_body'], 'Sala trancada.');
-      expect(find.text(AppStrings.routeNoteAdded), findsOneWidget);
-    },
-  );
-
-  testWidgets('cancelling the note dialog uploads nothing', (tester) async {
-    final evidenceApi = FakeEvidenceApi();
+  testWidgets('the block shows a pending local photo as a thumbnail', (
+    tester,
+  ) async {
+    final localStore = InMemoryLocalWriteStore();
+    await localStore.enqueue(
+      id: 'op-photo-1',
+      kind: PendingOpKind.evidencePhoto,
+      routeId: 'r1',
+      payload: {
+        'execution_id': 'exec-1',
+        // A real (1x1) PNG, not arbitrary bytes: Image.memory decodes this
+        // eagerly, and flutter_test surfaces a decode failure as an
+        // uncaught test error rather than a rendering glitch.
+        'bytes_b64': base64Encode(onePixelPng),
+        'sha256': 'abc123',
+        'captured_at': '2026-08-25T08:05:00.000Z',
+      },
+    );
     await pumpHome(
       tester,
       homeWith(
         repositoryWith(_inProgressStopRoute()),
         stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
-        evidenceApi: evidenceApi,
+        localWriteStore: localStore,
       ),
     );
 
-    await tapInSheet(tester, _addNote());
-    await tester.enterText(find.byType(TextField), 'not saved');
-    await tester.tap(find.widgetWithText(TextButton, 'Cancelar'));
-    await tester.pumpAndSettle();
-
-    expect(evidenceApi.uploadedNoteTexts, isEmpty);
-    expect(find.text(AppStrings.routeNoteAdded), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.text(AppStrings.photoSequenceCounter(1)), findsOneWidget);
   });
-
-  testWidgets(
-    'renders a synced note from the backend and a pending local photo '
-    'together, each with its own sync icon',
-    (tester) async {
-      final localStore = InMemoryLocalWriteStore();
-      await localStore.enqueue(
-        id: 'op-photo-1',
-        kind: PendingOpKind.evidencePhoto,
-        routeId: 'r1',
-        payload: {
-          'execution_id': 'exec-1',
-          // A real (1x1) PNG, not arbitrary bytes: Image.memory decodes this
-          // eagerly, and flutter_test surfaces a decode failure as an
-          // uncaught test error rather than a rendering glitch.
-          'bytes_b64': base64Encode(onePixelPng),
-          'sha256': 'abc123',
-          'captured_at': '2026-08-25T08:05:00.000Z',
-        },
-      );
-      final evidenceApi = FakeEvidenceApi(
-        syncedItems: [
-          EvidenceItem(
-            id: 'e1',
-            kind: 'NOTE',
-            textBody: 'Sala trancada.',
-            capturedAt: DateTime.utc(2026, 8, 25, 8),
-            createdAt: DateTime.utc(2026, 8, 25, 8, 1),
-          ),
-        ],
-      );
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(_inProgressStopRoute()),
-          stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
-          evidenceApi: evidenceApi,
-          localWriteStore: localStore,
-        ),
-      );
-
-      expect(find.text('Sala trancada.'), findsOneWidget);
-      expect(find.text(AppStrings.routeEvidencePhotoLabel), findsOneWidget);
-      expect(find.byIcon(Icons.cloud_done), findsOneWidget);
-      expect(find.byIcon(Icons.cloud_upload), findsOneWidget);
-      expect(find.byType(Image), findsOneWidget);
-    },
-  );
 
   for (final withSession in [true, false]) {
     testWidgets(
-      'renders a synced PHOTO evidence item as a NetworkImage built from the '
+      'the block renders a synced photo as a NetworkImage built from the '
       'configured base URL + contentUrl, '
       '${withSession ? 'with a bearer-token header' : 'with no headers and '
                 'no session'}',

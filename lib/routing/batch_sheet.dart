@@ -5,6 +5,7 @@ import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/stop_actions.dart';
 import 'package:route_monitor/routing/stop_row.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
@@ -28,6 +29,13 @@ Map<String, LocalStopState> watchLocalStates(
       stop.id: LocalStopState.fromEntry(entry),
 };
 
+/// The batch's slot in progress, if any: it takes the place of "Próxima
+/// parada" with the `InProgressBlock`.
+CardSlot? inProgressSlotOf(BatchCard card) => card.groups
+    .expand((group) => group.slots)
+    .where((slot) => slot.state == SlotState.inProgress)
+    .firstOrNull;
+
 /// The current batch's stops with an outbox row not yet delivered.
 Set<String> watchPendingSyncStops(WidgetRef ref, RouteSummary route) => {
   for (final stop in route.currentBatchStops)
@@ -41,7 +49,8 @@ RouteStopSummary _stopOf(RouteSummary route, String stopId) =>
     route.stops.firstWhere((stop) => stop.id == stopId);
 
 /// "Próxima parada": the first PENDING stop of the batch in route order,
-/// with the leg to it — or the stop in progress when none is left to start.
+/// with the leg to it. A stop in progress shows the `InProgressBlock`
+/// instead (redesign §6.2).
 ///
 ///     NextStopRow(route: route, card: card)
 class NextStopRow extends StatelessWidget {
@@ -53,19 +62,11 @@ class NextStopRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final next = card.next;
-    final inProgress = card.groups
-        .expand((group) => group.slots)
-        .where((slot) => slot.state == SlotState.inProgress)
-        .firstOrNull;
-    final slot = next ?? inProgress;
-    if (slot == null) return const SizedBox.shrink();
-    final stop = _stopOf(route, slot.stopId);
+    if (next == null) return const SizedBox.shrink();
     return _row(
       Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light,
-      label: next == null
-          ? AppStrings.inProgressStopLabel
-          : AppStrings.nextStopLabel,
-      stop: stop,
+      label: AppStrings.nextStopLabel,
+      stop: _stopOf(route, next.stopId),
     );
   }
 
@@ -112,19 +113,23 @@ class NextStopRow extends StatelessWidget {
 
 /// The half/open sheet with no building selected: the card, then every
 /// building of the batch with its stops and their actions.
-class BatchOverview extends StatelessWidget {
+class BatchOverview extends ConsumerWidget {
   const BatchOverview({required this.route, required this.card, super.key});
 
   final RouteSummary route;
   final BatchCard card;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 8),
-        BatchCardView(card: card),
+        // The stamp falls only on the stop just checked out (redesign §6.6).
+        BatchCardView(
+          card: card,
+          stampingStopId: ref.watch(lastStampedStopProvider),
+        ),
         for (final group in card.groups) ...[
           const SizedBox(height: 16),
           BuildingHeader(group: group),

@@ -188,27 +188,4 @@ class ExecutionRepository {
     unawaited(_syncWorker.syncRoute(routeId));
     return key;
   }
-
-  /// Adds a text note to [executionId]'s evidence list — same lifecycle as
-  /// [addPhoto].
-  Future<void> addNote({
-    required String routeId,
-    required String executionId,
-    required String text,
-  }) async {
-    final key = _uuid.v4();
-    final capturedAt = DateTime.now().toUtc();
-    await _store.enqueue(
-      id: key,
-      kind: PendingOpKind.evidenceNote,
-      routeId: routeId,
-      payload: {
-        'execution_id': executionId,
-        'text_body': text,
-        'captured_at': capturedAt.toIso8601String(),
-        'idempotency_key': key,
-      },
-    );
-    unawaited(_syncWorker.syncRoute(routeId));
-  }
 }

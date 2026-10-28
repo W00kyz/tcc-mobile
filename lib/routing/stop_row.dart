@@ -8,7 +8,6 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/stop_actions.dart';
-import 'package:route_monitor/routing/stop_evidence_section.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
@@ -60,15 +59,9 @@ class StopRow extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _summary(p, syncChip),
+          // The photos of an IN_PROGRESS stop live in the in-progress
+          // block above the card (redesign §6.2), not in its row.
           _actions(context, ref),
-          if (_inProgress)
-            StopEvidenceSection(
-              routeId: route.id,
-              routeStopId: stop.id,
-              requiresEvidence: stop.requiresEvidence,
-              buildingName: stop.buildingName,
-              floorLabel: stop.floorLabel,
-            ),
         ],
       ),
     );
@@ -135,7 +128,7 @@ class StopRow extends ConsumerWidget {
         if (_inProgress)
           TextButton(
             onPressed: _canConclude(ref)
-                ? () => checkOutStop(context, ref, route, stop)
+                ? () => concludeStop(context, ref, route, stop)
                 : null,
             child: const Text(AppStrings.routeConcludeButton),
           ),

@@ -162,18 +162,29 @@ abstract final class AppStrings {
   /// The travel-from-previous leg line, e.g. `a 120 m · 2 min`.
   static String routeLeg(String leg) => 'a $leg';
 
-  // --- route screen · evidence ---
-  static const String routeAddPhotoButton = 'Adicionar foto';
-  static const String routeAddNoteButton = 'Adicionar observação';
-  static const String routeNoteHint = 'Descreva a observação';
-  static const String routeEvidencePhotoLabel = 'Foto';
-  static const String routeEvidenceLoadError =
-      'Não foi possível carregar as evidências.';
-  static const String routePhotoAdded = 'Foto adicionada.';
-  static const String routePhotoAddError = 'Não foi possível adicionar a foto.';
-  static const String routeNoteAdded = 'Observação adicionada.';
-  static const String routeNoteAddError =
-      'Não foi possível adicionar a observação.';
+  // --- in-progress block (redesign §6.2) ---
+  static const String takePhotosButton = 'Tirar fotos';
+
+  /// `Em andamento · desde <HH:mm>`, the check-in hour of the stop.
+  static String inProgressSince(String hour) => 'Em andamento · desde $hour';
+
+  /// `<n> de 2 fotos obrigatórias` on a stop that requires evidence.
+  static String requiredPhotosProgress(int n) => '$n de 2 fotos obrigatórias';
+
+  /// Under a closed "Concluir": `Falta <n> foto(s)`.
+  static String missingPhotos(int n) =>
+      n == 1 ? 'Falta 1 foto' : 'Falta $n fotos';
+
+  // --- conclusion sheet (redesign §6.6) ---
+  static const String concludeTakeMore = 'Tirar mais';
+  static const String concludeObservationLabel = 'Observação (opcional)';
+  static const String concludeObservationHelper =
+      'Reclamações e sugestões também vão aqui';
+  static const String concludeScanExitButton = 'Escanear QR de saída';
+
+  /// `Concluir <prédio> · <andar>`.
+  static String concludeSheetTitle(String building, String floor) =>
+      'Concluir $building · $floor';
 
   // --- photo-sequence camera ---
   static const String photoSequenceDone = 'Pronto';
@@ -195,16 +206,6 @@ abstract final class AppStrings {
   static String photoSequenceMissing(int n) => 'Falta $n';
   static String photoSequencePhoto(int n) => 'Foto $n';
   static String photoSequencePending(int n) => 'Foto $n pendente';
-
-  // --- route screen · evidence requirement ---
-  /// `Tire pelo menos 2 fotos (faltam N)`.
-  static String evidenceMissingHint(int missing) =>
-      'Tire pelo menos 2 fotos (faltam $missing)';
-
-  // --- complaints and suggestions dialog ---
-  static const String complaintsDialogTitle =
-      'Reclamações e Sugestões (opcional)';
-  static const String complaintsContinue = 'Continuar';
 
   // --- map ---
   static const String mapApproximateLegLabel = 'trajeto aproximado';
@@ -360,9 +361,6 @@ abstract final class AppStrings {
     _ => appealSendError,
   };
 
-  // --- evidence note dialog ---
-  static const String formAddNoteDialogTitle = 'Adicionar observação';
-
   // --- notifications screen ---
   static const String notificationsAppBarTitle = 'Notificações';
   static const String notificationsLoadError =
@@ -492,7 +490,6 @@ abstract final class AppStrings {
   // --- map home (redesign §6.2, §6.10) ---
   static const String scanQrButton = 'Escanear QR';
   static const String nextStopLabel = 'Próxima parada';
-  static const String inProgressStopLabel = 'Em andamento';
   static const String myPositionTooltip = 'Minha posição';
   static const String accountMenuTooltip = 'Menu da conta';
   static const String collectionChip = 'Coleta de localização ativa';

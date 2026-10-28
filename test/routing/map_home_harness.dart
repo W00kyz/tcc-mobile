@@ -164,15 +164,32 @@ Future<void> scanWith(WidgetTester tester, String? rawValue) async {
   Navigator.of(tester.element(find.byType(ScanScreen))).pop(rawValue);
 }
 
-/// Taps the stop's "Concluir" and answers the pushed [ScanScreen] with
-/// [rawValue] (same leaked-camera caveat as [scanWith]).
-Future<void> concludeWith(WidgetTester tester, String rawValue) async {
-  await tapInSheet(
-    tester,
-    find.widgetWithText(TextButton, AppStrings.routeConcludeButton),
-  );
+/// The in-progress block's "Concluir" (the stop rows keep a text one).
+Finder blockConcludeButton() =>
+    find.byKey(const ValueKey('in-progress-conclude'));
+
+/// The in-progress block's "Tirar fotos".
+Finder blockTakePhotosButton() =>
+    find.byKey(const ValueKey('in-progress-take-photos'));
+
+/// Taps the in-progress block's "Concluir", optionally types [observation]
+/// into the conclusion sheet, taps "Escanear QR de saída" and answers the
+/// pushed [ScanScreen] with [rawValue] (null = cancelled; same
+/// leaked-camera caveat as [scanWith]).
+Future<void> concludeWith(
+  WidgetTester tester,
+  String? rawValue, {
+  String? observation,
+}) async {
+  await tapInSheet(tester, blockConcludeButton());
+  if (observation != null) {
+    await tester.enterText(find.byType(TextField), observation);
+  }
+  await tester.tap(find.text(AppStrings.concludeScanExitButton));
+  await tester.pumpAndSettle();
   expect(find.byType(ScanScreen), findsOneWidget);
   Navigator.of(tester.element(find.byType(ScanScreen))).pop(rawValue);
+  await tester.pumpAndSettle();
 }
 
 /// A [RouteStopSummary] in building [buildingId] (default `b1`), batch 1,

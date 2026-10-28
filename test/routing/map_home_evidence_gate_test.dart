@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
@@ -13,14 +12,15 @@ import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
 
 // Ported from the deleted route_screen_test.dart: the photo gate of a stop
-// that requires evidence (spec 2026-10-26-exige-evidencias). Task 9 moves it
-// to the in-progress block.
+// that requires evidence (spec 2026-10-26-exige-evidencias), now on the
+// in-progress block (redesign §6.2).
 
-Finder _concluir() =>
-    find.widgetWithText(TextButton, AppStrings.routeConcludeButton);
+Finder _concluir() => blockConcludeButton();
 
-Finder _addPhoto() =>
-    find.widgetWithText(TextButton, AppStrings.routeAddPhotoButton);
+Finder _addPhoto() => blockTakePhotosButton();
+
+VoidCallback? _onPressed(WidgetTester tester, Finder button) =>
+    tester.widget<ButtonStyleButton>(button).onPressed;
 
 /// An [EvidenceApi] whose `listEvidence` always throws [error] — the device
 /// is offline, or the server answered an HTTP error.
@@ -104,14 +104,14 @@ void main() {
       return store;
     }
 
-    testWidgets('with 1 photo shows the hint and a disabled "Concluir"', (
+    testWidgets('with 1 photo shows "Falta 1 foto" and a disabled "Concluir"', (
       tester,
     ) async {
       await pumpWith(tester, pendingPhotos: 1);
 
-      expect(find.text(AppStrings.evidenceMissingHint(1)), findsOneWidget);
-      expect(find.text('Tire pelo menos 2 fotos (faltam 1)'), findsOneWidget);
-      expect(tester.widget<TextButton>(_concluir()).onPressed, isNull);
+      expect(find.text(AppStrings.missingPhotos(1)), findsOneWidget);
+      expect(find.text('Falta 1 foto'), findsOneWidget);
+      expect(_onPressed(tester, _concluir()), isNull);
     });
 
     // The gate reads the device's own outbox: no network answer, good or
@@ -126,8 +126,8 @@ void main() {
         evidenceApi: _FailingEvidenceApi.offline(),
       );
 
-      expect(tester.widget<TextButton>(_concluir()).onPressed, isNotNull);
-      expect(find.textContaining('Tire pelo menos'), findsNothing);
+      expect(_onPressed(tester, _concluir()), isNotNull);
+      expect(find.textContaining('Falta'), findsNothing);
     });
 
     testWidgets('an HTTP 500 on the list does not stall the count', (
@@ -138,15 +138,15 @@ void main() {
         pendingPhotos: 2,
         evidenceApi: _FailingEvidenceApi.http(500),
       );
-      expect(tester.widget<TextButton>(_concluir()).onPressed, isNotNull);
+      expect(_onPressed(tester, _concluir()), isNotNull);
 
       await pumpWith(
         tester,
         pendingPhotos: 1,
         evidenceApi: _FailingEvidenceApi.http(500),
       );
-      expect(tester.widget<TextButton>(_concluir()).onPressed, isNull);
-      expect(find.text(AppStrings.evidenceMissingHint(1)), findsOneWidget);
+      expect(_onPressed(tester, _concluir()), isNull);
+      expect(find.text(AppStrings.missingPhotos(1)), findsOneWidget);
     });
 
     testWidgets('the 10-photo cap counts the local photos, list or no list', (
@@ -158,7 +158,7 @@ void main() {
         syncedPhotos: 5,
         evidenceApi: _FailingEvidenceApi.http(404),
       );
-      expect(tester.widget<TextButton>(_addPhoto()).onPressed, isNull);
+      expect(_onPressed(tester, _addPhoto()), isNull);
 
       await pumpWith(
         tester,
@@ -166,7 +166,7 @@ void main() {
         syncedPhotos: 4,
         evidenceApi: _FailingEvidenceApi.http(404),
       );
-      expect(tester.widget<TextButton>(_addPhoto()).onPressed, isNotNull);
+      expect(_onPressed(tester, _addPhoto()), isNotNull);
     });
 
     testWidgets('counts a pending photo together with a synced one', (
@@ -187,50 +187,16 @@ void main() {
         ),
       );
 
-      expect(find.textContaining('Tire pelo menos'), findsNothing);
-      expect(tester.widget<TextButton>(_concluir()).onPressed, isNotNull);
+      expect(find.textContaining('Falta'), findsNothing);
+      expect(_onPressed(tester, _concluir()), isNotNull);
     });
 
-    testWidgets('disables "Adicionar foto" at the 10-photo cap', (
+    testWidgets('disables "Tirar fotos" at the 10-photo cap', (
       tester,
     ) async {
       await pumpWith(tester, pendingPhotos: 10);
 
-      expect(tester.widget<TextButton>(_addPhoto()).onPressed, isNull);
-    });
-
-    testWidgets('"Concluir" asks for complaints first and "Cancelar" '
-        'enqueues nothing', (tester) async {
-      final store = await pumpWith(tester, pendingPhotos: 2);
-
-      await tapInSheet(tester, _concluir());
-      expect(find.text(AppStrings.complaintsDialogTitle), findsOneWidget);
-      expect(find.byType(ScanScreen), findsNothing);
-
-      await tester.tap(find.text(AppStrings.commonCancel));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(ScanScreen), findsNothing);
-      final kinds = (await store.unsyncedForRoute('r1')).map((r) => r.kind);
-      expect(kinds, isNot(contains(PendingOpKind.checkOut)));
-    });
-
-    testWidgets('"Continuar" scans and enqueues the check-out with the '
-        'typed text', (tester) async {
-      final store = await pumpWith(tester, pendingPhotos: 2);
-
-      await tapInSheet(tester, _concluir());
-      await tester.enterText(find.byType(TextField), 'Falta papel');
-      await tester.tap(find.text(AppStrings.complaintsContinue));
-      await tester.pumpAndSettle();
-      expect(find.byType(ScanScreen), findsOneWidget);
-      Navigator.of(tester.element(find.byType(ScanScreen))).pop('v1.floor.1.s');
-      await tester.pumpAndSettle();
-
-      final checkOut = (await store.unsyncedForRoute(
-        'r1',
-      )).singleWhere((r) => r.kind == PendingOpKind.checkOut);
-      expect(checkOut.payload['complaints_suggestions'], 'Falta papel');
+      expect(_onPressed(tester, _addPhoto()), isNull);
     });
   });
 }

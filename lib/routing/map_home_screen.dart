@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'package:route_monitor/appeals/released_stop_listener.dart';
+import 'package:route_monitor/execution/in_progress_block.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/collection_banner.dart';
 import 'package:route_monitor/monitoring/silence_banner.dart';
@@ -67,6 +68,9 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   final DraggableScrollableController _sheet = DraggableScrollableController();
   LatLng? _workerPosition;
 
+  /// The card last drawn, so the stamp listener finds the stop's building.
+  BatchCard? _card;
+
   @override
   void dispose() {
     _map.dispose();
@@ -77,6 +81,9 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   @override
   Widget build(BuildContext context) {
     _clearSelectionOnNewBatch();
+    ref.listen<String?>(lastStampedStopProvider, (_, stopId) {
+      if (stopId != null) _onStamped(stopId);
+    });
     final dayAsync = ref.watch(myDayProvider);
     // Watched here so the automatic next-batch pull lives as long as the
     // screen does (spec §6.4), and its offline panel shows in the sheet.
@@ -88,6 +95,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     final card = _isWorked(route)
         ? buildBatchCard(route!, local, watchPendingSyncStops(ref, route))
         : null;
+    _card = card;
     final selected = _selectedGroup(card, ref.watch(selectedBuildingProvider));
     return PopScope(
       canPop: selected == null,
@@ -143,6 +151,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         return;
       }
       _clearSelection();
+      _forgetStamp();
     });
   }
 
@@ -297,10 +306,17 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
             label: const Text(AppStrings.scanQrButton),
           )
         : null;
+    final inProgress = _inProgressBlock(route, card);
     if (selected != null) {
       return MapSheet(
         controller: _sheet,
-        header: BuildingHeader(group: selected),
+        header: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ?inProgress,
+            BuildingHeader(group: selected),
+          ],
+        ),
         body: BuildingStops(route: route, group: selected),
         stickyFooter: footer,
       );
@@ -312,7 +328,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         children: [
           if (nextBatch == NextBatchState.waitingForNetwork)
             const NextBatchOfflinePanel(),
-          NextStopRow(route: route, card: card),
+          inProgress ?? NextStopRow(route: route, card: card),
         ],
       ),
       body: BatchOverview(route: route, card: card),
@@ -320,10 +336,43 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     );
   }
 
+  /// The stop in progress, in place of "Próxima parada" (redesign §6.2);
+  /// also over a selected building's list, so its photos and "Concluir"
+  /// never hide behind a pin tap.
+  Widget? _inProgressBlock(RouteSummary route, BatchCard card) {
+    final slot = inProgressSlotOf(card);
+    if (slot == null) return null;
+    final stop = route.stops.firstWhere((s) => s.id == slot.stopId);
+    return InProgressBlock(
+      key: ValueKey('in-progress-${stop.id}'),
+      route: route,
+      stop: stop,
+    );
+  }
+
+  /// After a written check-out (redesign §6.6): the map centres on the
+  /// stop's building and the sheet comes to half height, where the card —
+  /// and the stamp falling on it — shows.
+  void _onStamped(String stopId) {
+    final group = _card?.groups
+        .where((g) => g.slots.any((slot) => slot.stopId == stopId))
+        .firstOrNull;
+    if (group != null) _map.move(group.position, _map.camera.zoom);
+    if (!_sheet.isAttached) return;
+    unawaited(
+      _sheet.animateTo(
+        kMapSheetInitial,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      ),
+    );
+  }
+
   /// Pin tap: select the building, centre the map on it and bring the sheet
   /// to half height with that building's stops.
   void _selectBuilding(BuildingGroup group) {
     ref.read(selectedBuildingProvider.notifier).select(group.buildingId);
+    _forgetStamp();
     _map.move(group.position, _map.camera.zoom);
     if (!_sheet.isAttached) return;
     unawaited(
@@ -336,6 +385,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   }
 
   void _clearSelection() => ref.read(selectedBuildingProvider.notifier).clear();
+
+  /// A stamp falls once: a card rebuilt later (a pin tap, a new batch) must
+  /// not replay it.
+  void _forgetStamp() => ref.read(lastStampedStopProvider.notifier).clear();
 
   /// One GPS read, drawn as the worker's dot and centred on.
   Future<void> _locateMe() async {

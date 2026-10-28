@@ -1,17 +1,23 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/stop_actions.dart';
 import 'package:route_monitor/ui/batch_card.dart';
 import 'package:route_monitor/ui/building_pin.dart';
+import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_route_repository.dart';
+import 'gated_write_store.dart';
 import 'map_home_harness.dart';
 
 /// Two buildings: "Central de Aulas" (Térreo, 1º andar) and "Bloco B"
@@ -403,6 +409,87 @@ void main() {
 
       expect(find.text(AppStrings.nextStopLabel).hitTestable(), findsOneWidget);
       expect(scanQrButton().hitTestable(), findsOneWidget);
+    });
+  });
+
+  group('in-progress block and stamp (Task 9)', () {
+    testWidgets('in-progress block shows "Em andamento · desde 09:47", photo '
+        'count and Concluir disabled with "Falta 1 foto"', (tester) async {
+      final store = InMemoryLocalWriteStore();
+      await store.enqueue(
+        id: 'p1',
+        kind: PendingOpKind.evidencePhoto,
+        routeId: 'r1',
+        payload: {
+          'execution_id': 'exec-1',
+          'bytes_b64': base64Encode(onePixelPng),
+          'sha256': 'abc',
+          'captured_at': '2026-10-28T09:50:00.000Z',
+          'idempotency_key': 'p1',
+        },
+      );
+      final route = routeWith(
+        stops: [
+          stopIn(id: 's1', status: 'IN_PROGRESS', requiresEvidence: true),
+        ],
+      );
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(route),
+          localWriteStore: store,
+          stopProgressStore: FakeStopProgressStore(
+            {'s1': 'exec-1'},
+            DateTime(2026, 10, 28, 9, 47),
+          ),
+        ),
+      );
+
+      expect(find.text('Em andamento · desde 09:47'), findsOneWidget);
+      expect(find.text('1 de 2 fotos obrigatórias'), findsOneWidget);
+      expect(find.text('Falta 1 foto'), findsOneWidget);
+      final conclude = tester.widget<ButtonStyleButton>(blockConcludeButton());
+      expect(conclude.onPressed, isNull);
+      expect(find.text(AppStrings.nextStopLabel), findsNothing);
+    });
+
+    testWidgets('stamp animates only after the check-out row is written', (
+      tester,
+    ) async {
+      final store = GatedLocalWriteStore();
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(
+            routeWith(
+              stops: [stopIn(id: 's1', status: 'IN_PROGRESS')],
+            ),
+          ),
+          localWriteStore: store,
+          stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
+        ),
+      );
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(MapHomeScreen)),
+      );
+      bool? writtenAtStamp;
+      container.listen<String?>(
+        lastStampedStopProvider,
+        (_, next) => writtenAtStamp ??= store.checkOutWritten,
+      );
+
+      await concludeWith(tester, 'v1.floor.1.sig');
+      expect(container.read(lastStampedStopProvider), isNull);
+
+      store.gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(container.read(lastStampedStopProvider), 's1');
+      expect(writtenAtStamp, isTrue);
+      final animating = tester
+          .widgetList<StampSlot>(find.byType(StampSlot))
+          .where((slot) => slot.animateStamp);
+      expect(animating.map((slot) => slot.slot.stopId), ['s1']);
     });
   });
 }

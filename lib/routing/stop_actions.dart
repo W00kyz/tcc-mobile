@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/checkin/scan_screen.dart';
+import 'package:route_monitor/execution/conclude_sheet.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/impediment_dialog.dart';
 import 'package:route_monitor/execution/room_picker.dart';
 import 'package:route_monitor/execution/room_resolution.dart';
 import 'package:route_monitor/l10n/strings.dart';
-import 'package:route_monitor/routing/complaints_dialog.dart';
+import 'package:route_monitor/local/stop_progress_store.dart'
+    show StopLocalStatus;
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
@@ -118,12 +120,33 @@ Future<String?> _resolveCheckInStop(
   }
 }
 
-/// "Concluir" on an `IN_PROGRESS` stop: the complaints prompt (evidence
-/// stops), the exit scan, then the enqueued check-out. Task 9 replaces it
-/// with the conclusion sheet.
+/// The stop whose stamp just fell: set only once its check-out row is in
+/// the outbox (RNF06 — the stamp is a consequence of the write, never ahead
+/// of it). The card animates that one slot; the map home centres on its
+/// building.
 ///
-///     onPressed: () => checkOutStop(context, ref, route, stop)
-Future<void> checkOutStop(
+///     ref.watch(lastStampedStopProvider); // 's1' right after s1's check-out
+final lastStampedStopProvider = NotifierProvider<LastStamped, String?>(
+  LastStamped.new,
+);
+
+class LastStamped extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  // A method, not a setter: reads as the action it is at the call site.
+  // ignore: use_setters_to_change_properties
+  void stamp(String routeStopId) => state = routeStopId;
+
+  void clear() => state = null;
+}
+
+/// "Concluir" on an `IN_PROGRESS` stop: the conclusion sheet (one optional
+/// observation, redesign §6.6), the exit scan, then the enqueued check-out
+/// carrying the observation as `complaints_suggestions`.
+///
+///     onPressed: () => concludeStop(context, ref, route, stop)
+Future<void> concludeStop(
   BuildContext context,
   WidgetRef ref,
   RouteSummary route,
@@ -132,20 +155,47 @@ Future<void> checkOutStop(
   // Before the QR, so the worker never scans and only then finds one more
   // step (spec 2026-10-26-exige-evidencias §6.4). Cancelling abandons the
   // check-out: nothing is enqueued.
-  String? complaints;
-  if (stop.requiresEvidence) {
-    final answer = await showComplaintsDialog(context);
-    if (answer == null || !context.mounted) return;
-    complaints = answer.text;
-  }
-  if (!context.mounted) return;
+  final scanExit = await showConcludeSheet(
+    context,
+    routeId: route.id,
+    stop: stop,
+    executionId: _openExecutionOf(ref, stop),
+  );
+  if (!scanExit || !context.mounted) return;
   final scan = await _scanAndLocate(
     context,
     ref,
     ExitScan(stop.buildingName, stop.floorLabel),
   );
+  // A cancelled camera writes nothing; the observation stays in its draft
+  // for the next "Concluir" (Review Focus 3).
   if (scan == null || !context.mounted) return;
 
+  await _recordCheckOut(ref, route, stop, scan);
+  if (context.mounted) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text(AppStrings.routeCheckOutDone)));
+  }
+}
+
+/// The stop's open execution on this device, if its progress row is read.
+String? _openExecutionOf(WidgetRef ref, RouteStopSummary stop) {
+  final entry = ref.read(stopProgressForProvider(stop.id)).asData?.value;
+  return entry?.status == StopLocalStatus.inProgress
+      ? entry?.executionId
+      : null;
+}
+
+/// Writes the check-out, then — only then — clears the draft, redraws the
+/// stop as done and drops its stamp.
+Future<void> _recordCheckOut(
+  WidgetRef ref,
+  RouteSummary route,
+  RouteStopSummary stop,
+  _Scan scan,
+) async {
+  final draft = observationDraftProvider(stop.id);
   // Check-out is always per-stop — the UI already knows which IN_PROGRESS
   // stop it is concluding, so there is no room to resolve. The repository
   // only enqueues + writes local state (spec Ruling 2): no
@@ -159,24 +209,29 @@ Future<void> checkOutStop(
         latitude: scan.coordinates?.latitude,
         longitude: scan.coordinates?.longitude,
         checkoutIdempotencyKey: _uuid.v4(),
-        complaintsSuggestions: complaints,
+        complaintsSuggestions: observationToSend(ref.read(draft)),
       );
-  // A local check-out flips the stop to DONE now (spec Ruling 5); this
-  // invalidate re-reads myDayProvider so the server view catches up too
-  // — the "Concluir" button's visibility is status == 'IN_PROGRESS', and
-  // the done-stamp rendering in the card takes over. The reload is also
-  // what lets the batch controller see a finished batch and pull the next.
-  ref.invalidate(myDayProvider);
-  if (context.mounted) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text(AppStrings.routeCheckOutDone)));
-  }
+  ref.read(draft.notifier).clear();
+  _showStopDone(ref, stop);
+}
+
+/// What follows a written check-out on screen.
+void _showStopDone(WidgetRef ref, RouteStopSummary stop) {
+  // The local row is DONE now: re-read it so the slot turns into a stamp.
+  ref
+    ..invalidate(stopProgressForProvider(stop.id))
+    ..read(lastStampedStopProvider.notifier).stamp(stop.id)
+    // A local check-out flips the stop to DONE now (spec Ruling 5); this
+    // invalidate re-reads myDayProvider so the server view catches up too
+    // — the "Concluir" button's visibility is status == 'IN_PROGRESS', and
+    // the done-stamp rendering in the card takes over. The reload is also
+    // what lets the batch controller see a finished batch and pull the next.
+    ..invalidate(myDayProvider);
 }
 
 /// Opens [ImpedimentDialog] for a `PENDING` or `IN_PROGRESS` stop and, on a
 /// non-null result, enqueues it via `ExecutionRepository.reportImpediment`
-/// (spec RF16-RF17, alocação automática §7.1). Same shape as [checkOutStop]:
+/// (spec RF16-RF17, alocação automática §7.1). Same shape as [concludeStop]:
 /// read the repo, call it, then a confirmation snackbar; the dialog stays
 /// ref-free (pure input collection).
 ///

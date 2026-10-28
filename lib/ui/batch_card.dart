@@ -14,11 +14,15 @@ class BatchCardView extends StatelessWidget {
   const BatchCardView({
     required this.card,
     this.highlightBuildingId,
+    this.stampingStopId,
     super.key,
   });
 
   final BatchCard card;
   final String? highlightBuildingId;
+
+  /// The one stop whose stamp falls (animates) once its slot reads done.
+  final String? stampingStopId;
 
   @override
   Widget build(BuildContext context) {
@@ -143,7 +147,7 @@ class BatchCardView extends StatelessWidget {
               for (var j = 0; j < _slotsPerRow; j++)
                 Expanded(
                   child: j < chunk.length
-                      ? Center(child: StampSlot(slot: chunk[j]))
+                      ? Center(child: _slot(chunk[j]))
                       : const SizedBox.shrink(),
                 ),
             ],
@@ -153,4 +157,12 @@ class BatchCardView extends StatelessWidget {
     }
     return Column(children: rows);
   }
+
+  /// Animated only once the slot is a stamp: a slot still in progress when
+  /// [stampingStopId] is set flips to `true` when it turns done, which is
+  /// what plays the stamp once.
+  Widget _slot(CardSlot slot) => StampSlot(
+    slot: slot,
+    animateStamp: slot.stopId == stampingStopId && slot.state == SlotState.done,
+  );
 }

@@ -431,22 +431,4 @@ void main() {
 
     expect(syncWorker.syncedRoutes, ['route-A']);
   });
-
-  test('addNote enqueues one pending evidenceNote row and kicks the sync '
-      'worker once', () async {
-    await repository.addNote(
-      routeId: 'route-A',
-      executionId: 'exec-1',
-      text: 'Sala trancada.',
-    );
-
-    final rows = await store.unsyncedForRoute('route-A');
-    expect(rows, hasLength(1));
-    expect(rows.single.state, PendingOpState.pending);
-    expect(rows.single.kind, PendingOpKind.evidenceNote);
-    expect(rows.single.payload['execution_id'], 'exec-1');
-    expect(rows.single.payload['text_body'], 'Sala trancada.');
-    expect(rows.single.payload['idempotency_key'], isA<String>());
-    expect(syncWorker.syncedRoutes, ['route-A']);
-  });
 }
