@@ -283,6 +283,27 @@ void main() {
       );
     });
 
+    test('a snapshot from before the building fields is no snapshot', () async {
+      final route = _routePayload();
+      for (final stop in route['stops'] as List<dynamic>) {
+        (stop as Map<String, dynamic>)
+          ..remove('building_id')
+          ..remove('building_name')
+          ..remove('floor_label');
+      }
+      final cache = InMemoryRouteSnapshotCache()
+        ..snapshots['u1'] = jsonEncode(_myDayPayload(route: route));
+
+      await expectLater(
+        DioRouteRepository(
+          _offlineDio(),
+          cache: cache,
+          userId: 'u1',
+        ).fetchMyDay(),
+        throwsA(isA<OfflineException>()),
+      );
+    });
+
     test('an HTTP error is a real answer, not a reason to use the cache', () {
       final cache = InMemoryRouteSnapshotCache()
         ..snapshots['u1'] = jsonEncode(_myDayPayload(route: _routePayload()));

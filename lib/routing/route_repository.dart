@@ -326,8 +326,26 @@ class DioRouteRepository implements RouteRepository {
       // at all = no network: fall back to the last day this device saw.
       if (error.response != null) rethrow;
       final cached = await _cache?.load(userId);
-      if (cached == null) throw const OfflineException(_myDayPath);
+      final day = cached == null ? null : _parseSnapshot(cached);
+      if (day == null) throw const OfflineException(_myDayPath);
+      return day;
+    }
+  }
+
+  /// The saved day, or null when it no longer parses. A snapshot saved by an
+  /// older build lacks fields this one requires (`building_id`,
+  /// `building_name`, `floor_label`): it counts as no snapshot rather than
+  /// a crash offline (final review M-4). The next online fetch replaces it.
+  static MyDay? _parseSnapshot(String cached) {
+    try {
       return MyDay.fromJson(jsonDecode(cached) as Map<String, dynamic>);
+      // A missing or mistyped field fails the `as` casts in fromJson with a
+      // TypeError; a corrupt string fails jsonDecode.
+      // ignore: avoid_catching_errors
+    } on TypeError {
+      return null;
+    } on FormatException {
+      return null;
     }
   }
 
