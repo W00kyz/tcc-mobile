@@ -25,6 +25,7 @@ import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/sync_notifications.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -32,9 +33,11 @@ import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
 import '../support/fake_connectivity.dart';
+import '../support/fake_sync_notification_taps.dart';
 import 'map_home_fakes.dart';
 import 'no_tiles_tile_provider.dart';
 
+export '../support/fake_sync_notification_taps.dart';
 export 'map_home_fakes.dart';
 
 /// The map home under test, every outer seam faked: never the network, the
@@ -57,6 +60,7 @@ Widget homeWith(
   SilenceWatchdog? silenceWatchdog,
   AppealApi? appealApi,
   ReleasedStopStore? releasedStopStore,
+  SyncNotificationTaps? notificationTaps,
 }) {
   final progress = stopProgressStore ?? FakeStopProgressStore();
   final store = localWriteStore ?? InMemoryLocalWriteStore();
@@ -72,6 +76,9 @@ Widget homeWith(
         releasedStopStore ?? NoReleasedStops(),
       ),
       syncWorkerProvider.overrideWithValue(worker),
+      syncNotificationTapsProvider.overrideWithValue(
+        notificationTaps ?? FakeSyncNotificationTaps(),
+      ),
       locationServiceProvider.overrideWithValue(
         locationService ?? FakeLocationService(),
       ),

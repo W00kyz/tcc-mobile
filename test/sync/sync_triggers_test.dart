@@ -9,6 +9,8 @@ import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/sync/background_sync.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
@@ -68,7 +70,21 @@ class _RecordingSyncWorker implements SyncWorker {
   Future<void> unblock(String operationId) async {}
 
   @override
+  Stream<SyncProgress> get progress => const Stream.empty();
+
+  @override
   Future<void> dispose() async {}
+}
+
+/// Ignores the lifecycle: the background-drain side of the triggers is
+/// covered in `background_sync_test.dart`, and the real tracker would open
+/// the on-device database.
+class _IgnoringForegroundTracker implements AppForegroundTracker {
+  @override
+  Future<void> entered() async {}
+
+  @override
+  Future<void> left() async {}
 }
 
 void main() {
@@ -88,6 +104,9 @@ void main() {
         overrides: [
           connectivityProvider.overrideWithValue(connectivity),
           syncWorkerProvider.overrideWithValue(worker),
+          appForegroundTrackerProvider.overrideWithValue(
+            _IgnoringForegroundTracker(),
+          ),
         ],
         child: SyncTriggers(child: child ?? const SizedBox.shrink()),
       ),
@@ -107,6 +126,9 @@ void main() {
       overrides: [
         connectivityProvider.overrideWithValue(connectivity),
         syncWorkerProvider.overrideWithValue(worker),
+        appForegroundTrackerProvider.overrideWithValue(
+          _IgnoringForegroundTracker(),
+        ),
         routeRepositoryProvider.overrideWithValue(routeRepository),
         if (monitoringApi != null)
           monitoringApiProvider.overrideWithValue(monitoringApi),

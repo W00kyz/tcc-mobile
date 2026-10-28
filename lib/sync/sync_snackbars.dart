@@ -7,6 +7,7 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/day_state_panels.dart';
+import 'package:route_monitor/sync/sync_notifications.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_snackbar_queue.dart';
 import 'package:route_monitor/sync/sync_status.dart';
@@ -45,6 +46,29 @@ class _SyncSnackbarsState extends ConsumerState<SyncSnackbars> {
     blocked: 0,
   );
   RouteSyncStatus _last = _quiet;
+  StreamSubscription<String>? _notificationTaps;
+
+  /// The "needs attention" OS notification (redesign §6.9) lands here: this
+  /// widget sits under the home's Navigator, where `BlockedSyncScreen` is
+  /// pushed from the "Ver" action too.
+  @override
+  void initState() {
+    super.initState();
+    final taps = ref.read(syncNotificationTapsProvider);
+    _notificationTaps = taps.blockedSyncTaps.listen(_openBlockedFor);
+    unawaited(_openLaunchTap(taps));
+  }
+
+  Future<void> _openLaunchTap(SyncNotificationTaps taps) async {
+    final routeId = await taps.takeLaunchTap();
+    if (routeId != null && mounted) _openBlockedFor(routeId);
+  }
+
+  @override
+  void dispose() {
+    unawaited(_notificationTaps?.cancel());
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(SyncSnackbars oldWidget) {
@@ -118,7 +142,10 @@ class _SyncSnackbarsState extends ConsumerState<SyncSnackbars> {
 
   void _openBlocked() {
     final routeId = widget.routeId;
-    if (routeId == null) return;
+    if (routeId != null) _openBlockedFor(routeId);
+  }
+
+  void _openBlockedFor(String routeId) {
     unawaited(
       Navigator.of(context).push(
         MaterialPageRoute<void>(

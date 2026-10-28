@@ -31,4 +31,16 @@ void main() {
 
     expect(await store.getClockOffsetSeconds(), 0.25);
   });
+
+  test('the app is not in the foreground before the flag is written', () async {
+    expect(await store.getAppInForeground(), isFalse);
+  });
+
+  test('setAppInForeground round-trips both ways', () async {
+    await store.setAppInForeground(inForeground: true);
+    expect(await store.getAppInForeground(), isTrue);
+
+    await store.setAppInForeground(inForeground: false);
+    expect(await store.getAppInForeground(), isFalse);
+  });
 }

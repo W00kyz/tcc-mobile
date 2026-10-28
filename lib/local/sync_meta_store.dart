@@ -9,6 +9,14 @@ abstract class SyncMetaStore {
   Future<double?> getClockOffsetSeconds();
 
   Future<void> setClockOffsetSeconds(double seconds);
+
+  /// Whether the app was last seen in the foreground — written by
+  /// `SyncTriggers` on each lifecycle change, read by the background drain,
+  /// which posts no OS notification while it is true (redesign §6.9: the
+  /// snackbars cover it). False before it was ever written.
+  Future<bool> getAppInForeground();
+
+  Future<void> setAppInForeground({required bool inForeground});
 }
 
 class DriftSyncMetaStore implements SyncMetaStore {
@@ -17,6 +25,10 @@ class DriftSyncMetaStore implements SyncMetaStore {
   final AppDatabase _db;
 
   static const _clockOffsetKey = 'clock_offset_seconds';
+
+  /// `'1'` / `'0'`. A row in SQLite rather than memory: the background drain
+  /// runs on another isolate (or another engine) and shares only the file.
+  static const _appInForegroundKey = 'app_in_foreground';
 
   @override
   Future<double?> getClockOffsetSeconds() async {
@@ -27,6 +39,14 @@ class DriftSyncMetaStore implements SyncMetaStore {
   @override
   Future<void> setClockOffsetSeconds(double seconds) =>
       _set(_clockOffsetKey, seconds.toString());
+
+  @override
+  Future<bool> getAppInForeground() async =>
+      await _get(_appInForegroundKey) == '1';
+
+  @override
+  Future<void> setAppInForeground({required bool inForeground}) =>
+      _set(_appInForegroundKey, inForeground ? '1' : '0');
 
   Future<String?> _get(String key) async {
     final row = await (_db.select(

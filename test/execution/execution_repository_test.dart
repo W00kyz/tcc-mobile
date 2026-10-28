@@ -6,6 +6,7 @@ import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -163,6 +164,9 @@ class _FakeSyncWorker implements SyncWorker {
 
   @override
   Future<void> unblock(String operationId) => throw UnimplementedError();
+
+  @override
+  Stream<SyncProgress> get progress => const Stream.empty();
 
   @override
   Future<void> dispose() => throw UnimplementedError();

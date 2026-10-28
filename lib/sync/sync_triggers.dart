@@ -8,6 +8,8 @@ import 'package:route_monitor/appeals/appeal_providers.dart'
 import 'package:route_monitor/monitoring/monitoring_providers.dart'
     show notificationsProvider, unreadCountProvider;
 import 'package:route_monitor/routing/route_providers.dart' show myDayProvider;
+import 'package:route_monitor/sync/background_sync.dart'
+    show appForegroundTrackerProvider;
 import 'package:route_monitor/sync/sync_providers.dart';
 
 /// App-wide observer that drains the outbox on the two automatic triggers of
@@ -15,6 +17,10 @@ import 'package:route_monitor/sync/sync_providers.dart';
 /// foreground (`AppLifecycleState.resumed`) and connectivity being regained
 /// (`Connectivity.onOnlineChanged`). The post-enqueue kick (Task 8) and the
 /// manual "Sincronizar agora" button (Task 11) cover the other two.
+///
+/// It also tells the background drain whether the app is in the foreground
+/// (no OS notification then) and, when the app is paused with rows still
+/// owed, schedules that drain (redesign §6.9).
 ///
 /// Mounted once, wrapping every route via `MaterialApp.router`'s `builder`:
 ///
@@ -46,6 +52,9 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
         .read(connectivityProvider)
         .onOnlineChanged
         .listen((_) => _sync());
+    // Mounted means on screen: a flag left at "background" by a killed
+    // process must not let the drain notify over the open app.
+    unawaited(ref.read(appForegroundTrackerProvider).entered());
   }
 
   @override
@@ -57,7 +66,11 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _sync();
+    final tracker = ref.read(appForegroundTrackerProvider);
+    if (state == AppLifecycleState.paused) unawaited(tracker.left());
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(tracker.entered());
+    _sync();
   }
 
   /// Fire-and-forget: a trigger asks the worker to drain, it does not wait for

@@ -15,6 +15,7 @@ import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -66,6 +67,9 @@ class RecordingSyncWorker implements SyncWorker {
   Future<void> unblock(String operationId) async {}
 
   @override
+  Stream<SyncProgress> get progress => const Stream.empty();
+
+  @override
   Future<void> dispose() async {}
 }
 
@@ -91,6 +95,15 @@ class InMemorySyncMetaStore implements SyncMetaStore {
 
   @override
   Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
+
+  bool appInForeground = false;
+
+  @override
+  Future<bool> getAppInForeground() async => appInForeground;
+
+  @override
+  Future<void> setAppInForeground({required bool inForeground}) async =>
+      appInForeground = inForeground;
 }
 
 class FakeLocationService implements LocationService {

@@ -168,6 +168,21 @@ abstract final class AppStrings {
   static const String syncSendNow = 'Enviar agora';
   static const String syncSeeBlocked = 'Ver registros bloqueados';
 
+  // --- background sync notifications (redesign §6.9) ---
+  static const String syncNotificationChannelName = 'Envio de registros';
+  static const String syncNotificationChannelDescription =
+      'Mostra o envio dos registros feito com o app fechado.';
+  static const String syncAttentionChannelName = 'Registros com problema';
+  static const String syncAttentionChannelDescription =
+      'Avisa quando um registro não pôde ser enviado.';
+  static String syncNotificationProgress(int done, int total) =>
+      'Enviando registros · $done de $total';
+  static String syncNotificationFinished(int n) =>
+      'Registros enviados · $n ${n == 1 ? 'registro' : 'registros'}';
+  static String syncNotificationAttention(int n) => n == 1
+      ? '1 registro precisa de atenção'
+      : '$n registros precisam de atenção';
+
   static const String routeChipPending = 'Pendente';
   static const String routeChipBlocked = 'Bloqueado';
 

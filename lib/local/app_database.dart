@@ -93,6 +93,19 @@ class ReleasedStops extends Table {
   Set<Column> get primaryKey => {routeStopId};
 }
 
+/// How long a statement waits for another connection's lock before failing.
+const Duration appDatabaseBusyTimeout = Duration(seconds: 5);
+
+/// IMPORTANT: the background drain (redesign §6.9, `background_sync.dart`)
+/// opens this same file on a second connection — its own isolate, sometimes
+/// its own engine — while the app may be writing. SQLite's default timeout
+/// is zero: the loser of a lock race would fail at once with "database is
+/// locked", and a failed `markSynced` would even be classified as a hard
+/// error and block a row the server already took. Waiting a few seconds
+/// turns that race into a short queue.
+final String appDatabaseBusyTimeoutPragma =
+    'PRAGMA busy_timeout = ${appDatabaseBusyTimeout.inMilliseconds}';
+
 @DriftDatabase(
   tables: [
     PendingOperations,
@@ -105,7 +118,15 @@ class AppDatabase extends _$AppDatabase {
   /// [executor] defaults to the on-device SQLite file; tests inject
   /// `NativeDatabase.memory()` so no suite ever touches real storage.
   AppDatabase([QueryExecutor? executor])
-    : super(executor ?? driftDatabase(name: 'route_monitor'));
+    : super(
+        executor ??
+            driftDatabase(
+              name: 'route_monitor',
+              native: DriftNativeOptions(
+                setup: (db) => db.execute(appDatabaseBusyTimeoutPragma),
+              ),
+            ),
+      );
 
   @override
   int get schemaVersion => 7;

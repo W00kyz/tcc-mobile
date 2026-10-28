@@ -34,6 +34,7 @@ import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/sync_notifications.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
@@ -42,6 +43,7 @@ import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
 import '../routing/no_tiles_tile_provider.dart';
+import '../support/fake_sync_notification_taps.dart';
 import '../support/in_memory_database.dart';
 
 /// DELIVERABLE PROOF for Etapa 6 (RF35): a whole batch is executed with the
@@ -706,6 +708,9 @@ class _Fixture {
         locationServiceProvider.overrideWithValue(_FakeLocationService()),
         apiBaseUrlProvider.overrideWithValue('http://test-base'),
         appealApiProvider.overrideWithValue(appealApi),
+        syncNotificationTapsProvider.overrideWithValue(
+          FakeSyncNotificationTaps(),
+        ),
       ],
     );
     return _Fixture(

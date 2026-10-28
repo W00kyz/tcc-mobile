@@ -33,6 +33,7 @@ class _Home {
 Future<_Home> _pump(
   WidgetTester tester, {
   bool online = true,
+  FakeSyncNotificationTaps? taps,
 }) async {
   final status = statusController();
   addTearDown(status.close);
@@ -45,6 +46,7 @@ Future<_Home> _pump(
       repositoryWith(_route()),
       syncWorker: worker,
       connectivity: connectivity,
+      notificationTaps: taps,
     ),
   );
   return _Home(worker, status);
@@ -109,6 +111,27 @@ void main() {
     );
     await tester.tap(find.text(AppStrings.syncSeeAction));
     await tester.pumpAndSettle();
+    expect(find.byType(BlockedSyncScreen), findsOneWidget);
+  });
+
+  testWidgets('a tap on "needs attention" opens BlockedSyncScreen', (
+    tester,
+  ) async {
+    final taps = FakeSyncNotificationTaps();
+    await _pump(tester, taps: taps);
+
+    taps.tap('r1');
+    await tester.pumpAndSettle();
+
+    expect(find.byType(BlockedSyncScreen), findsOneWidget);
+  });
+
+  testWidgets('a cold start from "needs attention" opens BlockedSyncScreen', (
+    tester,
+  ) async {
+    await _pump(tester, taps: FakeSyncNotificationTaps(launchRoute: 'r1'));
+    await tester.pumpAndSettle();
+
     expect(find.byType(BlockedSyncScreen), findsOneWidget);
   });
 

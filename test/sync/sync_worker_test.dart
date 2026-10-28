@@ -12,6 +12,7 @@ import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/stop_release.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -225,6 +226,15 @@ class _FakeSyncMetaStore implements SyncMetaStore {
 
   @override
   Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
+
+  bool appInForeground = false;
+
+  @override
+  Future<bool> getAppInForeground() async => appInForeground;
+
+  @override
+  Future<void> setAppInForeground({required bool inForeground}) async =>
+      appInForeground = inForeground;
 }
 
 class _FakeLocalWriteStore implements LocalWriteStore {
@@ -939,6 +949,29 @@ void main() {
       expect(h.deliveredScans, [DateTime.utc(2026)]);
     });
   });
+
+  test(
+    'SyncWorker.progress emits monotonically up to total during syncAll',
+    () async {
+      final h = _Harness();
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.evidenceNote, createdAt: 2)
+        ..seed(
+          'c',
+          kind: PendingOpKind.checkIn,
+          createdAt: 3,
+          routeId: 'route-S',
+        );
+      final seen = <SyncProgress>[];
+      final subscription = h.worker.progress.listen(seen.add);
+      addTearDown(subscription.cancel);
+
+      await h.worker.syncAll();
+
+      expect(seen.map((p) => (p.done, p.total)), [(1, 3), (2, 3), (3, 3)]);
+    },
+  );
 
   test('re-running a fully drained route makes zero API calls', () async {
     final h = _Harness();

@@ -13,6 +13,7 @@ import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/stop_release.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 
 /// How the worker reacts to a failed dispatch (spec Ruling 6).
@@ -101,6 +102,13 @@ class SyncWorker {
 
   final Map<String, StreamController<RouteSyncStatus>> _statusControllers = {};
 
+  // Sync: every row is heard before `syncAll` returns (background drain).
+  final StreamController<SyncProgress> _progress =
+      StreamController<SyncProgress>.broadcast(sync: true);
+
+  /// The `syncAll` in flight, if any — what a delivered row advances.
+  SyncProgressRun? _run;
+
   /// One FIFO pass over [routeId]'s due rows; does nothing while the device
   /// is offline. Called while a pass is running, it queues one more pass
   /// behind it and completes with that one — the running pass read its rows
@@ -174,9 +182,26 @@ class SyncWorker {
   /// Drains every route that has queued work. A route that blocks does not
   /// stop the others.
   Future<void> syncAll() async {
-    for (final routeId in await _store.routeIdsWithWork()) {
-      await syncRoute(routeId);
+    final routeIds = await _store.routeIdsWithWork();
+    final now = _now().millisecondsSinceEpoch;
+    final total = await countDeliverable(_store, routeIds, now: now);
+    final run = SyncProgressRun(total, _emitProgress);
+    _run = run;
+    try {
+      for (final routeId in routeIds) {
+        await syncRoute(routeId);
+      }
+    } finally {
+      if (identical(_run, run)) _run = null;
     }
+  }
+
+  /// Rows delivered during [syncAll], out of those due when it started
+  /// (redesign §6.9); `worker.progress.listen((p) => show(p.done, p.total))`.
+  Stream<SyncProgress> get progress => _progress.stream;
+
+  void _emitProgress(SyncProgress progress) {
+    if (!_progress.isClosed) _progress.add(progress);
   }
 
   /// The drain status for [routeId], re-emitted after every pass and every
@@ -202,13 +227,16 @@ class SyncWorker {
       await controller.close();
     }
     _statusControllers.clear();
+    await _progress.close();
   }
 
   /// Dispatches one row and says where it ended. A synced scan is reported
   /// only once the row's state is final, so the report can never change it.
   Future<_Dispatched> _dispatch(PendingOperationRow row) async {
     final outcome = await _attempt(row);
-    if (outcome == _Dispatched.synced) _reportScanDelivered(row);
+    if (outcome != _Dispatched.synced) return outcome;
+    _reportScanDelivered(row);
+    _run?.advance();
     return outcome;
   }
 
