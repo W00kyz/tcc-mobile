@@ -40,6 +40,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
   }) async {
     // insertOrIgnore: a re-enqueue with an id already present is a no-op
     // (Etapa 5 behavior — the same-tap room-picker retry reuses the key).
@@ -110,6 +111,14 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   Future<void> resetToPending(String id) => throw UnimplementedError();
 
   @override
+  Future<int> releaseHeldPhotos(String executionId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<int> discardHeldPhotos(String executionId) =>
+      throw UnimplementedError();
+
+  @override
   Future<int> localPhotoCountFor(String executionId) =>
       throw UnimplementedError();
 }
@@ -144,6 +153,10 @@ class _FakeStopProgressStore implements StopProgressStore {
       status: StopLocalStatus.done,
     );
   }
+
+  @override
+  Future<void> markStamped(String routeStopId, {String? observation}) =>
+      throw UnimplementedError();
 
   @override
   Future<StopProgressEntry?> progressFor(String routeStopId) async =>

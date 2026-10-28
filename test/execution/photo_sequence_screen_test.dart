@@ -38,6 +38,7 @@ class _GatedStore extends InMemoryLocalWriteStore {
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
   }) async {
     await gate?.future;
     if (failure != null) throw failure!;
@@ -46,6 +47,7 @@ class _GatedStore extends InMemoryLocalWriteStore {
       kind: kind,
       payload: payload,
       routeId: routeId,
+      initialState: initialState,
     );
   }
 }

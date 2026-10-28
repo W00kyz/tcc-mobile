@@ -27,13 +27,25 @@ enum PendingOpKind {
 /// it (redesign §6.9). A lease that expired (a worker killed mid-send) makes
 /// the row due again; nothing resets `sending` on startup, since the other
 /// isolate may still be mid-send.
-enum PendingOpState { pending, synced, failed, blocked, sending }
+///
+/// `held` is an evidence photo taken but not yet cleared to leave the device:
+/// it waits for its task to be stamped ([LocalWriteStore.releaseHeldPhotos])
+/// or abandoned ([LocalWriteStore.discardHeldPhotos]). It is owed to the
+/// network eventually, so it counts as unsent, but it is never due.
+enum PendingOpState { pending, synced, failed, blocked, sending, held }
 
-/// The states still owed to the network.
-const List<PendingOpState> _unsentStates = [
+/// The states a sync worker may pick up: `held` is owed to the network but
+/// not yet cleared to leave.
+const List<PendingOpState> _sendableStates = [
   PendingOpState.pending,
   PendingOpState.failed,
   PendingOpState.sending,
+];
+
+/// The states still owed to the network.
+const List<PendingOpState> _unsentStates = [
+  ..._sendableStates,
+  PendingOpState.held,
 ];
 
 /// A decoded [PendingOperations] row, free of any Drift type so callers
@@ -78,11 +90,13 @@ class PendingOperationRow {
 abstract class LocalWriteStore {
   /// True when the row was written; false when a row with [id] already
   /// existed (the same idempotency key enqueued twice), which changes nothing.
+  /// [initialState] is `held` for a photo that must wait for its stamp.
   Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
   });
 
   Future<void> markSynced(String id);
@@ -111,15 +125,17 @@ abstract class LocalWriteStore {
     required int nextAttemptAt,
   });
 
-  /// Rows for [routeId] still owed to the network — `pending`, `failed` and
-  /// `sending` — oldest first, so the drain replays them in the order they
-  /// were made.
+  /// Rows for [routeId] still owed to the network — `pending`, `failed`,
+  /// `sending` and `held` — oldest first, so the drain replays them in the
+  /// order they were made.
   Future<List<PendingOperationRow>> unsyncedForRoute(String routeId);
 
   /// How many evidence photos the outbox holds for [executionId], in EVERY
   /// state: `synced` rows stay in SQLite after delivery, and `failed` /
-  /// `blocked` ones are still photos the worker took. This is the on-device
-  /// truth behind the "Concluir" gate and the photo cap, valid offline.
+  /// `blocked` ones are still photos the worker took. `held` ones count too:
+  /// a photo waiting for its stamp is already part of the evidence. This is
+  /// the on-device truth behind the "Concluir" gate and the photo cap, valid
+  /// offline.
   Future<int> localPhotoCountFor(String executionId);
 
   /// `blocked` rows for [routeId], oldest first — the manual-attention list.
@@ -155,10 +171,18 @@ abstract class LocalWriteStore {
   /// blocked-rows list, spec Ruling 6).
   Future<void> resetToPending(String id);
 
+  /// Moves every `held` photo of [executionId] to `pending`, so the next
+  /// drain sends it; returns how many it released.
+  Future<int> releaseHeldPhotos(String executionId);
+
+  /// Deletes every `held` photo of [executionId] (the task was abandoned);
+  /// returns how many it removed.
+  Future<int> discardHeldPhotos(String executionId);
+
   /// Deletes [operationId] only if it is an `evidencePhoto` row not yet
-  /// delivered and not in flight (`pending`, `failed` or `blocked`); returns
-  /// whether it did. A `synced` or `sending` row, or a non-photo one, is left
-  /// untouched and yields `false`.
+  /// delivered and not in flight (`pending`, `failed`, `held` or `blocked`);
+  /// returns whether it did. A `synced` or `sending` row, or a non-photo one,
+  /// is left untouched and yields `false`.
   Future<bool> deletePendingPhoto(String operationId);
 }
 
@@ -173,6 +197,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
   }) async {
     // insertOrIgnore: `id` is the idempotency key, so re-enqueuing the same
     // operation (e.g. the drain retries after a flaky failure) must not throw
@@ -187,6 +212,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
             routeId: routeId,
             payloadJson: jsonEncode(payload),
             createdAt: DateTime.now().millisecondsSinceEpoch,
+            state: Value(initialState.name),
           ),
           mode: InsertMode.insertOrIgnore,
         );
@@ -263,12 +289,49 @@ class DriftLocalWriteStore implements LocalWriteStore {
             row.state.isIn([
               PendingOpState.pending.name,
               PendingOpState.failed.name,
+              PendingOpState.held.name,
               // A blocked photo waits for the worker: dropping it is one of
               // the ways out (final review I-1).
               PendingOpState.blocked.name,
             ]),
       );
     return await delete.go() > 0;
+  }
+
+  @override
+  Future<int> releaseHeldPhotos(String executionId) async {
+    final ids = await _heldPhotoIds(executionId);
+    if (ids.isEmpty) return 0;
+    final update = _db.update(_db.pendingOperations)
+      ..where((row) => row.id.isIn(ids));
+    return update.write(
+      PendingOperationsCompanion(state: Value(PendingOpState.pending.name)),
+    );
+  }
+
+  @override
+  Future<int> discardHeldPhotos(String executionId) async {
+    final ids = await _heldPhotoIds(executionId);
+    if (ids.isEmpty) return 0;
+    return (_db.delete(
+      _db.pendingOperations,
+    )..where((row) => row.id.isIn(ids))).go();
+  }
+
+  /// The ids of [executionId]'s `held` photos. The execution id lives inside
+  /// the JSON payload, so it is matched here rather than in SQL.
+  Future<List<String>> _heldPhotoIds(String executionId) async {
+    final query = _db.select(_db.pendingOperations)
+      ..where(
+        (row) =>
+            row.kind.equals(PendingOpKind.evidencePhoto.name) &
+            row.state.equals(PendingOpState.held.name),
+      );
+    final rows = await query.get();
+    return [
+      for (final row in rows.map(_toRow))
+        if (row.payload['execution_id'] == executionId) row.id,
+    ];
   }
 
   @override
@@ -311,7 +374,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
   /// Due at [now]: `pending`/`failed` past its backoff, or `sending` past
   /// its lease (both live in `nextAttemptAt`).
   Expression<bool> _dueAt($PendingOperationsTable row, int now) =>
-      row.state.isIn([for (final state in _unsentStates) state.name]) &
+      row.state.isIn([for (final state in _sendableStates) state.name]) &
       (row.nextAttemptAt.isNull() |
           row.nextAttemptAt.isSmallerOrEqualValue(now));
 

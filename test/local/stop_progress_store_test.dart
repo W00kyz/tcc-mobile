@@ -1,4 +1,8 @@
+import 'dart:io';
+
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 
 import '../support/in_memory_database.dart';
@@ -92,5 +96,74 @@ void main() {
       (await store.progressFor('stop-2'))!.status,
       StopLocalStatus.inProgress,
     );
+  });
+
+  test('markStamped stores the status and the observation', () async {
+    await store.upsertInProgress('s1', 'exec-1');
+
+    await store.markStamped('s1', observation: 'pia');
+
+    final entry = await store.progressFor('s1');
+    expect(entry!.status, StopLocalStatus.stamped);
+    expect(entry.observation, 'pia');
+    expect(entry.executionId, 'exec-1');
+  });
+
+  test('markStamped without a note leaves the observation null', () async {
+    await store.upsertInProgress('s1', 'exec-1');
+
+    await store.markStamped('s1');
+
+    expect((await store.progressFor('s1'))!.observation, isNull);
+  });
+
+  test('markStamped bumps updatedAt', () async {
+    await store.upsertInProgress('s1', 'exec-1');
+    final before = (await store.progressFor('s1'))!.updatedAt;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+
+    await store.markStamped('s1');
+
+    final after = (await store.progressFor('s1'))!.updatedAt;
+    expect(after.isAfter(before), isTrue);
+  });
+
+  test('markStamped on an untouched stop is a no-op', () async {
+    await store.markStamped('s-never', observation: 'x');
+
+    expect(await store.progressFor('s-never'), isNull);
+  });
+
+  test('markDone after markStamped keeps the observation', () async {
+    await store.upsertInProgress('s1', 'exec-1');
+    await store.markStamped('s1', observation: 'pia');
+
+    await store.markDone('s1');
+
+    final entry = await store.progressFor('s1');
+    expect(entry!.status, StopLocalStatus.done);
+    expect(entry.observation, 'pia');
+  });
+
+  test('a stamped stop and its note survive closing the database', () async {
+    final file = File(
+      '${Directory.systemTemp.path}/stamped_'
+      '${DateTime.now().microsecondsSinceEpoch}.sqlite',
+    );
+    addTearDown(() {
+      if (file.existsSync()) file.deleteSync();
+    });
+    final first = AppDatabase(NativeDatabase(file));
+    final firstStore = DriftStopProgressStore(first);
+    await firstStore.upsertInProgress('s1', 'exec-1');
+    await firstStore.markStamped('s1', observation: 'pia');
+    await first.close();
+
+    final second = AppDatabase(NativeDatabase(file));
+    addTearDown(second.close);
+    final entry = await DriftStopProgressStore(second).progressFor('s1');
+
+    expect(entry!.status, StopLocalStatus.stamped);
+    expect(entry.observation, 'pia');
   });
 }

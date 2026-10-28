@@ -7,9 +7,12 @@ import 'package:route_monitor/local/app_database.dart';
 /// so the app remembers what the check-in/check-out responses told it.
 ///
 /// `.name` here is NOT what lands in the column — the `local_status` column
-/// stores `'IN_PROGRESS'` / `'DONE'` (schema 3), so the mapping is explicit
+/// stores `'IN_PROGRESS'` / `'STAMPED'` / `'DONE'`, so the mapping is explicit
 /// in `_statusColumn` / `_statusFromColumn`.
-enum StopLocalStatus { inProgress, done }
+///
+/// `stamped` is a task the worker finished on its floor (photos and note
+/// taken) whose check-out has not been made yet.
+enum StopLocalStatus { inProgress, stamped, done }
 
 /// A decoded `StopProgress` row, free of any Drift type.
 class StopProgressEntry {
@@ -18,6 +21,7 @@ class StopProgressEntry {
     required this.executionId,
     required this.status,
     required this.updatedAt,
+    this.observation,
   });
 
   final String routeStopId;
@@ -26,6 +30,9 @@ class StopProgressEntry {
 
   /// Last local change to the row (check-in or check-out time).
   final DateTime updatedAt;
+
+  /// The note left when the task was stamped; null when none.
+  final String? observation;
 }
 
 /// One row per stop the worker touched: written `inProgress` on check-in
@@ -33,6 +40,10 @@ class StopProgressEntry {
 /// no longer deletes the row, it marks it DONE).
 abstract class StopProgressStore {
   Future<void> upsertInProgress(String routeStopId, String executionId);
+
+  /// Flips the stop to `stamped`, keeping [observation] (the worker's note,
+  /// possibly null) and bumping `updatedAt`. No-op for an untouched stop.
+  Future<void> markStamped(String routeStopId, {String? observation});
 
   Future<void> markDone(String routeStopId);
 
@@ -65,6 +76,19 @@ class DriftStopProgressStore implements StopProgressStore {
             updatedAt: DateTime.now().millisecondsSinceEpoch,
           ),
         );
+  }
+
+  @override
+  Future<void> markStamped(String routeStopId, {String? observation}) {
+    final update = _db.update(_db.stopProgress)
+      ..where((row) => row.routeStopId.equals(routeStopId));
+    return update.write(
+      StopProgressCompanion(
+        localStatus: Value(_statusColumn(StopLocalStatus.stamped)),
+        observation: Value(observation),
+        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+      ),
+    );
   }
 
   @override
@@ -105,12 +129,14 @@ class DriftStopProgressStore implements StopProgressStore {
       executionId: row.executionId,
       status: _statusFromColumn(row.localStatus),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(row.updatedAt),
+      observation: row.observation,
     );
   }
 
   static String _statusColumn(StopLocalStatus status) {
     return switch (status) {
       StopLocalStatus.inProgress => 'IN_PROGRESS',
+      StopLocalStatus.stamped => 'STAMPED',
       StopLocalStatus.done => 'DONE',
     };
   }
@@ -118,11 +144,12 @@ class DriftStopProgressStore implements StopProgressStore {
   static StopLocalStatus _statusFromColumn(String value) {
     return switch (value) {
       'IN_PROGRESS' => StopLocalStatus.inProgress,
+      'STAMPED' => StopLocalStatus.stamped,
       'DONE' => StopLocalStatus.done,
       _ => throw ArgumentError.value(
         value,
         'local_status',
-        'expected "IN_PROGRESS" or "DONE"',
+        'expected "IN_PROGRESS", "STAMPED" or "DONE"',
       ),
     };
   }

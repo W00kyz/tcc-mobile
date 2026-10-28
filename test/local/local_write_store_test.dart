@@ -400,4 +400,88 @@ void main() {
       expect(after.nextAttemptAt, isNull);
     });
   });
+
+  group('held photos', () {
+    Future<void> enqueueHeld(String id, String executionId) => store.enqueue(
+      id: id,
+      kind: PendingOpKind.evidencePhoto,
+      payload: {'execution_id': executionId},
+      routeId: 'route-A',
+      initialState: PendingOpState.held,
+    );
+
+    test('a held photo is unsent but never due', () async {
+      await enqueueHeld('p-held', 'e1');
+
+      final unsent = await store.unsyncedForRoute('route-A');
+      expect(unsent.single.state, PendingOpState.held);
+      expect(await store.dueForRoute('route-A', now: 1 << 40), isEmpty);
+      expect(await store.routeIdsWithWork(), ['route-A']);
+    });
+
+    test('a held photo counts toward localPhotoCountFor', () async {
+      await enqueueHeld('p-held', 'e1');
+      await enqueueHeld('p-other', 'e2');
+
+      expect(await store.localPhotoCountFor('e1'), 1);
+      expect(await store.localPhotoCountFor('e2'), 1);
+    });
+
+    test('deletePendingPhoto deletes a held photo', () async {
+      await enqueueHeld('p-held', 'e1');
+
+      expect(await store.deletePendingPhoto('p-held'), isTrue);
+      expect(await store.unsyncedForRoute('route-A'), isEmpty);
+    });
+
+    test('releaseHeldPhotos makes only that execution due', () async {
+      await enqueueHeld('p1', 'e1');
+      await enqueueHeld('p2', 'e2');
+
+      expect(await store.releaseHeldPhotos('e1'), 1);
+
+      final due = await store.dueForRoute('route-A', now: 0);
+      expect(due.map((r) => r.id), ['p1']);
+      expect(due.single.state, PendingOpState.pending);
+      expect(await store.releaseHeldPhotos('e1'), 0);
+    });
+
+    test(
+      'releaseHeldPhotos leaves non-held and non-photo rows alone',
+      () async {
+        await store.enqueue(
+          id: 'p-pending',
+          kind: PendingOpKind.evidencePhoto,
+          payload: {'execution_id': 'e1'},
+          routeId: 'route-A',
+        );
+        await store.enqueue(
+          id: 'note',
+          kind: PendingOpKind.evidenceNote,
+          payload: {'execution_id': 'e1'},
+          routeId: 'route-A',
+          initialState: PendingOpState.held,
+        );
+
+        expect(await store.releaseHeldPhotos('e1'), 0);
+        expect(await store.discardHeldPhotos('e1'), 0);
+        expect(await store.unsyncedForRoute('route-A'), hasLength(2));
+      },
+    );
+
+    test(
+      'discardHeldPhotos deletes them and keeps another execution',
+      () async {
+        await enqueueHeld('p1', 'e1');
+        await enqueueHeld('p2', 'e2');
+
+        expect(await store.discardHeldPhotos('e1'), 1);
+
+        final left = await store.unsyncedForRoute('route-A');
+        expect(left.map((r) => r.id), ['p2']);
+        expect(left.single.state, PendingOpState.held);
+        expect(await store.localPhotoCountFor('e1'), 0);
+      },
+    );
+  });
 }

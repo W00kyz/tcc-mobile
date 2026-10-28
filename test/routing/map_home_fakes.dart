@@ -194,6 +194,7 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
   }) async {
     // insertOrIgnore, like the real store.
     if (_rows.containsKey(id)) return false;
@@ -203,7 +204,7 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
       routeId: routeId,
       payload: payload,
       createdAt: _rows.length,
-      state: PendingOpState.pending,
+      state: initialState,
       lastError: null,
       attempts: 0,
       nextAttemptAt: null,
@@ -247,6 +248,33 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
           )
           .toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+  @override
+  Future<int> releaseHeldPhotos(String executionId) async =>
+      _moveHeldPhotos(executionId, release: true);
+
+  @override
+  Future<int> discardHeldPhotos(String executionId) async =>
+      _moveHeldPhotos(executionId, release: false);
+
+  int _moveHeldPhotos(String executionId, {required bool release}) {
+    final held = _rows.values
+        .where(
+          (row) =>
+              row.kind == PendingOpKind.evidencePhoto &&
+              row.state == PendingOpState.held &&
+              row.payload['execution_id'] == executionId,
+        )
+        .toList();
+    for (final row in held) {
+      if (release) {
+        _setState(row.id, PendingOpState.pending);
+      } else {
+        _rows.remove(row.id);
+      }
+    }
+    return held.length;
+  }
 
   @override
   Future<int> localPhotoCountFor(String executionId) async => _rows.values
@@ -337,6 +365,10 @@ class FakeStopProgressStore implements StopProgressStore {
       status: StopLocalStatus.done,
     );
   }
+
+  @override
+  Future<void> markStamped(String routeStopId, {String? observation}) =>
+      throw UnimplementedError();
 
   @override
   Future<StopProgressEntry?> progressFor(String routeStopId) async =>

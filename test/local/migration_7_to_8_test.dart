@@ -104,7 +104,7 @@ void main() {
     expect(await store.all(), isEmpty);
     await store.recordStopDone(DateTime(2026, 10, 21, 9));
     expect((await store.all()).single.pointsDone, 1);
-    expect(db.schemaVersion, 8);
+    expect(db.schemaVersion, 9);
   });
 
   test('7 to 8 keeps every outbox row unchanged', () async {

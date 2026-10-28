@@ -209,6 +209,10 @@ class _FakeStopProgressStore implements StopProgressStore {
   }
 
   @override
+  Future<void> markStamped(String routeStopId, {String? observation}) =>
+      throw UnimplementedError();
+
+  @override
   Future<StopProgressEntry?> progressFor(String routeStopId) async =>
       rows[routeStopId];
 
@@ -307,6 +311,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
   }) async {
     seed(
       id,
@@ -380,6 +385,14 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   );
 
   @override
+  Future<int> releaseHeldPhotos(String executionId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<int> discardHeldPhotos(String executionId) =>
+      throw UnimplementedError();
+
+  @override
   Future<int> localPhotoCountFor(String executionId) =>
       throw UnimplementedError();
 
@@ -394,7 +407,8 @@ class _FakeLocalWriteStore implements LocalWriteStore {
               r.routeId == routeId &&
               (r.state == PendingOpState.pending ||
                   r.state == PendingOpState.failed ||
-                  r.state == PendingOpState.sending),
+                  r.state == PendingOpState.sending ||
+                  r.state == PendingOpState.held),
         ),
       );
 
@@ -1042,6 +1056,23 @@ void main() {
         expect(h.log, ['checkIn:c']);
       },
     );
+
+    test('a held photo holds nothing back and is never sent', () async {
+      final h = _Harness();
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed(
+          'b',
+          kind: PendingOpKind.evidencePhoto,
+          createdAt: 2,
+          state: PendingOpState.held,
+        );
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['checkIn:a']);
+      expect(h.store.rows['b']!.state, PendingOpState.held);
+    });
 
     test('the sent row is claimed for the send lease, then settled', () async {
       final h = _Harness();

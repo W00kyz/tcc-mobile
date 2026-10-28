@@ -113,7 +113,7 @@ void main() {
     expect(blocked.single.id, 'op-1');
     expect(blocked.single.releasedStopId, isNull);
     expect(pending.single.id, 'op-2');
-    expect(db.schemaVersion, 8);
+    expect(db.schemaVersion, 9);
   });
 
   test('5 to 6 adds the released-stops table, empty', () async {

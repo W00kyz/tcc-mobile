@@ -18,6 +18,7 @@ class GatedLocalWriteStore extends InMemoryLocalWriteStore {
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
   }) async {
     if (kind == PendingOpKind.checkOut) await gate.future;
     final inserted = await super.enqueue(
@@ -25,6 +26,7 @@ class GatedLocalWriteStore extends InMemoryLocalWriteStore {
       kind: kind,
       payload: payload,
       routeId: routeId,
+      initialState: initialState,
     );
     if (kind == PendingOpKind.checkOut) checkOutWritten = true;
     return inserted;

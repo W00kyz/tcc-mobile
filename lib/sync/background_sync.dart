@@ -80,7 +80,10 @@ final appForegroundTrackerProvider = Provider<AppForegroundTracker>(
 Future<bool> hasPendingWork(LocalWriteStore store) async {
   for (final routeId in await store.routeIdsWithWork()) {
     final scope = BlockedScope(await store.blockedForRoute(routeId));
-    final unsent = await store.unsyncedForRoute(routeId);
+    final unsent = (await store.unsyncedForRoute(routeId)).where(
+      // A `held` photo waits for its stamp: a retry would find nothing to do.
+      (row) => row.state != PendingOpState.held,
+    );
     if (scope.deliverable(unsent).isNotEmpty) return true;
   }
   return false;
