@@ -42,6 +42,7 @@ Marker buildingMarker(
   required bool selected,
   required bool dimmed,
   required VoidCallback? onTap,
+  bool showLabel = true,
 }) {
   return Marker(
     key: ValueKey('marker-${group.buildingId}'),
@@ -67,11 +68,52 @@ Marker buildingMarker(
             group: group,
             selected: selected,
             dimmed: dimmed,
+            showLabel: showLabel,
             inProgress: group.slots.any((s) => s.state == SlotState.inProgress),
           ),
         ),
       ),
     ),
+  );
+}
+
+/// Diameter of a circle on the route line, in logical pixels.
+const double _lineCircleDiameter = 12;
+
+/// Uber-style circles on the route line (redesign, 2026-10-28): one where
+/// each drawn leg ends — its real line endpoint, which OSRM may snap a few
+/// metres off the stop — and one where the live approach starts. A done
+/// destination fills moss; the next one gets a thicker ring. The worker's
+/// own dot stays the [workerMarker] drawn above these.
+///
+///     CircleLayer(circles: routeLineCircles(data, palette));
+List<CircleMarker> routeLineCircles(RouteMapData data, FieldPalette p) {
+  final approach = data.approach;
+  return [
+    if (approach != null && approach.points.isNotEmpty)
+      _lineCircle(approach.points.first, p.white, p.ink, 2),
+    // The next destination last, so it sits on top of any it overlaps.
+    for (final leg in data.drawnLegs.where((l) => l.kind != LegKind.next))
+      ?_destinationCircle(leg, p),
+    for (final leg in data.drawnLegs.where((l) => l.kind == LegKind.next))
+      ?_destinationCircle(leg, p),
+  ];
+}
+
+CircleMarker? _destinationCircle(RouteMapLeg leg, FieldPalette p) {
+  if (leg.points.isEmpty) return null;
+  final end = leg.points.last;
+  if (leg.destinationDone) return _lineCircle(end, p.moss, p.moss, 2);
+  return _lineCircle(end, p.white, p.ink, leg.kind == LegKind.next ? 3 : 2);
+}
+
+CircleMarker _lineCircle(LatLng point, Color fill, Color ring, double width) {
+  return CircleMarker(
+    point: point,
+    radius: _lineCircleDiameter / 2,
+    color: fill,
+    borderColor: ring,
+    borderStrokeWidth: width,
   );
 }
 

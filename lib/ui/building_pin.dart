@@ -13,12 +13,15 @@ String truncateLabel(String name) => name.length <= _maxLabelChars
     : '${name.substring(0, _maxLabelChars - 1)}…';
 
 /// A building on the map: a 40dp circle with `done/total` and the name beside.
+/// The map hides the name when zoomed out ([showLabel] false); the circle and
+/// its count always stay.
 class BuildingPin extends StatelessWidget {
   const BuildingPin({
     required this.group,
     this.selected = false,
     this.dimmed = false,
     this.inProgress = false,
+    this.showLabel = true,
     super.key,
   });
 
@@ -26,6 +29,7 @@ class BuildingPin extends StatelessWidget {
   final bool selected;
   final bool dimmed;
   final bool inProgress;
+  final bool showLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -35,9 +39,12 @@ class BuildingPin extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _circle(p),
-          const SizedBox(width: 6),
-          _label(p),
+          // Zoomed out, the name is not drawn but still read aloud.
+          if (showLabel)
+            _circle(p)
+          else
+            Semantics(label: group.buildingName, child: _circle(p)),
+          if (showLabel) ...[const SizedBox(width: 6), _label(p)],
         ],
       ),
     );

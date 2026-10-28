@@ -21,6 +21,8 @@ import 'package:route_monitor/monitoring/location_mode.dart';
 import 'package:route_monitor/monitoring/monitoring_api.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
+import 'package:route_monitor/routing/approach_api.dart';
+import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -39,6 +41,7 @@ import '../support/fake_connectivity.dart';
 import '../support/fake_day_log_store.dart';
 import '../support/fake_sync_notification_taps.dart';
 import '../support/in_memory_database.dart';
+import 'fake_approach_api.dart';
 import 'map_home_fakes.dart';
 import 'no_tiles_tile_provider.dart';
 
@@ -67,6 +70,7 @@ Widget homeWith(
   ReleasedStopStore? releasedStopStore,
   SyncNotificationTaps? notificationTaps,
   DayLogStore? dayLogStore,
+  ApproachApi? approachApi,
 }) {
   final progress = stopProgressStore ?? FakeStopProgressStore();
   final store = localWriteStore ?? InMemoryLocalWriteStore();
@@ -95,6 +99,8 @@ Widget homeWith(
       locationServiceProvider.overrideWithValue(
         locationService ?? FakeLocationService(),
       ),
+      // The live first leg asks the server once a position is known.
+      approachApiProvider.overrideWithValue(approachApi ?? FakeApproachApi()),
       // Online unless a test says otherwise: the next-batch controller the
       // screen mounts must never reach the real connectivity_plus plugin.
       connectivityProvider.overrideWithValue(

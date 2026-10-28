@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:pmtiles/pmtiles.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/campus_map_layers.dart';
+import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
@@ -22,7 +23,7 @@ import 'package:vector_tile_renderer/vector_tile_renderer.dart'
 /// kept apart from the widget so it can be unit-tested without `pumpWidget`
 /// (Ruling 10 — the map stays a thin seam over flutter_map + vector_map_tiles).
 class RouteMapData {
-  RouteMapData({required this.stops, required this.legs});
+  RouteMapData({required this.stops, required this.legs, this.approach});
 
   /// The stops in visiting order.
   final List<RouteMapStop> stops;
@@ -30,6 +31,20 @@ class RouteMapData {
   /// One leg per stop after the first: `legs[i]` joins `stops[i]` to
   /// `stops[i + 1]`.
   final List<RouteMapLeg> legs;
+
+  /// The live first leg, from the worker to the next stop; null without a
+  /// worker position. Kept out of [legs] so the camera does not re-frame
+  /// every time the worker moves.
+  final RouteMapLeg? approach;
+
+  /// What the map strokes: [legs], then [approach]. While an approach is
+  /// live, the server's leg into the next stop (it starts at the previous
+  /// stop, not at the worker) is hidden rather than drawn twice.
+  List<RouteMapLeg> get drawnLegs => [
+    for (final leg in legs)
+      if (approach == null || leg.kind != LegKind.next) leg,
+    ?approach,
+  ];
 }
 
 /// A single numbered pin on the map.
@@ -61,6 +76,7 @@ class RouteMapLeg {
     required this.points,
     required this.approximate,
     this.kind = LegKind.rest,
+    this.destinationDone = false,
   });
 
   /// The polyline vertices, in `LatLng(lat, lng)` order.
@@ -73,6 +89,9 @@ class RouteMapLeg {
 
   /// Drives the stroke: `rule` walked, moss 6px next, ink 3px rest.
   final LegKind kind;
+
+  /// The stop this leg reaches is done: its circle on the line fills moss.
+  final bool destinationDone;
 }
 
 /// Pure transform from the API summary to what the map draws: the current
@@ -83,13 +102,18 @@ class RouteMapLeg {
 /// [RouteMapLeg.approximate] leg between it and its predecessor. Each leg
 /// takes its [LegKind] from the stop it leads to, as [card] draws that stop
 /// (the server status alone when no card is given): a done stop's leg was
-/// walked, the next stop's leg is the next one.
+/// walked, the next stop's leg is the next one. A live [approach] becomes
+/// [RouteMapData.approach], drawn as the next leg.
 ///
 /// ```dart
-/// final data = buildRouteMapData(route, card: card);
+/// final data = buildRouteMapData(route, card: card, approach: approach);
 /// CampusMap(data: data);
 /// ```
-RouteMapData buildRouteMapData(RouteSummary route, {BatchCard? card}) {
+RouteMapData buildRouteMapData(
+  RouteSummary route, {
+  BatchCard? card,
+  LiveApproach? approach,
+}) {
   final batchStops = route.currentBatchStops;
   final states = {
     for (final slot
@@ -120,6 +144,7 @@ RouteMapData buildRouteMapData(RouteSummary route, {BatchCard? card}) {
           ],
           approximate: false,
           kind: _legKind(states[current.id]),
+          destinationDone: states[current.id] == SlotState.done,
         ),
       );
     } else {
@@ -131,19 +156,34 @@ RouteMapData buildRouteMapData(RouteSummary route, {BatchCard? card}) {
           ],
           approximate: true,
           kind: _legKind(states[current.id]),
+          destinationDone: states[current.id] == SlotState.done,
         ),
       );
     }
   }
 
-  return RouteMapData(stops: stops, legs: legs);
+  return RouteMapData(
+    stops: stops,
+    legs: legs,
+    approach: approach == null ? null : _approachLeg(approach),
+  );
 }
+
+RouteMapLeg _approachLeg(LiveApproach approach) => RouteMapLeg(
+  points: approach.points,
+  approximate: approach.approximate,
+  kind: LegKind.next,
+);
 
 LegKind _legKind(SlotState? destination) => switch (destination) {
   SlotState.done || SlotState.released => LegKind.walked,
   SlotState.next => LegKind.next,
   _ => LegKind.rest,
 };
+
+/// From here up the building pins show their names (the middle of the
+/// 12–19 zoom range); below, only the circle and its `n/m`.
+const double kPinLabelMinZoom = 15.5;
 
 /// Where the map opens when there is nothing to fit (no route yet): the
 /// UFCG Campina Grande campus.
@@ -225,13 +265,21 @@ class CampusMap extends StatelessWidget {
               ground: p.mapGround,
             ),
             PolylineLayer(
-              polylines: [for (final leg in data.legs) legPolyline(leg, p)],
+              polylines: [
+                for (final leg in data.drawnLegs) legPolyline(leg, p),
+              ],
             ),
-            MarkerLayer(markers: _markers(p)),
+            CircleLayer(circles: routeLineCircles(data, p)),
+            // Rebuilt with the camera: the pin labels follow the zoom.
+            Builder(
+              builder: (context) => MarkerLayer(
+                markers: _markers(p, MapCamera.of(context).zoom),
+              ),
+            ),
             _RefitOnNewRoute(points: _allPoints, padding: overlayPadding),
           ],
         ),
-        if (data.legs.any((leg) => leg.approximate))
+        if (data.drawnLegs.any((leg) => leg.approximate))
           ApproximateLegend(padding: overlayPadding),
       ],
     );
@@ -253,7 +301,7 @@ class CampusMap extends StatelessWidget {
     );
   }
 
-  List<Marker> _markers(FieldPalette p) {
+  List<Marker> _markers(FieldPalette p, double zoom) {
     final selected = selectedBuildingId;
     final position = workerPosition;
     return [
@@ -263,6 +311,8 @@ class CampusMap extends StatelessWidget {
           group,
           selected: group.buildingId == selected,
           dimmed: selected != null && group.buildingId != selected,
+          // A selected pin keeps its name at any zoom.
+          showLabel: zoom >= kPinLabelMinZoom || group.buildingId == selected,
           onTap: onPinTap == null ? null : () => onPinTap!(group),
         ),
     ];

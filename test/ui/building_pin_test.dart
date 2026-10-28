@@ -114,4 +114,14 @@ void main() {
     );
     expect(t.widget<Opacity>(find.byType(Opacity)).opacity, 0.4);
   });
+
+  testWidgets('showLabel false hides the name, never the count', (t) async {
+    await t.pumpWidget(
+      host(BuildingPin(group: group('Central de Aulas'), showLabel: false)),
+    );
+
+    expect(find.text('1/3'), findsOneWidget);
+    expect(find.text('Central de Aulas'), findsNothing);
+    expect(find.bySemanticsLabel(RegExp('Central de Aulas')), findsOneWidget);
+  });
 }

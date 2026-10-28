@@ -19,6 +19,7 @@ import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/day_state_panels.dart';
 import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/home_top_bar.dart';
+import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
@@ -77,7 +78,6 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     contextOf: () => mounted ? context : null,
     sheet: _sheet,
   );
-  LatLng? _workerPosition;
 
   /// The card last drawn, so the stamp listener finds the stop's building.
   BatchCard? _card;
@@ -229,10 +229,14 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     return CampusMap(
       data: card == null
           ? RouteMapData(stops: const [], legs: const [])
-          : buildRouteMapData(route!, card: card),
+          : buildRouteMapData(
+              route!,
+              card: card,
+              approach: watchLiveApproach(ref, route, card),
+            ),
       groups: card?.groups ?? const [],
       selectedBuildingId: selected?.buildingId,
-      workerPosition: _workerPosition,
+      workerPosition: ref.watch(workerPositionProvider),
       controller: _map,
       onPinTap: _selectBuilding,
       onMapTap: _clearSelection,
@@ -455,7 +459,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
           .getCurrentPosition(purpose: LocationPurpose.tracking);
       if (!mounted) return;
       final position = LatLng(here.latitude, here.longitude);
-      setState(() => _workerPosition = position);
+      ref.read(workerPositionProvider.notifier).update(position);
       _map.move(position, _map.camera.zoom);
       // Deliberately broad, like the check-in's GPS read: any failure means
       // "no position now", never a crash.
