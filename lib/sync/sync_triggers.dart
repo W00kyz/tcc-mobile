@@ -8,6 +8,8 @@ import 'package:route_monitor/appeals/appeal_providers.dart'
 import 'package:route_monitor/monitoring/monitoring_providers.dart'
     show notificationsProvider, unreadCountProvider;
 import 'package:route_monitor/routing/route_providers.dart' show myDayProvider;
+import 'package:route_monitor/sync/background_sync.dart'
+    show appForegroundTrackerProvider;
 import 'package:route_monitor/sync/sync_providers.dart';
 
 /// App-wide observer that drains the outbox on the two automatic triggers of
@@ -15,6 +17,10 @@ import 'package:route_monitor/sync/sync_providers.dart';
 /// foreground (`AppLifecycleState.resumed`) and connectivity being regained
 /// (`Connectivity.onOnlineChanged`). The post-enqueue kick (Task 8) and the
 /// manual "Sincronizar agora" button (Task 11) cover the other two.
+///
+/// It also tells the background drain whether the app is in the foreground
+/// (no OS notification then) and, when the app is paused with rows still
+/// owed, schedules that drain (redesign §6.9).
 ///
 /// Mounted once, wrapping every route via `MaterialApp.router`'s `builder`:
 ///
@@ -46,6 +52,9 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
         .read(connectivityProvider)
         .onOnlineChanged
         .listen((_) => _sync());
+    // Mounted means on screen: a flag left at "background" by a killed
+    // process must not let the drain notify over the open app.
+    unawaited(ref.read(appForegroundTrackerProvider).entered());
   }
 
   @override
@@ -57,19 +66,22 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _sync();
+    final tracker = ref.read(appForegroundTrackerProvider);
+    if (state == AppLifecycleState.paused) unawaited(tracker.left());
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(tracker.entered());
+    _sync();
   }
 
   /// Fire-and-forget: a trigger asks the worker to drain, it does not wait for
   /// the pass. `SyncWorker` already guards against overlapping drains.
   ///
-  /// Also invalidates `myDayProvider` (Task 14) so a resume/reconnect
-  /// re-fetches the day — which in turn feeds `formReconciliationProvider`
-  /// fresh `FormSchema`s to diff local drafts against (RF39/RF40), and lets
-  /// the next-batch controller see a batch finished while the app was away.
+  /// Also invalidates `myDayProvider` so a resume/reconnect re-fetches the
+  /// day, which lets the next-batch controller see a batch finished while
+  /// the app was away.
   /// Gated on `Connectivity.isOnline`: a re-fetch while offline only falls
   /// back to the device snapshot, or — with none saved — throws, and
-  /// `route_screen.dart`'s error branch would replace the whole,
+  /// the map home's error panel would replace the whole,
   /// still-perfectly-valid day with a generic error message.
   ///
   /// The notification providers are also refreshed here (RF49): the route

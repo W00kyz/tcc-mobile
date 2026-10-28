@@ -268,4 +268,136 @@ void main() {
       expect(reset.releasedStopId, isNull);
     },
   );
+
+  group('localPhotoCountFor', () {
+    Future<void> enqueue(
+      String id,
+      PendingOpKind kind,
+      String executionId,
+    ) => store.enqueue(
+      id: id,
+      kind: kind,
+      payload: {'execution_id': executionId},
+      routeId: 'route-A',
+    );
+
+    test(
+      'counts the execution photos in every state, and only those',
+      () async {
+        await enqueue('p-pending', PendingOpKind.evidencePhoto, 'exec-1');
+        await enqueue('p-synced', PendingOpKind.evidencePhoto, 'exec-1');
+        await enqueue('p-failed', PendingOpKind.evidencePhoto, 'exec-1');
+        await enqueue('p-blocked', PendingOpKind.evidencePhoto, 'exec-1');
+        await enqueue('p-other', PendingOpKind.evidencePhoto, 'exec-2');
+        await enqueue('note', PendingOpKind.evidenceNote, 'exec-1');
+        await enqueue('check-in', PendingOpKind.checkIn, 'exec-1');
+        await store.markSynced('p-synced');
+        await store.markFailed('p-failed', 'boom');
+        await store.markBlocked('p-blocked', 'gave up');
+
+        expect(await store.localPhotoCountFor('exec-1'), 4);
+        expect(await store.localPhotoCountFor('exec-2'), 1);
+        expect(await store.localPhotoCountFor('exec-3'), 0);
+      },
+    );
+  });
+
+  group('deletePendingPhoto', () {
+    Future<void> enqueue(String id, PendingOpKind kind) => store.enqueue(
+      id: id,
+      kind: kind,
+      payload: {'execution_id': 'exec-1'},
+      routeId: 'route-A',
+    );
+
+    test('deletes a pending or failed photo and returns true', () async {
+      await enqueue('p-pending', PendingOpKind.evidencePhoto);
+      await enqueue('p-failed', PendingOpKind.evidencePhoto);
+      await store.markFailed('p-failed', 'boom');
+
+      expect(await store.deletePendingPhoto('p-pending'), isTrue);
+      expect(await store.deletePendingPhoto('p-failed'), isTrue);
+      expect(await store.unsyncedForRoute('route-A'), isEmpty);
+      expect(await store.localPhotoCountFor('exec-1'), 0);
+    });
+
+    test('returns false for synced and non-photo rows, leaving them', () async {
+      await enqueue('p-synced', PendingOpKind.evidencePhoto);
+      await enqueue('note', PendingOpKind.evidenceNote);
+      await store.markSynced('p-synced');
+
+      expect(await store.deletePendingPhoto('p-synced'), isFalse);
+      expect(await store.deletePendingPhoto('note'), isFalse);
+      expect(await store.deletePendingPhoto('missing'), isFalse);
+      expect(await store.localPhotoCountFor('exec-1'), 1);
+      expect(await store.unsyncedForRoute('route-A'), hasLength(1));
+    });
+
+    test('deletes a blocked photo, refuses a sending one', () async {
+      await enqueue('p-blocked', PendingOpKind.evidencePhoto);
+      await enqueue('p-sending', PendingOpKind.evidencePhoto);
+      await store.markBlocked('p-blocked', 'HTTP 422');
+      await store.claim('p-sending', now: 0, leaseUntil: 100);
+
+      expect(await store.deletePendingPhoto('p-blocked'), isTrue);
+      expect(await store.deletePendingPhoto('p-sending'), isFalse);
+      expect(await store.blockedForRoute('route-A'), isEmpty);
+      expect(await store.localPhotoCountFor('exec-1'), 1);
+    });
+  });
+
+  group('claiming a row for one send (two connections, one file)', () {
+    Future<void> enqueueImpediment() => store.enqueue(
+      id: 'op-1',
+      kind: PendingOpKind.impediment,
+      payload: {'x': 1},
+      routeId: 'route-A',
+    );
+
+    test('only the first claim of a due row wins', () async {
+      await enqueueImpediment();
+
+      expect(await store.claim('op-1', now: 10, leaseUntil: 100), isTrue);
+      expect(await store.claim('op-1', now: 10, leaseUntil: 100), isFalse);
+    });
+
+    test('a claimed row is still unsent work, but not due', () async {
+      await enqueueImpediment();
+      await store.claim('op-1', now: 10, leaseUntil: 100);
+
+      expect(
+        (await store.unsyncedForRoute('route-A')).single.state,
+        PendingOpState.sending,
+      );
+      expect(await store.routeIdsWithWork(), ['route-A']);
+      expect(await store.dueForRoute('route-A', now: 50), isEmpty);
+    });
+
+    test('an expired lease makes the row due and claimable again', () async {
+      await enqueueImpediment();
+      await store.claim('op-1', now: 10, leaseUntil: 100);
+
+      expect(await store.dueForRoute('route-A', now: 100), hasLength(1));
+      expect(await store.claim('op-1', now: 100, leaseUntil: 200), isTrue);
+    });
+
+    test('a row in its retry backoff cannot be claimed', () async {
+      await enqueueImpediment();
+      await store.markRetryScheduled('op-1', attempts: 1, nextAttemptAt: 500);
+
+      expect(await store.claim('op-1', now: 10, leaseUntil: 100), isFalse);
+    });
+
+    test('releaseClaim puts the row back as it was', () async {
+      await enqueueImpediment();
+      final before = (await store.unsyncedForRoute('route-A')).single;
+      await store.claim('op-1', now: 10, leaseUntil: 100);
+
+      await store.releaseClaim(before);
+
+      final after = (await store.unsyncedForRoute('route-A')).single;
+      expect(after.state, PendingOpState.pending);
+      expect(after.nextAttemptAt, isNull);
+    });
+  });
 }

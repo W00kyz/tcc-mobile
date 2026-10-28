@@ -7,6 +7,7 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -14,6 +15,10 @@ import 'package:route_monitor/sync/sync_worker.dart';
 /// A minimal in-memory [LocalWriteStore] for the blocked-rows list — only
 /// `blockedForRoute` and `resetToPending` are exercised here.
 class _FakeLocalWriteStore implements LocalWriteStore {
+  @override
+  Future<bool> deletePendingPhoto(String operationId) =>
+      throw UnimplementedError();
+
   final Map<String, PendingOperationRow> rows = {};
 
   void seedBlocked(
@@ -126,6 +131,9 @@ class _FakeSyncWorker implements SyncWorker {
 
   @override
   Stream<RouteSyncStatus> statusFor(String routeId) => const Stream.empty();
+
+  @override
+  Stream<SyncProgress> get progress => const Stream.empty();
 
   @override
   Future<void> dispose() async {}

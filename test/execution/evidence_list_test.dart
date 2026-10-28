@@ -1,17 +1,25 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 
 class _FakeEvidenceApi implements EvidenceApi {
-  _FakeEvidenceApi(this.items);
+  _FakeEvidenceApi(this.items, {this.error});
   final List<EvidenceItem> items;
 
+  /// Thrown by `listEvidence` when set (a failed network call).
+  final Exception? error;
+
   @override
-  Future<List<EvidenceItem>> listEvidence(String executionId) async => items;
+  Future<List<EvidenceItem>> listEvidence(String executionId) async {
+    final failure = error;
+    if (failure != null) throw failure;
+    return items;
+  }
 
   @override
   Future<DateTime?> uploadNote({
@@ -36,7 +44,19 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   final List<PendingOperationRow> rows;
 
   @override
-  Future<void> enqueue({
+  Future<bool> claim(String id, {required int now, required int leaseUntil}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> releaseClaim(PendingOperationRow row) =>
+      throw UnimplementedError();
+
+  @override
+  Future<bool> deletePendingPhoto(String operationId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
@@ -87,6 +107,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
 
   @override
   Future<void> resetToPending(String id) => throw UnimplementedError();
+
+  @override
+  Future<int> localPhotoCountFor(String executionId) =>
+      throw UnimplementedError();
 }
 
 PendingOperationRow _row({
@@ -162,7 +186,7 @@ void main() {
       expect(entries[2].kind, 'PHOTO');
       expect(entries[2].syncState, PendingOpState.pending);
       expect(entries[2].photoBytes, [1, 2, 3]);
-      // Both sources carry the key a MEDIA answer uses to find its photos.
+      // Both sources carry the upload's idempotency key.
       expect(entries[0].idempotencyKey, 'key-synced');
       expect(entries[2].idempotencyKey, 'key-pending');
     },
@@ -202,4 +226,77 @@ void main() {
       expect(entries, isEmpty);
     },
   );
+
+  group('when the backend list cannot be fetched', () {
+    List<PendingOperationRow> twoPendingPhotos() => [
+      for (final n in [1, 2])
+        _row(
+          id: 'op-$n',
+          kind: PendingOpKind.evidencePhoto,
+          payload: {
+            'execution_id': 'exec-1',
+            'bytes_b64': base64Encode(Uint8List.fromList([n])),
+            'captured_at': '2026-08-25T08:0$n:00.000Z',
+          },
+        ),
+    ];
+
+    test('a network failure falls back to the pending local rows', () async {
+      final api = _FakeEvidenceApi(
+        const [],
+        error: DioException.connectionError(
+          requestOptions: RequestOptions(path: '/executions/exec-1/evidence'),
+          reason: 'offline',
+        ),
+      );
+
+      final entries = await loadStopEvidence(
+        store: _FakeLocalWriteStore(twoPendingPhotos()),
+        api: api,
+        routeId: 'route-A',
+        executionId: 'exec-1',
+      );
+
+      expect(entries.where((e) => e.kind == 'PHOTO'), hasLength(2));
+    });
+
+    test('an HTTP error response still propagates', () {
+      final request = RequestOptions(path: '/executions/exec-1/evidence');
+      final api = _FakeEvidenceApi(
+        const [],
+        error: DioException.badResponse(
+          statusCode: 404,
+          requestOptions: request,
+          response: Response<void>(requestOptions: request, statusCode: 404),
+        ),
+      );
+
+      expect(
+        loadStopEvidence(
+          store: _FakeLocalWriteStore(twoPendingPhotos()),
+          api: api,
+          routeId: 'route-A',
+          executionId: 'exec-1',
+        ),
+        throwsA(isA<DioException>()),
+      );
+    });
+
+    test('a non-Dio error still propagates', () {
+      final api = _FakeEvidenceApi(
+        const [],
+        error: const FormatException('boom'),
+      );
+
+      expect(
+        loadStopEvidence(
+          store: _FakeLocalWriteStore(twoPendingPhotos()),
+          api: api,
+          routeId: 'route-A',
+          executionId: 'exec-1',
+        ),
+        throwsFormatException,
+      );
+    });
+  });
 }

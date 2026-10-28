@@ -12,6 +12,7 @@ import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/stop_release.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
@@ -45,8 +46,6 @@ class _FakeExecutionApi implements ExecutionApi {
   /// When set, every check-in waits on it — holds a drain pass mid-flight.
   Completer<void>? checkInGate;
   double? lastClientClockOffset;
-  String? lastFormVersionId;
-  List<Map<String, Object?>>? lastAnswers;
   ({
     String routeId,
     String? routeStopId,
@@ -97,12 +96,9 @@ class _FakeExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-    String? formVersionId,
-    List<Map<String, Object?>>? answers,
+    String? complaintsSuggestions,
   }) async {
     log.add('checkOut:$checkoutIdempotencyKey');
-    lastFormVersionId = formVersionId;
-    lastAnswers = answers;
     final error = checkOutError;
     if (error != null) {
       if (consumeError) checkOutError = null;
@@ -192,6 +188,7 @@ class _FakeStopProgressStore implements StopProgressStore {
   Future<void> upsertInProgress(String routeStopId, String executionId) async {
     calls.add('inProgress:$routeStopId');
     rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
       routeStopId: routeStopId,
       executionId: executionId,
       status: StopLocalStatus.inProgress,
@@ -204,6 +201,7 @@ class _FakeStopProgressStore implements StopProgressStore {
     final existing = rows[routeStopId];
     if (existing == null) return;
     rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
       routeStopId: existing.routeStopId,
       executionId: existing.executionId,
       status: StopLocalStatus.done,
@@ -228,9 +226,22 @@ class _FakeSyncMetaStore implements SyncMetaStore {
 
   @override
   Future<void> setClockOffsetSeconds(double seconds) async => offset = seconds;
+
+  bool appInForeground = false;
+
+  @override
+  Future<bool> getAppInForeground() async => appInForeground;
+
+  @override
+  Future<void> setAppInForeground({required bool inForeground}) async =>
+      appInForeground = inForeground;
 }
 
 class _FakeLocalWriteStore implements LocalWriteStore {
+  @override
+  Future<bool> deletePendingPhoto(String operationId) =>
+      throw UnimplementedError();
+
   final Map<String, PendingOperationRow> rows = {};
 
   void seed(
@@ -291,35 +302,49 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   );
 
   @override
-  Future<void> enqueue({
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
-  }) async => seed(
-    id,
-    kind: kind,
-    createdAt: rows.length,
-    payload: payload,
-    routeId: routeId,
-  );
+  }) async {
+    seed(
+      id,
+      kind: kind,
+      createdAt: rows.length,
+      payload: payload,
+      routeId: routeId,
+    );
+    return true;
+  }
 
   @override
-  Future<void> markSynced(String id) async =>
-      rows[id] = _copy(rows[id]!, state: PendingOpState.synced);
-
-  @override
-  Future<void> markFailed(String id, String error) async => rows[id] = _copy(
+  Future<void> markSynced(String id) async => rows[id] = _copy(
     rows[id]!,
-    state: PendingOpState.failed,
-    lastError: error,
+    state: PendingOpState.synced,
+    clearNextAttemptAt: true,
   );
+
+  /// When set, the next `markFailed` throws it (a store write failing
+  /// inside the dispatch's error path).
+  Error? markFailedError;
+
+  @override
+  Future<void> markFailed(String id, String error) async {
+    final failure = markFailedError;
+    if (failure != null) {
+      markFailedError = null;
+      throw failure;
+    }
+    rows[id] = _copy(rows[id]!, state: PendingOpState.failed, lastError: error);
+  }
 
   @override
   Future<void> markBlocked(String id, String error) async => rows[id] = _copy(
     rows[id]!,
     state: PendingOpState.blocked,
     lastError: error,
+    clearNextAttemptAt: true,
   );
 
   @override
@@ -332,6 +357,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     state: PendingOpState.blocked,
     lastError: error,
     releasedStopId: routeStopId,
+    clearNextAttemptAt: true,
   );
 
   @override
@@ -353,6 +379,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     clearNextAttemptAt: true,
   );
 
+  @override
+  Future<int> localPhotoCountFor(String executionId) =>
+      throw UnimplementedError();
+
   List<PendingOperationRow> _sorted(Iterable<PendingOperationRow> it) =>
       it.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
@@ -363,7 +393,8 @@ class _FakeLocalWriteStore implements LocalWriteStore {
           (r) =>
               r.routeId == routeId &&
               (r.state == PendingOpState.pending ||
-                  r.state == PendingOpState.failed),
+                  r.state == PendingOpState.failed ||
+                  r.state == PendingOpState.sending),
         ),
       );
 
@@ -381,13 +412,40 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     required int now,
   }) async => _sorted(
     rows.values.where(
-      (r) =>
-          r.routeId == routeId &&
-          (r.state == PendingOpState.pending ||
-              r.state == PendingOpState.failed) &&
-          (r.nextAttemptAt == null || r.nextAttemptAt! <= now),
+      (r) => r.routeId == routeId && _isDue(r, now),
     ),
   );
+
+  bool _isDue(PendingOperationRow r, int now) =>
+      (r.state == PendingOpState.pending ||
+          r.state == PendingOpState.failed ||
+          r.state == PendingOpState.sending) &&
+      (r.nextAttemptAt == null || r.nextAttemptAt! <= now);
+
+  /// Like the Drift store's conditional UPDATE: only a due row is taken.
+  @override
+  Future<bool> claim(
+    String id, {
+    required int now,
+    required int leaseUntil,
+  }) async {
+    final row = rows[id];
+    if (row == null || !_isDue(row, now)) return false;
+    rows[id] = _copy(
+      row,
+      state: PendingOpState.sending,
+      nextAttemptAt: leaseUntil,
+    );
+    return true;
+  }
+
+  @override
+  Future<void> releaseClaim(PendingOperationRow row) async {
+    if (rows[row.id]?.state != PendingOpState.sending) return;
+    rows[row.id] = row.state == PendingOpState.sending
+        ? _copy(row, state: PendingOpState.pending, clearNextAttemptAt: true)
+        : row;
+  }
 
   @override
   Future<List<String>> routeIdsWithWork() async => rows.values
@@ -419,14 +477,55 @@ class _FakeReleasedStopStore implements ReleasedStopStore {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+final _checkOutResponse = <String, dynamic>{
+  'route_stop_id': 'stop-1',
+  'execution_id': 'exec-1',
+  'checked_out_at': '2026-06-01T12:00:00Z',
+  'validation_flags': <String>[],
+};
+
+/// A real [Dio] whose adapter records every request and answers 200.
+Dio _capturingDio({
+  required void Function(RequestOptions) onRequest,
+  required Map<String, dynamic> body,
+}) =>
+    Dio(BaseOptions(baseUrl: 'http://test'))
+      ..httpClientAdapter = _CapturingAdapter(onRequest, body);
+
+class _CapturingAdapter implements HttpClientAdapter {
+  _CapturingAdapter(this._onRequest, this._body);
+
+  final void Function(RequestOptions) _onRequest;
+  final Map<String, dynamic> _body;
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    _onRequest(options);
+    return ResponseBody.fromString(
+      jsonEncode(_body),
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+}
+
 class _Harness {
-  _Harness() {
+  _Harness({ExecutionApi? api}) {
     worker = SyncWorker(
       store,
       stopProgress,
       syncMeta,
       connectivity,
-      executionApi,
+      api ?? executionApi,
       evidenceApi,
       releasedStops,
       now: () => now,
@@ -516,39 +615,69 @@ void main() {
     },
   );
 
+  test('legacy checkOut row with form fields is sent without them', () async {
+    // An old build queued this row before forms were removed: the payload
+    // still carries `form_version_id` / `answers`. The real DioExecutionApi
+    // is used so the assertion is on the wire body, not on a fake signature.
+    final sent = <RequestOptions>[];
+    final h = _Harness(
+      api: DioExecutionApi(
+        _capturingDio(onRequest: sent.add, body: _checkOutResponse),
+      ),
+    );
+    h.store.seed(
+      'c',
+      kind: PendingOpKind.checkOut,
+      createdAt: 1,
+      payload: {
+        ..._FakeLocalWriteStore._defaultPayload('c'),
+        'form_version_id': 'v2',
+        'answers': jsonDecode(
+          jsonEncode([
+            {'stable_key': 'q1', 'value': 'answered'},
+          ]),
+        ),
+      },
+    );
+
+    await h.worker.syncRoute('route-R');
+
+    expect(h.store.rows['c']!.state, PendingOpState.synced);
+    final body = sent.single.data as Map;
+    expect(body.containsKey('form_version_id'), isFalse);
+    expect(body.containsKey('answers'), isFalse);
+    expect(body['checkout_idempotency_key'], 'c');
+  });
+
   test(
-    'a checkOut row with form_version_id + answers in its payload passes '
-    'them through to ExecutionApi.checkOut, correctly typed after the '
-    'jsonEncode/jsonDecode round-trip',
+    'a checkOut row with complaints_suggestions sends it to the API',
     () async {
-      final h = _Harness();
-      h.store.seed(
-        'c',
-        kind: PendingOpKind.checkOut,
-        createdAt: 1,
-        payload: {
-          ..._FakeLocalWriteStore._defaultPayload('c'),
-          'form_version_id': 'v2',
-          // A round-trip through jsonEncode/jsonDecode (as the real
-          // LocalWriteStore does) leaves this a List<dynamic> of
-          // Map<String, dynamic> — reproduced here instead of a literal
-          // List<Map<String, Object?>> so the test proves the worker's cast
-          // actually copes with that shape.
-          'answers': jsonDecode(
-            jsonEncode([
-              {'stable_key': 'q1', 'value': 'answered'},
-            ]),
-          ),
-        },
+      final sent = <RequestOptions>[];
+      final h = _Harness(
+        api: DioExecutionApi(
+          _capturingDio(onRequest: sent.add, body: _checkOutResponse),
+        ),
       );
+      h.store
+        ..seed(
+          'c',
+          kind: PendingOpKind.checkOut,
+          createdAt: 1,
+          payload: {
+            ..._FakeLocalWriteStore._defaultPayload('c'),
+            'complaints_suggestions': 'Falta papel',
+          },
+        )
+        ..seed('d', kind: PendingOpKind.checkOut, createdAt: 2);
 
       await h.worker.syncRoute('route-R');
 
-      expect(h.store.rows['c']!.state, PendingOpState.synced);
-      expect(h.executionApi.lastFormVersionId, 'v2');
-      expect(h.executionApi.lastAnswers, [
-        {'stable_key': 'q1', 'value': 'answered'},
-      ]);
+      expect(sent, hasLength(2));
+      expect((sent[0].data as Map)['complaints_suggestions'], 'Falta papel');
+      expect(
+        (sent[1].data as Map).containsKey('complaints_suggestions'),
+        isFalse,
+      );
     },
   );
 
@@ -678,6 +807,8 @@ void main() {
       final row = h.store.rows['a']!;
       expect(row.state, PendingOpState.pending);
       expect(row.attempts, 0);
+      // The send claim is given back: due again at once after a login.
+      expect(row.nextAttemptAt, isNull);
       expect(h.log, ['checkIn:a']);
     },
   );
@@ -863,6 +994,119 @@ void main() {
       expect(h.deliveredScans, [DateTime.utc(2026)]);
     });
   });
+
+  group('claims and ordering across two workers', () {
+    const farFuture = 1 << 50;
+
+    test("a row another worker has claimed is not sent, nor its stop's "
+        'later rows; another stop still goes', () async {
+      final h = _Harness();
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.checkOut, createdAt: 2)
+        ..seed(
+          'c',
+          kind: PendingOpKind.checkIn,
+          createdAt: 3,
+          payload: _stopPayload('c', 'stop-2'),
+        );
+      await h.store.claim('a', now: 0, leaseUntil: farFuture);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['checkIn:c']);
+    });
+
+    test(
+      'a failed check-in still in backoff holds back its check-out',
+      () async {
+        final h = _Harness();
+        h.store
+          ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+          ..seed('b', kind: PendingOpKind.checkOut, createdAt: 2)
+          ..seed(
+            'c',
+            kind: PendingOpKind.checkIn,
+            createdAt: 3,
+            payload: _stopPayload('c', 'stop-2'),
+          );
+        await h.store.markFailed('a', 'timeout');
+        await h.store.markRetryScheduled(
+          'a',
+          attempts: 1,
+          nextAttemptAt: farFuture,
+        );
+
+        await h.worker.syncRoute('route-R');
+
+        expect(h.log, ['checkIn:c']);
+      },
+    );
+
+    test('the sent row is claimed for the send lease, then settled', () async {
+      final h = _Harness();
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+      h.executionApi.checkInGate = Completer<void>();
+
+      final pass = h.worker.syncRoute('route-R');
+      await pumpEventQueue();
+      final duringSend = h.store.rows['a']!;
+      h.executionApi.checkInGate!.complete();
+      await pass;
+
+      expect(duringSend.state, PendingOpState.sending);
+      expect(
+        duringSend.nextAttemptAt,
+        h.now.millisecondsSinceEpoch + SyncWorker.sendLease.inMilliseconds,
+      );
+      expect(h.store.rows['a']!.state, PendingOpState.synced);
+    });
+
+    test(
+      'a store write that throws mid-dispatch gives the claim back',
+      () async {
+        final h = _Harness();
+        h.store
+          ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+          ..markFailedError = StateError('database is locked');
+        h.executionApi.checkInError = _dio(status: 503);
+
+        await expectLater(h.worker.syncRoute('route-R'), throwsStateError);
+
+        final row = h.store.rows['a']!;
+        expect(row.state, PendingOpState.pending);
+        expect(row.nextAttemptAt, isNull);
+      },
+    );
+  });
+
+  test(
+    'SyncWorker.progress emits monotonically up to total during syncAll',
+    () async {
+      final h = _Harness();
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.evidenceNote, createdAt: 2)
+        ..seed(
+          'c',
+          kind: PendingOpKind.checkIn,
+          createdAt: 3,
+          routeId: 'route-S',
+        );
+      final seen = <SyncProgress>[];
+      final subscription = h.worker.progress.listen(seen.add);
+      addTearDown(subscription.cancel);
+
+      await h.worker.syncAll();
+
+      expect(seen.map((p) => (p.done, p.total)), [
+        (0, 3),
+        (1, 3),
+        (2, 3),
+        (3, 3),
+      ]);
+    },
+  );
 
   test('re-running a fully drained route makes zero API calls', () async {
     final h = _Harness();

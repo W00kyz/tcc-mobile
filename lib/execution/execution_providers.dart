@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/misc.dart' show FutureProviderFamily;
 import 'package:route_monitor/api/env.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
+import 'package:route_monitor/execution/evidence_camera.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
-import 'package:route_monitor/forms/form_providers.dart';
 import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -36,7 +37,7 @@ final localWriteStoreProvider = Provider<LocalWriteStore>(
 );
 
 /// Wraps `apiBaseUrlFromEnvironment()` for widgets that need the raw base
-/// URL rather than a whole `Dio` client — e.g. `route_screen.dart`'s
+/// URL rather than a whole `Dio` client — e.g. the stop evidence list's
 /// synced-photo thumbnail, which builds a `NetworkImage` URL by hand. Going
 /// through a provider (instead of calling the env function directly from
 /// build()) lets a test override it with a fixed value, rather than
@@ -72,10 +73,24 @@ final evidenceApiProvider = Provider<EvidenceApi>((ref) {
   return DioEvidenceApi(dio);
 });
 
-/// Real camera capture in production; RouteScreen's tests override this
-/// with a fake `EvidenceCapture` instead of touching the platform camera.
-final evidenceCaptureProvider = Provider<EvidenceCapture>(
-  (ref) => DeviceEvidenceCapture(),
+/// The in-app photo camera; the photo-sequence tests override it with a fake
+/// `EvidenceCamera` instead of touching the platform camera.
+final evidenceCameraProvider = Provider<EvidenceCamera>(
+  (ref) => DeviceEvidenceCamera(),
+);
+
+/// Compresses a camera file into a `CapturedPhoto`; a seam so tests skip the
+/// platform compression channel.
+final capturedFileCompressorProvider =
+    Provider<Future<CapturedPhoto> Function(String path)>(
+      (ref) => compressCapturedFile,
+    );
+
+/// The personal day log behind the streak and achievements (redesign §6.8).
+/// Here, beside the other stores, because the check-out writes it in its own
+/// transaction.
+final dayLogStoreProvider = Provider<DayLogStore>(
+  (ref) => DriftDayLogStore(ref.watch(appDatabaseProvider)),
 );
 
 final executionRepositoryProvider = Provider<ExecutionRepository>(
@@ -83,13 +98,17 @@ final executionRepositoryProvider = Provider<ExecutionRepository>(
     ref.watch(localWriteStoreProvider),
     ref.watch(stopProgressStoreProvider),
     ref.watch(syncWorkerProvider),
-    ref.watch(formDraftStoreProvider),
+    // The same connection the stores above write through: the check-out's
+    // transaction must cover all three.
+    database: ref.watch(appDatabaseProvider),
+    dayLog: ref.watch(dayLogStoreProvider),
   ),
 );
 
 /// Null both for an untouched stop and for the Ruling 17 cold-start gap (a
-/// stop that turned `IN_PROGRESS` before `StopProgress` existed) — RouteScreen
-/// hides the evidence buttons entirely on null, and also on a `done` entry.
+/// stop that turned `IN_PROGRESS` before `StopProgress` existed) — the map
+/// home hides the evidence buttons entirely on null, and also on a `done`
+/// entry.
 final FutureProviderFamily<StopProgressEntry?, String> stopProgressForProvider =
     FutureProvider.family<StopProgressEntry?, String>(
       (ref, routeStopId) =>

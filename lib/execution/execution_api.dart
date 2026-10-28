@@ -96,8 +96,7 @@ abstract class ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-    String? formVersionId,
-    List<Map<String, Object?>>? answers,
+    String? complaintsSuggestions,
   });
 
   /// Signals an impossibility to execute (spec RF16-RF17): `scope='STOP'` with
@@ -188,8 +187,7 @@ class DioExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-    String? formVersionId,
-    List<Map<String, Object?>>? answers,
+    String? complaintsSuggestions,
   }) async {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
@@ -206,12 +204,7 @@ class DioExecutionApi implements ExecutionApi {
           'checkout_idempotency_key': checkoutIdempotencyKey,
           'route_stop_id': routeStopId,
           'client_clock_offset_seconds': clientClockOffsetSeconds,
-          // Task 14 — the stop's form draft, carried through only when one
-          // exists (a stop with no form, or an already-cleared draft, sends
-          // neither field, same null-when-absent convention as every other
-          // optional field above).
-          'form_version_id': formVersionId,
-          'answers': answers,
+          'complaints_suggestions': ?complaintsSuggestions,
         },
       );
       final body = response.data!;

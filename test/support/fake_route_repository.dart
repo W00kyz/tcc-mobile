@@ -13,6 +13,9 @@ RouteStopSummary stopWith({
   double latitude = -7.21,
   double longitude = -35.91,
 }) => RouteStopSummary(
+  buildingId: 'b1',
+  buildingName: 'Prédio',
+  floorLabel: 'Térreo',
   id: id,
   orderIndex: orderIndex,
   batchNumber: batchNumber,

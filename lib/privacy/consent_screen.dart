@@ -83,7 +83,9 @@ class _ConsentBody extends StatelessWidget {
         children: [
           Text(
             status.noticeTitle ?? AppStrings.consentTitle,
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 16),
           Expanded(

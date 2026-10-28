@@ -57,9 +57,9 @@ abstract class ReleasedStopStore {
   Future<List<ReleasedStopNotice>> allNotices();
 
   /// Deletes everything this device holds for [routeStopId]: its outbox rows
-  /// of every state (check-in/out with their answers, impediments, the
-  /// evidence of its execution), its form draft, its progress and its
-  /// notice. Nothing of another stop is touched.
+  /// of every state (check-in/out, impediments, the evidence of its
+  /// execution), its progress and its notice. Nothing of another stop is
+  /// touched.
   Future<void> discardStop(String routeStopId);
 }
 
@@ -151,9 +151,6 @@ class DriftReleasedStopStore implements ReleasedStopStore {
   Future<void> discardStop(String routeStopId) => _db.transaction(() async {
     final executions = await _executionsOf(routeStopId);
     await _deleteOutboxRows(routeStopId, executions);
-    await (_db.delete(
-      _db.formDraftItems,
-    )..where((r) => r.routeStopId.equals(routeStopId))).go();
     await (_db.delete(
       _db.stopProgress,
     )..where((r) => r.routeStopId.equals(routeStopId))).go();

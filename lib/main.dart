@@ -8,12 +8,13 @@ import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/auth/login_screen.dart';
 import 'package:route_monitor/auth/registration_screen.dart';
-import 'package:route_monitor/forms/form_reconciliation.dart';
+import 'package:route_monitor/gamification/profile_screen.dart';
 import 'package:route_monitor/monitoring/position_reporting_trigger.dart';
 import 'package:route_monitor/privacy/consent_screen.dart';
 import 'package:route_monitor/privacy/my_data_screen.dart';
-import 'package:route_monitor/routing/route_screen.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
+import 'package:route_monitor/ui/app_theme.dart';
 
 void main() {
   runApp(const ProviderScope(child: RouteMonitorApp()));
@@ -81,7 +82,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/consentimento',
         builder: (context, state) => const ConsentScreen(),
       ),
-      GoRoute(path: '/rota', builder: (context, state) => const RouteScreen()),
+      GoRoute(
+        path: '/rota',
+        builder: (context, state) => const MapHomeScreen(),
+      ),
       GoRoute(
         path: '/meus-dados',
         builder: (context, state) => const MyDataScreen(),
@@ -89,6 +93,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/recursos',
         builder: (context, state) => const AppealsScreen(),
+      ),
+      GoRoute(
+        path: '/perfil',
+        builder: (context, state) => const ProfileScreen(),
       ),
     ],
   );
@@ -107,16 +115,11 @@ class RouteMonitorApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp.router(
       title: 'Monitoramento de Rotas',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1B4332)),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       routerConfig: ref.watch(routerProvider),
       builder: (context, child) => SyncTriggers(
-        child: FormReconciliationTrigger(
-          child: PositionReportingTrigger(
-            child: child ?? const SizedBox.shrink(),
-          ),
+        child: PositionReportingTrigger(
+          child: child ?? const SizedBox.shrink(),
         ),
       ),
     );

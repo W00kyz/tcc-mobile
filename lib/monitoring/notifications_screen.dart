@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/notification_models.dart';
+import 'package:route_monitor/ui/empty_state.dart';
 
 /// The in-app notification list (RF49). Reached from the bell in the route
 /// screen's app bar; tapping an unread row marks it read and refreshes both
@@ -24,7 +25,13 @@ class NotificationsScreen extends ConsumerWidget {
         ),
         data: (notifications) {
           if (notifications.isEmpty) {
-            return const Center(child: Text(AppStrings.notificationsEmpty));
+            return RefreshIndicator(
+              onRefresh: () async => ref.invalidate(notificationsProvider),
+              child: const EmptyState(
+                title: AppStrings.notificationsEmpty,
+                body: AppStrings.notificationsEmptyBody,
+              ),
+            );
           }
           return RefreshIndicator(
             onRefresh: () async => ref.invalidate(notificationsProvider),
@@ -61,7 +68,7 @@ String _kindLabel(String kind) => switch (kind) {
 };
 
 /// `DD/MM HH:MM`, read straight off the timestamp (no `.toLocal()`) — the
-/// system-wide wall-clock-tagged-UTC convention, same as `route_screen`.
+/// system-wide wall-clock-tagged-UTC convention, same as the map home.
 String _formatTimestamp(DateTime when) {
   final day = when.day.toString().padLeft(2, '0');
   final month = when.month.toString().padLeft(2, '0');
@@ -82,7 +89,11 @@ class _NotificationTile extends StatelessWidget {
     return ListTile(
       onTap: onTap,
       leading: unread
-          ? const Icon(Icons.circle, size: 12, color: Colors.blue)
+          ? Icon(
+              Icons.circle,
+              size: 12,
+              color: Theme.of(context).colorScheme.secondary,
+            )
           : const SizedBox(width: 12),
       title: Text(
         notification.title,

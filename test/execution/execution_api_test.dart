@@ -162,10 +162,6 @@ void main() {
         scannedAt: DateTime.utc(2026, 8, 25, 8, 40),
         checkoutIdempotencyKey: 'idem-out-1',
         routeStopId: 's1',
-        formVersionId: 'v2',
-        answers: const [
-          {'stable_key': 'q1', 'value': 'answered'},
-        ],
       )).result;
 
       final body = captured.data as Map;
@@ -176,10 +172,6 @@ void main() {
       expect(body['scanned_at'], '2026-08-25T08:40:00.000Z');
       expect(body['checkout_idempotency_key'], 'idem-out-1');
       expect(body['route_stop_id'], 's1');
-      expect(body['form_version_id'], 'v2');
-      expect(body['answers'], [
-        {'stable_key': 'q1', 'value': 'answered'},
-      ]);
       expect(result.routeStopId, 's1');
       expect(result.executionId, 'e1');
       expect(result.checkedOutAt, DateTime.utc(2026, 8, 25, 8, 40));

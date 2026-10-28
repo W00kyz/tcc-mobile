@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/execution/execution_providers.dart'
@@ -12,6 +13,8 @@ import 'package:route_monitor/monitoring/ongoing_notification.dart';
 import 'package:route_monitor/monitoring/position_reporter.dart';
 import 'package:route_monitor/monitoring/position_source.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
+import 'package:route_monitor/routing/live_approach.dart'
+    show workerPositionProvider;
 import 'package:route_monitor/routing/route_providers.dart'
     show locationServiceProvider, myDayProvider;
 
@@ -66,6 +69,14 @@ final positionReporterProvider = Provider<PositionReporter>((ref) {
     onPositionSent: (sentAt) {
       if (!ref.mounted) return;
       ref.read(silenceWatchdogProvider)?.onActivity(sentAt);
+    },
+    // The fix the reporter already reads also moves the worker's dot and
+    // the live first leg on the map: no second GPS loop.
+    onFix: (fix) {
+      if (!ref.mounted) return;
+      ref
+          .read(workerPositionProvider.notifier)
+          .update(LatLng(fix.latitude, fix.longitude));
     },
   );
   ref.onDispose(reporter.dispose);

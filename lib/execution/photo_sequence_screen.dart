@@ -1,0 +1,402 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'package:route_monitor/execution/evidence_camera.dart';
+import 'package:route_monitor/execution/evidence_photo_count.dart';
+import 'package:route_monitor/execution/evidence_requirement.dart';
+import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/photo_sequence_viewer.dart';
+import 'package:route_monitor/execution/photo_sequence_widgets.dart';
+import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
+import 'package:route_monitor/ui/app_theme.dart';
+
+/// Opens the full-screen photo camera for one stop and returns how many
+/// photos of this session are still kept when it closes. [minimum] is
+/// `MIN_EVIDENCE_PHOTOS` for a `requires_evidence` stop, null otherwise.
+Future<int> openPhotoSequence(
+  BuildContext context, {
+  required String routeId,
+  required String executionId,
+  required String buildingName,
+  required String floorLabel,
+  required int? minimum,
+}) async {
+  final taken = await Navigator.of(context).push<int>(
+    MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (_) => PhotoSequenceScreen(
+        routeId: routeId,
+        executionId: executionId,
+        title: AppStrings.photoSequenceTitle(buildingName, floorLabel),
+        minimum: minimum,
+      ),
+    ),
+  );
+  return taken ?? 0;
+}
+
+class PhotoSequenceScreen extends ConsumerStatefulWidget {
+  const PhotoSequenceScreen({
+    required this.routeId,
+    required this.executionId,
+    required this.title,
+    required this.minimum,
+    super.key,
+  });
+
+  final String routeId;
+  final String executionId;
+  final String title;
+  final int? minimum;
+
+  @override
+  ConsumerState<PhotoSequenceScreen> createState() => _State();
+}
+
+class _State extends ConsumerState<PhotoSequenceScreen>
+    with WidgetsBindingObserver {
+  late final EvidenceCamera _camera = ref.read(evidenceCameraProvider);
+  final List<SessionShot> _shots = [];
+
+  /// Each outbox row's state by id, as last read; a shot missing here was
+  /// delivered (see [shotStatusFor]).
+  Map<String, PendingOpState> _states = {};
+  bool _ready = false;
+  bool _failed = false;
+  bool _busy = false;
+
+  /// An [_open] is in flight: a resume must not start a second one.
+  bool _opening = false;
+
+  /// The camera was let go because the app went inactive; resumed re-opens.
+  bool _released = false;
+
+  /// Went inactive mid-shot: let go of the camera once the shot settles.
+  bool _releaseAfterShot = false;
+
+  (String, String) get _query => (widget.routeId, widget.executionId);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(_open());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    unawaited(_camera.close());
+    super.dispose();
+  }
+
+  Future<void> _open() async {
+    _opening = true;
+    try {
+      await _camera.open();
+      _opening = false;
+      // Went inactive while opening: the camera goes until resumed.
+      if (_released) return await _camera.close();
+      if (mounted) setState(() => _ready = true);
+      // Deliberately broad: no camera, permission denied or any plugin error
+      // all mean the same here — show the message, keep the screen closable.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      _opening = false;
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  /// The platform camera is not ours while the app is in the background
+  /// (the `camera` package's own guidance): let it go on `inactive`, take
+  /// it back on `resumed` (final review I-4).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive) _releaseCamera();
+    if (state == AppLifecycleState.resumed) _retakeCamera();
+  }
+
+  /// A shot in flight keeps the camera until it lands in SQLite (RNF06).
+  void _releaseCamera() {
+    if (_busy) {
+      _releaseAfterShot = true;
+      return;
+    }
+    _releaseAfterShot = false;
+    if (_released || (!_ready && !_opening)) return;
+    _released = true;
+    // Still opening: `_open` closes it once `open()` returns.
+    if (_opening) return;
+    setState(() => _ready = false);
+    unawaited(_camera.close());
+  }
+
+  void _retakeCamera() {
+    _releaseAfterShot = false;
+    if (!_released) return;
+    _released = false;
+    // The first open is still running: it shows the preview by itself.
+    if (!_opening) unawaited(_open());
+  }
+
+  /// Reads every shot's real state: the unsent rows (`pending`, `failed`,
+  /// `sending`) and the `blocked` ones. A photo a sync worker is uploading
+  /// right now (`sending`) cannot be deleted (`deletePendingPhoto` refuses
+  /// it), but it is not delivered either (final review I-1).
+  Future<void> _refreshStates() async {
+    final store = ref.read(localWriteStoreProvider);
+    final unsent = await store.unsyncedForRoute(widget.routeId);
+    final blocked = await store.blockedForRoute(widget.routeId);
+    _states = {
+      for (final row in [...unsent, ...blocked]) row.id: row.state,
+    };
+  }
+
+  /// Compress, write to SQLite, and only then show the thumbnail (RNF06).
+  Future<void> _shoot() async {
+    setState(() => _busy = true);
+    try {
+      final path = await _camera.takePicture();
+      final photo = await ref.read(capturedFileCompressorProvider)(path);
+      final id = await ref
+          .read(executionRepositoryProvider)
+          .addPhoto(
+            routeId: widget.routeId,
+            executionId: widget.executionId,
+            photo: photo,
+          );
+      _invalidateCounts();
+      await _refreshStates();
+      if (mounted) {
+        setState(() => _shots.add(SessionShot(id: id, bytes: photo.bytes)));
+      }
+      // Deliberately broad, same discipline as the other capture paths.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (_) {
+      _showError(AppStrings.photoSequenceSaveError);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+      if (mounted && _releaseAfterShot) _releaseCamera();
+    }
+  }
+
+  void _invalidateCounts() {
+    ref
+      ..invalidate(localPhotoCountProvider(widget.executionId))
+      ..invalidate(stopEvidenceProvider(_query));
+  }
+
+  /// Floats the message under the title bar so it never covers the shutter.
+  void _showError(String message) {
+    if (!mounted) return;
+    final size = MediaQuery.sizeOf(context);
+    final top = MediaQuery.paddingOf(context).top + 96;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(16, 0, 16, size.height - top - 56),
+      ),
+    );
+  }
+
+  Future<void> _openShot(SessionShot shot) async {
+    await _refreshStates();
+    if (!mounted) return;
+    // Redraw the strip too: a badge may have moved on since the last shot.
+    setState(() {});
+    final state = _states[shot.id];
+    final delete = await showShotViewer(
+      context,
+      shot: shot,
+      status: shotStatusFor(state),
+      deletable: shotDeletable(state),
+    );
+    if (delete) await _delete(shot);
+  }
+
+  Future<void> _delete(SessionShot shot) async {
+    final removed = await ref
+        .read(localWriteStoreProvider)
+        .deletePendingPhoto(shot.id);
+    if (!removed) {
+      _showError(AppStrings.photoSequenceDeleteError);
+      return;
+    }
+    _invalidateCounts();
+    if (mounted) setState(() => _shots.remove(shot));
+  }
+
+  void _close() => Navigator.of(context).pop(_shots.length);
+
+  @override
+  Widget build(BuildContext context) {
+    final count = ref.watch(stopPhotoCountProvider(_query)) ?? _shots.length;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        // A shot in flight must land in SQLite first: back is a no-op then.
+        if (!didPop && !_busy) _close();
+      },
+      child: Scaffold(
+        backgroundColor: kCameraChrome,
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            _viewfinder(),
+            _topBar(count),
+            Align(alignment: Alignment.bottomCenter, child: _dock(count)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _viewfinder() {
+    if (_ready) return _camera.preview();
+    if (!_failed) return const SizedBox.shrink();
+    return const Center(
+      child: Text(
+        AppStrings.photoSequenceCameraError,
+        style: TextStyle(color: kCameraSoftText),
+      ),
+    );
+  }
+
+  Widget _topBar(int count) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [kCameraTopFade, kCameraTopFade.withValues(alpha: 0)],
+        ),
+      ),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 12, 24),
+            child: Row(
+              children: [
+                IconButton(
+                  key: const Key('photo-close'),
+                  constraints: const BoxConstraints.tightFor(
+                    width: 48,
+                    height: 48,
+                  ),
+                  tooltip: AppStrings.photoSequenceClose,
+                  icon: const Icon(Icons.close, color: kScanOverlayWhite),
+                  onPressed: _busy ? null : _close,
+                ),
+                Expanded(child: _title()),
+                CounterPill(count: count, minimum: widget.minimum),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _title() => Text(
+    widget.title,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: const TextStyle(
+      color: kScanOverlayWhite,
+      fontSize: 17,
+      fontWeight: FontWeight.w600,
+    ),
+  );
+
+  Widget _dock(int count) {
+    final min = widget.minimum;
+    final missing = min == null ? 0 : (min - count).clamp(0, min);
+    final capped = !canAddEvidencePhoto(
+      requiresEvidence: min != null,
+      photoCount: count,
+    );
+    return Container(
+      width: double.infinity,
+      color: kCameraDock,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _strip(count),
+            const SizedBox(height: 12),
+            _controls(
+              canShoot: _ready && !_busy && !capped,
+              missing: missing,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The session's shots, then one empty slot per photo the stop still
+  /// needs: [count] is stop-wide, so photos taken in an earlier session
+  /// count too (final review M-2).
+  Widget _strip(int count) {
+    final slots = (widget.minimum ?? 0) - count;
+    return SizedBox(
+      height: 60,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          for (final (i, shot) in _shots.indexed)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: ShotThumbnail(
+                key: Key('photo-thumb-$i'),
+                shot: shot,
+                number: i + 1,
+                status: shotStatusFor(_states[shot.id]),
+                onTap: () => _openShot(shot),
+              ),
+            ),
+          for (var n = 1; n <= slots; n++)
+            Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: PendingSlot(number: count + n),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _controls({required bool canShoot, required int missing}) {
+    return SizedBox(
+      width: double.infinity,
+      height: 104,
+      child: Stack(
+        alignment: Alignment.topCenter,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: ShutterButton(
+              key: const Key('photo-shutter'),
+              onTap: canShoot ? _shoot : null,
+            ),
+          ),
+          Positioned(
+            right: 0,
+            top: 16,
+            child: DoneButton(
+              key: const Key('photo-done'),
+              missing: missing,
+              onTap: missing == 0 && !_busy ? _close : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

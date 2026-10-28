@@ -24,22 +24,28 @@ import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
+import 'package:route_monitor/gamification/profile_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/location_service.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
-import 'package:route_monitor/routing/route_screen.dart';
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/sync_notifications.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
+import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
+import '../routing/map_home_harness.dart' show closeStopSheet, openStopSheet;
+import '../routing/no_tiles_tile_provider.dart';
+import '../support/fake_sync_notification_taps.dart';
 import '../support/in_memory_database.dart';
 
 /// DELIVERABLE PROOF for Etapa 6 (RF35): a whole batch is executed with the
@@ -59,6 +65,12 @@ import '../support/in_memory_database.dart';
 /// (not `integration_test/`) on purpose: `flutter test` special-cases the
 /// `integration_test/` directory and forces on-device mode for anything in it,
 /// which would make this deliverable unrunnable in CI without an emulator.
+/// The reconnect panel in the sheet — not the snackbar that says the same.
+Finder _nextBatchOfflinePanel() => find.descendant(
+  of: find.byType(DraggableScrollableSheet),
+  matching: find.text(AppStrings.routeNextBatchOffline),
+);
+
 void main() {
   // The scenario drives the REAL SyncWorker + real Drift outbox, whose futures
   // ride the real event loop and real timers. `flutter_test`'s default
@@ -99,18 +111,15 @@ void main() {
         StopLocalStatus.done,
       );
 
-      // Mount the screen; its real _SyncBanner subscribes to the real worker
+      // Mount the screen; its real sync slot subscribes to the real worker
       // status stream and reports the 5 waiting actions (plural). The batch
       // is finished on the device, so the next one waits for the network.
       await fixture.container.read(myDayProvider.future); // warm: no spinner
-      await tester.pumpWidget(fixture.app());
+      await _pumpApp(tester, fixture);
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
-      expect(
-        find.text(AppStrings.routePendingSync(5)),
-        findsOneWidget,
-      );
-      expect(find.text(AppStrings.routeNextBatchOffline), findsOneWidget);
+      expect(find.byTooltip(AppStrings.routePendingSync(5)), findsOneWidget);
+      expect(_nextBatchOfflinePanel(), findsOneWidget);
       expect(fixture.routeApi.nextBatchCalls, 0);
 
       // ---- Timestamp-preservation proof (the RF35 crux) -------------------
@@ -181,11 +190,14 @@ void main() {
       expect(syncedStates, everyElement('synced'));
       expect(await fixture.store.unsyncedForRoute(_routeId), isEmpty);
 
-      // The second batch is on screen and the banner flips to all-clear.
-      expect(find.text(AppStrings.routeBatchHeader(2, 2)), findsOneWidget);
+      // The second batch is on screen and the slot flips to all-clear.
+      expect(find.text(AppStrings.dayProgress(2, 2, 3)), findsOneWidget);
+      expect(_nextBatchOfflinePanel(), findsNothing);
+      expect(find.byTooltip(AppStrings.routeAllSynced), findsOneWidget);
+      // Its stop reads on the sheet its card slot opens.
+      await openStopSheet(tester, 's3');
       expect(find.text('Sala 201'), findsOneWidget);
-      expect(find.text(AppStrings.routeNextBatchOffline), findsNothing);
-      expect(find.text(AppStrings.routeAllSynced), findsOneWidget);
+      await closeStopSheet(tester);
 
       // ---- Idempotent re-drain -----------------------------------------
       await fixture.worker.syncAll();
@@ -207,7 +219,7 @@ void main() {
       await fixture.runFullBatchOffline();
       await fixture.container.read(myDayProvider.future);
 
-      await tester.pumpWidget(fixture.app());
+      await _pumpApp(tester, fixture);
       await tester.pump(const Duration(milliseconds: 100));
 
       fixture.connectivity.goOnline();
@@ -241,9 +253,9 @@ void main() {
       ]);
       expect(fixture.routeApi.batchesHandedOut, 0);
 
-      // Banner shows the blocked state.
+      // The sync slot shows the blocked state.
       expect(
-        find.textContaining('Sincronização bloqueada'),
+        find.byTooltip(AppStrings.routeSyncBlockedBanner),
         findsOneWidget,
       );
     },
@@ -290,7 +302,7 @@ void main() {
       fixture.releaseStop1(executionId: execution1);
 
       await fixture.container.read(myDayProvider.future);
-      await tester.pumpWidget(fixture.app());
+      await _pumpApp(tester, fixture);
       await tester.pump(const Duration(milliseconds: 100));
 
       // ---- Back above ground: the late writes sync ------------------------
@@ -329,6 +341,9 @@ void main() {
       expect(notice.localCheckOutAt, isNotNull);
 
       // ---- The snackbar offers the appeal ---------------------------------
+      // A sync notice may have been up first: the appeal offer replaces it.
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text(AppStrings.releasedStopsSnackbar), findsOneWidget);
       await tester.tap(find.text(AppStrings.releasedStopsSnackbarAction));
       await tester.pump(const Duration(milliseconds: 100));
@@ -369,7 +384,7 @@ void main() {
 
       // Back on the route, nothing left to sync.
       expect(find.byType(AppealFormScreen), findsNothing);
-      expect(find.text(AppStrings.routeAllSynced), findsOneWidget);
+      expect(find.byTooltip(AppStrings.routeAllSynced), findsOneWidget);
     },
   );
 
@@ -415,7 +430,7 @@ void main() {
     /// Mounts the app on the closed day, brings the network back and syncs.
     Future<void> syncTheClosedDay(WidgetTester tester, _Fixture fixture) async {
       await fixture.container.read(myDayProvider.future);
-      await tester.pumpWidget(fixture.app());
+      await _pumpApp(tester, fixture);
       await settle(tester);
       fixture.connectivity.goOnline();
       await fixture.worker.syncAll();
@@ -423,7 +438,10 @@ void main() {
     }
 
     Future<void> openAppeals(WidgetTester tester) async {
-      await tester.tap(find.byTooltip(AppStrings.appealsTooltip));
+      // The account avatar opens Perfil, whose shortcuts include "Recursos".
+      await tester.tap(find.byTooltip(AppStrings.profileTooltip));
+      await settle(tester);
+      await tester.tap(find.text(AppStrings.appealsTooltip));
       await settle(tester);
       expect(find.byType(AppealsScreen), findsOneWidget);
     }
@@ -476,16 +494,18 @@ void main() {
         expect(parked.single.releasedStopId, _stop1);
         final held = await fixture.store.unsyncedForRoute(_routeId);
         expect(held.single.kind, PendingOpKind.checkOut);
-        // A paused day draws no sync banner: the blocked-sync screen is out
+        // A paused day draws no sync slot: the blocked-sync screen is out
         // of reach, so /recursos is the way out.
         expect(find.text(AppStrings.routePausedTitle), findsOneWidget);
-        expect(find.text(AppStrings.routeSyncBlockedBanner), findsNothing);
+        expect(find.byTooltip(AppStrings.routeSyncBlockedBanner), findsNothing);
         // The snackbar offered the appeal too; this test takes the other
         // road, so it is put away (it would sit over the form's button).
+        await settle(tester);
         expect(find.text(AppStrings.releasedStopsSnackbar), findsOneWidget);
-        ScaffoldMessenger.of(
-          tester.element(find.byType(RouteScreen)),
-        ).removeCurrentSnackBar();
+        final messenger = ScaffoldMessenger.of(
+          tester.element(find.byType(MapHomeScreen)),
+        );
+        messenger.clearSnackBars();
         await settle(tester);
 
         await openAppeals(tester);
@@ -540,7 +560,7 @@ void main() {
         );
         // The photo and the check-out are held behind the parked check-in.
         expect(await fixture.store.unsyncedForRoute(_routeId), hasLength(2));
-        expect(find.text(AppStrings.routeNoMorePoints), findsOneWidget);
+        expect(find.text(AppStrings.dayDoneTitle), findsOneWidget);
         expect(find.text(AppStrings.releasedStopsSnackbar), findsNothing);
         // The device stop alone badges the entry.
         expect(find.widgetWithText(Badge, '1'), findsOneWidget);
@@ -567,6 +587,14 @@ void main() {
       },
     );
   });
+}
+
+/// Mounts [fixture]'s app on a tall phone-shaped surface: the themed sheet
+/// and the appeal form (its 56dp button) fit without scrolling.
+Future<void> _pumpApp(WidgetTester tester, _Fixture fixture) async {
+  await tester.binding.setSurfaceSize(const Size(420, 1400));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(fixture.app());
 }
 
 const _routeId = 'r1';
@@ -685,6 +713,9 @@ class _Fixture {
         locationServiceProvider.overrideWithValue(_FakeLocationService()),
         apiBaseUrlProvider.overrideWithValue('http://test-base'),
         appealApiProvider.overrideWithValue(appealApi),
+        syncNotificationTapsProvider.overrideWithValue(
+          FakeSyncNotificationTaps(),
+        ),
       ],
     );
     return _Fixture(
@@ -708,18 +739,24 @@ class _Fixture {
       container.read(releasedStopStoreProvider);
   AppDatabase get _db => container.read(appDatabaseProvider);
 
-  /// The route screen as the app routes it, `/recursos` included.
+  /// The map home as the app routes it, `/recursos` included.
   Widget app() {
     final router = GoRouter(
       routes: [
-        GoRoute(path: '/', builder: (_, _) => const RouteScreen()),
+        GoRoute(
+          path: '/',
+          builder: (_, _) =>
+              MapHomeScreen(mapTileProvider: NoTilesTileProvider()),
+        ),
         GoRoute(path: '/recursos', builder: (_, _) => const AppealsScreen()),
+        GoRoute(path: '/perfil', builder: (_, _) => const ProfileScreen()),
       ],
     );
     addTearDown(router.dispose);
     return UncontrolledProviderScope(
       container: container,
       child: MaterialApp.router(
+        theme: buildAppTheme(),
         routerConfig: router,
         builder: (context, child) =>
             SyncTriggers(child: child ?? const SizedBox.shrink()),
@@ -829,7 +866,16 @@ class _Fixture {
   }
 
   /// The route's outbox status as the worker reports it to a new listener.
-  Future<RouteSyncStatus> syncStatus() => worker.statusFor(_routeId).first;
+  /// The status after one more (empty) pass: a broadcast stream only
+  /// re-reads the outbox for its first listener, and the screen is one.
+  Future<RouteSyncStatus> syncStatus() async {
+    RouteSyncStatus? last;
+    final listening = worker.statusFor(_routeId).listen((s) => last = s);
+    await worker.syncRoute(_routeId);
+    await Future<void>.delayed(Duration.zero);
+    await listening.cancel();
+    return last!;
+  }
 
   /// Every outbox row of [stop], its evidence (of [executionId]) included.
   Future<List<String>> rowsOfStop(String stop, String executionId) async {
@@ -958,8 +1004,7 @@ class _RecordingExecutionApi implements ExecutionApi {
     double? longitude,
     String? routeStopId,
     double? clientClockOffsetSeconds,
-    String? formVersionId,
-    List<Map<String, Object?>>? answers,
+    String? complaintsSuggestions,
   }) async {
     _log.add('checkOut:$routeStopId');
     scannedAtArgs.add(scannedAt);
@@ -1060,6 +1105,9 @@ class _RecordingRouteRepository implements RouteRepository {
     currentBatch: batchesHandedOut == 0 ? 1 : 2,
     stops: [
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: _stop1,
         orderIndex: 1,
         batchNumber: 1,
@@ -1070,6 +1118,9 @@ class _RecordingRouteRepository implements RouteRepository {
         longitude: -35.88,
       ),
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: _stop2,
         orderIndex: 2,
         batchNumber: 1,
@@ -1081,6 +1132,9 @@ class _RecordingRouteRepository implements RouteRepository {
       ),
       if (batchesHandedOut > 0)
         const RouteStopSummary(
+          buildingId: 'b1',
+          buildingName: 'Prédio',
+          floorLabel: 'Térreo',
           id: 's3',
           orderIndex: 3,
           batchNumber: 2,

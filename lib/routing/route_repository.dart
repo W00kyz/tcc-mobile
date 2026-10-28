@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:route_monitor/api/api_client.dart' show apiErrorCode;
-import 'package:route_monitor/forms/form_schema.dart';
 import 'package:route_monitor/routing/route_snapshot_cache.dart';
 
 DateTime? _parseOptionalTimestamp(Object? raw) =>
@@ -15,15 +14,19 @@ class RouteStopSummary {
     required this.batchNumber,
     required this.status,
     required this.servicePointName,
+    required this.buildingId,
+    required this.buildingName,
+    required this.floorLabel,
     required this.latitude,
     required this.longitude,
     this.releaseReason,
+    this.doneAt,
     this.distanceFromPrevM,
     this.durationFromPrevS,
     this.legGeometry,
     this.serviceTypeId,
     this.serviceTypeName,
-    this.form,
+    this.requiresEvidence = false,
   });
 
   factory RouteStopSummary.fromJson(Map<String, dynamic> json) =>
@@ -34,6 +37,10 @@ class RouteStopSummary {
         status: json['status'] as String,
         releaseReason: json['release_reason'] as String?,
         servicePointName: json['service_point_name'] as String,
+        buildingId: json['building_id'] as String,
+        buildingName: json['building_name'] as String,
+        floorLabel: json['floor_label'] as String,
+        doneAt: _parseOptionalTimestamp(json['done_at']),
         latitude: (json['latitude'] as num).toDouble(),
         longitude: (json['longitude'] as num).toDouble(),
         distanceFromPrevM: (json['distance_from_prev_m'] as num?)?.toDouble(),
@@ -49,9 +56,7 @@ class RouteStopSummary {
             .toList(),
         serviceTypeId: json['service_type_id'] as String?,
         serviceTypeName: json['service_type_name'] as String?,
-        form: json['form'] == null
-            ? null
-            : FormSchema.fromJson(json['form'] as Map<String, dynamic>),
+        requiresEvidence: json['requires_evidence'] as bool? ?? false,
       );
 
   final String id;
@@ -70,6 +75,12 @@ class RouteStopSummary {
   /// null for any other status.
   final String? releaseReason;
   final String servicePointName;
+  final String buildingId;
+  final String buildingName;
+  final String floorLabel;
+
+  /// When the server recorded the stop done; null until then.
+  final DateTime? doneAt;
   final double latitude;
   final double longitude;
   final double? distanceFromPrevM;
@@ -81,9 +92,9 @@ class RouteStopSummary {
   final String? serviceTypeId;
   final String? serviceTypeName;
 
-  /// The stop's PUBLISHED `active_form_version` and its ordered questions
-  /// (spec §6.2), or null when the stop's service type has no form attached.
-  final FormSchema? form;
+  /// Copied onto the stop at allocation: it needs at least 2 photos before
+  /// "Concluir" and asks for complaints/suggestions on the way out.
+  final bool requiresEvidence;
 }
 
 class RouteSummary {
@@ -315,8 +326,26 @@ class DioRouteRepository implements RouteRepository {
       // at all = no network: fall back to the last day this device saw.
       if (error.response != null) rethrow;
       final cached = await _cache?.load(userId);
-      if (cached == null) throw const OfflineException(_myDayPath);
+      final day = cached == null ? null : _parseSnapshot(cached);
+      if (day == null) throw const OfflineException(_myDayPath);
+      return day;
+    }
+  }
+
+  /// The saved day, or null when it no longer parses. A snapshot saved by an
+  /// older build lacks fields this one requires (`building_id`,
+  /// `building_name`, `floor_label`): it counts as no snapshot rather than
+  /// a crash offline (final review M-4). The next online fetch replaces it.
+  static MyDay? _parseSnapshot(String cached) {
+    try {
       return MyDay.fromJson(jsonDecode(cached) as Map<String, dynamic>);
+      // A missing or mistyped field fails the `as` casts in fromJson with a
+      // TypeError; a corrupt string fails jsonDecode.
+      // ignore: avoid_catching_errors
+    } on TypeError {
+      return null;
+    } on FormatException {
+      return null;
     }
   }
 

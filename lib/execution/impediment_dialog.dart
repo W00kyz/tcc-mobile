@@ -38,11 +38,23 @@ class ImpedimentChoice {
   final String? note;
 }
 
+/// Opens [ImpedimentDialog] as a modal bottom sheet (redesign §6.12) and
+/// returns the worker's choice, or null when it was dismissed.
+///
+///     final choice = await showImpedimentSheet(context);
+Future<ImpedimentChoice?> showImpedimentSheet(BuildContext context) =>
+    showModalBottomSheet<ImpedimentChoice>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => const ImpedimentDialog(),
+    );
+
 /// Collects a reason (+ optional note, + the "Não consigo continuar hoje"
 /// scope) for a "Sinalizar impossibilidade" report. Pure input collection —
 /// it holds only local form state and returns an [ImpedimentChoice] via
 /// `Navigator.pop`; the `ExecutionRepository.reportImpediment` call happens
-/// back in `route_screen`, through the outbox.
+/// back in `stop_actions.dart`, through the outbox. Shown as a modal sheet
+/// by [showImpedimentSheet].
 ///
 /// The switch is always offered, even on the last open stop: it is how the
 /// worker ends the day ("Encerrar por hoje", spec §6.4) — a STOP impediment
@@ -80,58 +92,92 @@ class _ImpedimentDialogState extends State<ImpedimentDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text(AppStrings.impedimentDialogTitle),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            RadioGroup<String>(
-              groupValue: _reason,
-              onChanged: (value) => setState(() => _reason = value),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final (value, label) in _reasonOptions)
-                    RadioListTile<String>(
-                      contentPadding: EdgeInsets.zero,
-                      value: value,
-                      title: Text(label),
-                    ),
-                ],
+    return SafeArea(
+      child: Padding(
+        // Lifts the sheet over the keyboard while the note is typed.
+        padding: EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          16 + MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                AppStrings.impedimentDialogTitle,
+                style: Theme.of(context).textTheme.titleLarge,
               ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _noteController,
-              // Matches the backend `impediments.note` column, `String(500)`
-              // (backend/app/domain/impediments/models.py) and spec §3 — a
-              // longer note would 422 at the API and block the route's sync
-              // queue with a visible chip.
-              maxLength: 500,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: AppStrings.impedimentNoteHint,
+              const SizedBox(height: 8),
+              _reasons(),
+              const SizedBox(height: 8),
+              _noteField(),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _forRemainder,
+                onChanged: (value) => setState(() => _forRemainder = value),
+                title: const Text(AppStrings.impedimentRemainderSwitch),
               ),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _forRemainder,
-              onChanged: (value) => setState(() => _forRemainder = value),
-              title: const Text(AppStrings.impedimentRemainderSwitch),
-            ),
-          ],
+              const SizedBox(height: 8),
+              _actions(),
+            ],
+          ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text(AppStrings.commonCancel),
+    );
+  }
+
+  Widget _reasons() {
+    return RadioGroup<String>(
+      groupValue: _reason,
+      onChanged: (value) => setState(() => _reason = value),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final (value, label) in _reasonOptions)
+            RadioListTile<String>(
+              contentPadding: EdgeInsets.zero,
+              value: value,
+              title: Text(label),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _noteField() {
+    return TextField(
+      controller: _noteController,
+      // Matches the backend `impediments.note` column, `String(500)`
+      // (backend/app/domain/impediments/models.py) and spec §3 — a
+      // longer note would 422 at the API and block the route's sync
+      // queue with a visible chip.
+      maxLength: 500,
+      maxLines: 3,
+      decoration: const InputDecoration(
+        hintText: AppStrings.impedimentNoteHint,
+      ),
+    );
+  }
+
+  /// Expanded, because the theme's primary button asks for the full width.
+  Widget _actions() {
+    return Row(
+      children: [
+        Expanded(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text(AppStrings.commonCancel),
+          ),
         ),
-        FilledButton(
-          onPressed: _reason == null ? null : _confirm,
-          child: const Text(AppStrings.commonConfirm),
+        const SizedBox(width: 8),
+        Expanded(
+          child: FilledButton(
+            onPressed: _reason == null ? null : _confirm,
+            child: const Text(AppStrings.commonConfirm),
+          ),
         ),
       ],
     );

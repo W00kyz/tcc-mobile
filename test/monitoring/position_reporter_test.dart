@@ -239,6 +239,23 @@ void main() {
     expect(sent, [sentAt]);
   });
 
+  test('every fix read reaches onFix, even when its send fails', () async {
+    final fixes = <Coordinates>[];
+    api.error = StateError('offline');
+    PositionReporter(
+      location: location,
+      positionSource: positions,
+      api: api,
+      notification: notification,
+      onFix: fixes.add,
+      createTimer: timer.create,
+    ).start('r1');
+
+    await timer.tick();
+
+    expect(fixes.map((f) => (f.latitude, f.longitude)), [(-7.21, -35.90)]);
+  });
+
   group('background mode', () {
     PositionReporter startBackground() => build()
       ..start(

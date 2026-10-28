@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:route_monitor/api/api_client.dart' show photoUploadSendTimeout;
 import 'package:route_monitor/execution/execution_api.dart'
     show parseServerDate;
 
@@ -41,7 +42,8 @@ class EvidenceItem {
   final DateTime createdAt;
   final String? contentUrl;
 
-  /// The key this device generated for the upload; a MEDIA answer lists it.
+  /// The key this device generated for the upload, so a local photo and its
+  /// synced copy can be told apart.
   final String? idempotencyKey;
 }
 
@@ -92,6 +94,7 @@ class DioEvidenceApi implements EvidenceApi {
         'captured_at': capturedAt.toUtc().toIso8601String(),
         'idempotency_key': idempotencyKey,
       }),
+      options: Options(sendTimeout: photoUploadSendTimeout),
     );
     return parseServerDate(response.headers);
   }

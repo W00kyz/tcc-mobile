@@ -7,7 +7,7 @@ import 'package:route_monitor/execution/execution_providers.dart';
 
 /// A square thumbnail of one evidence photo: the local bytes while the
 /// upload is still queued, the backend copy once synced, nothing for a note.
-/// Shared by the stop's evidence list and the form's MEDIA question.
+/// Used by the stop's evidence list.
 ///
 /// ```dart
 /// EvidenceThumbnail(entry, size: 72)

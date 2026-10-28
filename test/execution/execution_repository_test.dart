@@ -4,22 +4,38 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
-import 'package:route_monitor/forms/form_draft_store.dart';
-import 'package:route_monitor/forms/form_schema.dart';
+import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
+
+import '../support/fake_day_log_store.dart';
+import '../support/in_memory_database.dart';
 
 /// In-memory stand-in for [DriftLocalWriteStore] — real Drift behavior (and
 /// the `insertOrIgnore` semantics reproduced below) is already proven by
 /// local_write_store_test.dart. Just enough here to inspect the outbox rows
 /// ExecutionRepository writes.
 class _FakeLocalWriteStore implements LocalWriteStore {
+  @override
+  Future<bool> claim(String id, {required int now, required int leaseUntil}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> releaseClaim(PendingOperationRow row) =>
+      throw UnimplementedError();
+
+  @override
+  Future<bool> deletePendingPhoto(String operationId) =>
+      throw UnimplementedError();
+
   final Map<String, PendingOperationRow> _rows = {};
 
   @override
-  Future<void> enqueue({
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
@@ -27,7 +43,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   }) async {
     // insertOrIgnore: a re-enqueue with an id already present is a no-op
     // (Etapa 5 behavior — the same-tap room-picker retry reuses the key).
-    if (_rows.containsKey(id)) return;
+    if (_rows.containsKey(id)) return false;
     _rows[id] = PendingOperationRow(
       id: id,
       kind: kind,
@@ -39,6 +55,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       attempts: 0,
       nextAttemptAt: null,
     );
+    return true;
   }
 
   @override
@@ -91,6 +108,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
 
   @override
   Future<void> resetToPending(String id) => throw UnimplementedError();
+
+  @override
+  Future<int> localPhotoCountFor(String executionId) =>
+      throw UnimplementedError();
 }
 
 /// In-memory stand-in for [DriftStopProgressStore] — real Drift behavior is
@@ -104,6 +125,7 @@ class _FakeStopProgressStore implements StopProgressStore {
   Future<void> upsertInProgress(String routeStopId, String executionId) async {
     calls.add('inProgress:$routeStopId:$executionId');
     _rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
       routeStopId: routeStopId,
       executionId: executionId,
       status: StopLocalStatus.inProgress,
@@ -116,6 +138,7 @@ class _FakeStopProgressStore implements StopProgressStore {
     final existing = _rows[routeStopId];
     if (existing == null) return;
     _rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
       routeStopId: existing.routeStopId,
       executionId: existing.executionId,
       status: StopLocalStatus.done,
@@ -132,6 +155,31 @@ class _FakeStopProgressStore implements StopProgressStore {
   ) async => [
     for (final id in routeStopIds) ?_rows[id],
   ];
+}
+
+/// Delegates `recordStopDone` to the real store, then fails — the write
+/// lands inside the transaction and must be rolled back with it.
+class _WritesThenThrowsDayLog implements DayLogStore {
+  _WritesThenThrowsDayLog(this._real);
+
+  final DayLogStore _real;
+
+  @override
+  Future<void> recordStopDone(DateTime day) async {
+    await _real.recordStopDone(day);
+    throw Exception('fails after the day-log write');
+  }
+
+  @override
+  Future<void> recordDayOpened(DateTime day, {required bool serviceDay}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> recordCardCompleted(DateTime day, {required bool clean}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<DayLogEntry>> all() => throw UnimplementedError();
 }
 
 /// Records every `syncRoute` kick and, for each, hands back a future that
@@ -157,68 +205,32 @@ class _FakeSyncWorker implements SyncWorker {
   Future<void> unblock(String operationId) => throw UnimplementedError();
 
   @override
+  Stream<SyncProgress> get progress => const Stream.empty();
+
+  @override
   Future<void> dispose() => throw UnimplementedError();
-}
-
-/// In-memory stand-in for [DriftFormDraftStore] — just enough to seed a
-/// draft under an executionId and observe whether `checkOut` cleared it.
-class _FakeFormDraftStore implements FormDraftStore {
-  final List<String> clearedExecutionIds = [];
-  final Map<String, List<FormDraftItem>> _itemsByExecutionId = {};
-
-  void seed(String executionId, List<FormDraftItem> items) {
-    _itemsByExecutionId[executionId] = items;
-  }
-
-  @override
-  Future<List<FormDraftItem>> itemsFor(String executionId) async =>
-      _itemsByExecutionId[executionId] ?? const [];
-
-  @override
-  Future<void> clear(String executionId) async {
-    clearedExecutionIds.add(executionId);
-    _itemsByExecutionId.remove(executionId);
-  }
-
-  @override
-  Future<void> snapshotFrom(
-    String executionId,
-    String routeStopId,
-    FormSchema schema,
-  ) => throw UnimplementedError();
-
-  @override
-  Future<void> setAnswer(String executionId, String stableKey, Object? value) =>
-      throw UnimplementedError();
-
-  @override
-  Future<bool> isComplete(String executionId) => throw UnimplementedError();
-
-  @override
-  Future<void> reconcile(
-    String executionId,
-    String routeStopId,
-    FormSchema newSchema,
-  ) => throw UnimplementedError();
 }
 
 void main() {
   late _FakeLocalWriteStore store;
   late _FakeStopProgressStore stopProgress;
   late _FakeSyncWorker syncWorker;
-  late _FakeFormDraftStore formDraftStore;
+  late RecordingDayLogStore dayLog;
   late ExecutionRepository repository;
 
   setUp(() {
     store = _FakeLocalWriteStore();
     stopProgress = _FakeStopProgressStore();
     syncWorker = _FakeSyncWorker();
-    formDraftStore = _FakeFormDraftStore();
+    dayLog = RecordingDayLogStore();
+    final db = inMemoryDatabase();
+    addTearDown(db.close);
     repository = ExecutionRepository(
       store,
       stopProgress,
       syncWorker,
-      formDraftStore,
+      database: db,
+      dayLog: dayLog,
     );
   });
 
@@ -339,140 +351,133 @@ void main() {
       (await stopProgress.progressFor('stop-1'))?.status,
       StopLocalStatus.done,
     );
+    expect(dayLog.calls, [startsWith('stopDone:')]);
     expect(syncWorker.syncedRoutes, ['route-A']);
   });
 
-  test(
-    'checkOut with a non-empty draft attaches form_version_id and answers, '
-    'then clears the draft under the REAL (StopProgress) executionId, not '
-    'the throwaway one generated for the payload',
-    () async {
-      await stopProgress.upsertInProgress('stop-1', 'exec-real-1');
-      stopProgress.calls.clear();
-      formDraftStore.seed('exec-real-1', const [
-        FormDraftItem(
-          stableKey: 'q1',
-          orderIndex: 0,
-          prompt: 'Prompt',
-          type: QuestionType.text,
-          required: false,
-          options: [],
-          contentHash: 'hash',
-          formVersionId: 'v1',
-          value: 'answered',
-          needsReanswer: false,
-        ),
-      ]);
+  group('against the real database', () {
+    late AppDatabase db;
+    late DriftLocalWriteStore realStore;
+    late DriftStopProgressStore realProgress;
 
-      await repository.checkOut(
-        routeId: 'route-A',
-        routeStopId: 'stop-1',
-        qrPayload: 'v1.floor.1.sig',
+    setUp(() {
+      db = inMemoryDatabase();
+      addTearDown(db.close);
+      realStore = DriftLocalWriteStore(db);
+      realProgress = DriftStopProgressStore(db);
+    });
+
+    ExecutionRepository repositoryWith(DayLogStore log) => ExecutionRepository(
+      realStore,
+      realProgress,
+      syncWorker,
+      database: db,
+      dayLog: log,
+    );
+
+    test('checkOut writes outbox, progress and day log atomically', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final failing = RecordingDayLogStore()
+        ..failStopDone = Exception('disk full');
+
+      await expectLater(
+        repositoryWith(failing).checkOut(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          qrPayload: 'q',
+        ),
+        throwsException,
       );
 
-      final rows = await store.unsyncedForRoute('route-A');
-      final payload = rows.single.payload;
-      // The throwaway `execution_id` in the payload is NOT the same value
-      // the draft was cleared under below — that's the whole point of the
-      // fix (checkOut's own generated UUID has nothing to do with the
-      // draft's real executionId).
-      expect(payload['execution_id'], isNot('exec-real-1'));
-      expect(payload['form_version_id'], 'v1');
-      expect(payload['answers'], [
-        {'stable_key': 'q1', 'value': 'answered'},
-      ]);
-      expect(formDraftStore.clearedExecutionIds, ['exec-real-1']);
-    },
-  );
+      expect(await realStore.unsyncedForRoute('route-A'), isEmpty);
+      expect(
+        (await realProgress.progressFor('stop-1'))!.status,
+        StopLocalStatus.inProgress,
+      );
+      expect(syncWorker.syncedRoutes, isEmpty);
+    });
 
-  test(
-    'checkOut with a mixed draft (one answered required question, one '
-    'unanswered non-required question) sends only the answered item — an '
-    'unanswered optional question must never reach the wire as a null value '
-    '(the backend rejects null for every question type with a 422, which '
-    'SyncWorker treats as a permanent, queue-blocking failure)',
-    () async {
-      await stopProgress.upsertInProgress('stop-1', 'exec-real-1');
-      stopProgress.calls.clear();
-      formDraftStore.seed('exec-real-1', const [
-        FormDraftItem(
-          stableKey: 'q1',
-          orderIndex: 0,
-          prompt: 'Required prompt',
-          type: QuestionType.text,
-          required: true,
-          options: [],
-          contentHash: 'hash',
-          formVersionId: 'v1',
-          value: 'answered',
-          needsReanswer: false,
-        ),
-        FormDraftItem(
-          stableKey: 'q2',
-          orderIndex: 1,
-          prompt: 'Optional prompt',
-          type: QuestionType.text,
-          required: false,
-          options: [],
-          contentHash: 'hash',
-          formVersionId: 'v1',
-          value: null,
-          needsReanswer: false,
-        ),
-      ]);
+    test('checkOut rolls the day-log row back with the rest when a later '
+        'step fails', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final log = DriftDayLogStore(db);
 
-      await repository.checkOut(
-        routeId: 'route-A',
-        routeStopId: 'stop-1',
-        qrPayload: 'v1.floor.1.sig',
+      await expectLater(
+        repositoryWith(_WritesThenThrowsDayLog(log)).checkOut(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          qrPayload: 'q',
+        ),
+        throwsException,
       );
 
-      final rows = await store.unsyncedForRoute('route-A');
-      final payload = rows.single.payload;
-      expect(payload['form_version_id'], 'v1');
-      expect(payload['answers'], [
-        {'stable_key': 'q1', 'value': 'answered'},
-      ]);
-    },
-  );
+      // The real point was written inside the transaction, then undone.
+      expect(await log.all(), isEmpty);
+      expect(await realStore.unsyncedForRoute('route-A'), isEmpty);
+      expect(
+        (await realProgress.progressFor('stop-1'))!.status,
+        StopLocalStatus.inProgress,
+      );
+    });
 
-  test(
-    'checkOut with no StopProgress entry sends no answers/form_version_id '
-    'and clears nothing',
-    () async {
-      await repository.checkOut(
+    test('a same-key checkOut retry adds no second point', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final log = DriftDayLogStore(db);
+      final repository = repositoryWith(log);
+
+      for (var i = 0; i < 2; i++) {
+        await repository.checkOut(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          qrPayload: 'q',
+          checkoutIdempotencyKey: 'CK',
+        );
+      }
+
+      expect((await log.all()).single.pointsDone, 1);
+      expect(await realStore.unsyncedForRoute('route-A'), hasLength(1));
+    });
+
+    test('checkOut counts the stop in the real day log', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final log = DriftDayLogStore(db);
+
+      await repositoryWith(log).checkOut(
         routeId: 'route-A',
         routeStopId: 'stop-1',
         qrPayload: 'q',
       );
 
-      final rows = await store.unsyncedForRoute('route-A');
-      final payload = rows.single.payload;
-      expect(payload.containsKey('answers'), isFalse);
-      expect(payload.containsKey('form_version_id'), isFalse);
-      expect(formDraftStore.clearedExecutionIds, isEmpty);
-    },
-  );
+      expect((await log.all()).single.pointsDone, 1);
+      expect(await realStore.unsyncedForRoute('route-A'), hasLength(1));
+    });
+  });
 
-  test(
-    'checkOut with a StopProgress entry but an empty draft sends no '
-    'answers/form_version_id but still clears (a no-op on an empty draft)',
-    () async {
-      await stopProgress.upsertInProgress('stop-1', 'exec-real-1');
+  test('checkOut writes complaints_suggestions into the payload only when '
+      'given', () async {
+    await repository.checkOut(
+      routeId: 'route-A',
+      routeStopId: 'stop-1',
+      qrPayload: 'q',
+      checkoutIdempotencyKey: 'with',
+      complaintsSuggestions: 'x',
+    );
+    await repository.checkOut(
+      routeId: 'route-A',
+      routeStopId: 'stop-2',
+      qrPayload: 'q',
+      checkoutIdempotencyKey: 'without',
+    );
 
-      await repository.checkOut(
-        routeId: 'route-A',
-        routeStopId: 'stop-1',
-        qrPayload: 'q',
-      );
-
-      final rows = await store.unsyncedForRoute('route-A');
-      final payload = rows.single.payload;
-      expect(payload.containsKey('answers'), isFalse);
-      expect(payload.containsKey('form_version_id'), isFalse);
-      expect(formDraftStore.clearedExecutionIds, ['exec-real-1']);
-    },
-  );
+    final rows = {
+      for (final row in await store.unsyncedForRoute('route-A')) row.id: row,
+    };
+    expect(rows['with']!.payload['complaints_suggestions'], 'x');
+    expect(
+      rows['without']!.payload.containsKey('complaints_suggestions'),
+      isFalse,
+    );
+  });
 
   test('checkOut reuses a caller-supplied checkoutIdempotencyKey', () async {
     await repository.checkOut(
@@ -491,6 +496,8 @@ void main() {
     final rows = await store.unsyncedForRoute('route-A');
     expect(rows, hasLength(1));
     expect(rows.single.id, 'CK');
+    // The retry queued nothing, so it counts no second point.
+    expect(dayLog.calls.where((c) => c.startsWith('stopDone')), hasLength(1));
   });
 
   test('addPhoto enqueues one pending evidencePhoto row and kicks the sync '
@@ -511,7 +518,7 @@ void main() {
     expect(rows.single.payload['execution_id'], 'exec-1');
     expect(rows.single.payload['bytes_b64'], isA<String>());
     expect(rows.single.payload['sha256'], 'abc123');
-    // The key a MEDIA answer lists: the one the upload will carry.
+    // The upload's idempotency key: the one the upload will carry.
     expect(rows.single.payload['idempotency_key'], key);
     expect(syncWorker.syncedRoutes, ['route-A']);
   });
@@ -576,24 +583,6 @@ void main() {
         )
         .timeout(const Duration(seconds: 1));
 
-    expect(syncWorker.syncedRoutes, ['route-A']);
-  });
-
-  test('addNote enqueues one pending evidenceNote row and kicks the sync '
-      'worker once', () async {
-    await repository.addNote(
-      routeId: 'route-A',
-      executionId: 'exec-1',
-      text: 'Sala trancada.',
-    );
-
-    final rows = await store.unsyncedForRoute('route-A');
-    expect(rows, hasLength(1));
-    expect(rows.single.state, PendingOpState.pending);
-    expect(rows.single.kind, PendingOpKind.evidenceNote);
-    expect(rows.single.payload['execution_id'], 'exec-1');
-    expect(rows.single.payload['text_body'], 'Sala trancada.');
-    expect(rows.single.payload['idempotency_key'], isA<String>());
     expect(syncWorker.syncedRoutes, ['route-A']);
   });
 }

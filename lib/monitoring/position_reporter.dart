@@ -48,6 +48,7 @@ class PositionReporter {
     required MonitoringApi api,
     required OngoingNotification notification,
     void Function(DateTime sentAt)? onPositionSent,
+    void Function(Coordinates fix)? onFix,
     DateTime Function() now = DateTime.now,
     PeriodicTimerFactory createTimer = Timer.periodic,
   }) : _location = location,
@@ -55,6 +56,7 @@ class PositionReporter {
        _api = api,
        _notification = notification,
        _onPositionSent = onPositionSent,
+       _onFix = onFix,
        _now = now,
        _createTimer = createTimer;
 
@@ -63,6 +65,9 @@ class PositionReporter {
   final MonitoringApi _api;
   final OngoingNotification _notification;
   final void Function(DateTime sentAt)? _onPositionSent;
+
+  /// Every fix read, sent or not: the map's live position and first leg.
+  final void Function(Coordinates fix)? _onFix;
   final DateTime Function() _now;
   final PeriodicTimerFactory _createTimer;
 
@@ -110,7 +115,10 @@ class PositionReporter {
       _stream = _positionSource
           .watch(interval: interval)
           .listen(
-            (fix) => unawaited(_send(routeId, fix)),
+            (fix) {
+              _onFix?.call(fix);
+              unawaited(_send(routeId, fix));
+            },
             onError: _ignore,
             // The platform ended the stream (e.g. permission revoked): not
             // running any more, so the next start() subscribes again.
@@ -184,6 +192,7 @@ class PositionReporter {
       // (fire-and-forget, spec §2 Ruling 5).
       return;
     }
+    _onFix?.call(position);
     if (await _send(routeId, position)) _adjustCadence(position);
   }
 

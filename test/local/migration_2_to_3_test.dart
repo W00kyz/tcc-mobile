@@ -107,11 +107,11 @@ void main() {
           .get();
       expect(openExecutions, isEmpty);
 
-      // AppDatabase.schemaVersion is the class's current constant (6 as of
-      // the 5→6 migration), not "whatever `to` was for this run" — opening
+      // AppDatabase.schemaVersion is the class's current constant (7 as of
+      // the 6→7 migration), not "whatever `to` was for this run" — opening
       // this schema-2 seed runs every later onUpgrade block in sequence,
       // landing on the current version.
-      expect(db.schemaVersion, 6);
+      expect(db.schemaVersion, 8);
     },
   );
 }

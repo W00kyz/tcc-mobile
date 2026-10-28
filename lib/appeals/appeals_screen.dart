@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import 'package:route_monitor/appeals/appeal_api.dart';
 import 'package:route_monitor/appeals/appeal_form_screen.dart';
@@ -9,6 +8,7 @@ import 'package:route_monitor/appeals/day_time.dart';
 import 'package:route_monitor/appeals/released_stop_entry.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
+import 'package:route_monitor/ui/empty_state.dart';
 
 /// `/recursos` (spec 2026-10-20-alocacao-automatica §7.5, §9), reachable
 /// whatever the route's state:
@@ -30,44 +30,63 @@ class AppealsScreen extends ConsumerWidget {
     final mine = ref.watch(myAppealsProvider);
     final local =
         ref.watch(localReleasedNoticesProvider).asData?.value ?? const [];
-    final localStops = {for (final notice in local) notice.routeStopId};
+    final isEmpty =
+        local.isEmpty &&
+        (eligible.asData?.value.isEmpty ?? false) &&
+        (mine.asData?.value.isEmpty ?? false);
     return Scaffold(
       appBar: AppBar(title: const Text(AppStrings.appealsAppBarTitle)),
       body: RefreshIndicator(
-        onRefresh: () async {
-          ref
-            ..invalidate(appealEligibleProvider)
-            ..invalidate(localReleasedNoticesProvider)
-            ..invalidate(myAppealsProvider);
-          await ref.read(appealEligibleProvider.future);
-        },
-        child: ListView(
-          children: [
-            if (local.isNotEmpty) ...[
-              const _SectionTitle(AppStrings.appealsLocalTitle),
-              for (final notice in local)
-                _LocalReleasedStop(notice: notice, eligible: eligible),
-            ],
-            const _SectionTitle(AppStrings.appealsEligibleTitle),
-            ..._section(
-              eligible.whenData(
-                (stops) => stops
-                    .where((stop) => !localStops.contains(stop.routeStopId))
-                    .toList(),
-              ),
-              // With device entries above, an empty rest says nothing.
-              empty: local.isEmpty ? AppStrings.appealsEligibleEmpty : null,
-              tile: _EligibleStopTile.new,
-            ),
-            const _SectionTitle(AppStrings.appealsMineTitle),
-            ..._section(
-              mine,
-              empty: AppStrings.appealsMineEmpty,
-              tile: _FiledAppealTile.new,
-            ),
-          ],
-        ),
+        onRefresh: () => _refresh(ref),
+        child: isEmpty
+            ? const EmptyState(
+                title: AppStrings.appealsEmptyTitle,
+                body: AppStrings.appealsEmptyBody,
+              )
+            : _lists(local, eligible, mine),
       ),
+    );
+  }
+
+  Future<void> _refresh(WidgetRef ref) async {
+    ref
+      ..invalidate(appealEligibleProvider)
+      ..invalidate(localReleasedNoticesProvider)
+      ..invalidate(myAppealsProvider);
+    await ref.read(appealEligibleProvider.future);
+  }
+
+  Widget _lists(
+    List<ReleasedStopNotice> local,
+    AsyncValue<List<AppealableStop>> eligible,
+    AsyncValue<List<FiledAppeal>> mine,
+  ) {
+    final localStops = {for (final notice in local) notice.routeStopId};
+    return ListView(
+      children: [
+        if (local.isNotEmpty) ...[
+          const _SectionTitle(AppStrings.appealsLocalTitle),
+          for (final notice in local)
+            _LocalReleasedStop(notice: notice, eligible: eligible),
+        ],
+        const _SectionTitle(AppStrings.appealsEligibleTitle),
+        ..._section(
+          eligible.whenData(
+            (stops) => stops
+                .where((stop) => !localStops.contains(stop.routeStopId))
+                .toList(),
+          ),
+          // With device entries above, an empty rest says nothing.
+          empty: local.isEmpty ? AppStrings.appealsEligibleEmpty : null,
+          tile: _EligibleStopTile.new,
+        ),
+        const _SectionTitle(AppStrings.appealsMineTitle),
+        ..._section(
+          mine,
+          empty: AppStrings.appealsMineEmpty,
+          tile: _FiledAppealTile.new,
+        ),
+      ],
     );
   }
 
@@ -200,27 +219,16 @@ class _FiledAppealTile extends StatelessWidget {
   }
 }
 
-/// The route screen's app-bar entry to [AppealsScreen], badged with how many
-/// released stops wait for the worker: the points the server says they can
-/// contest plus the stops this device holds data for, each counted once. A
-/// failed or loading list counts nothing, like the notifications bell.
-class AppealsEntryButton extends ConsumerWidget {
-  const AppealsEntryButton({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final eligible = ref.watch(appealEligibleProvider).asData?.value ?? [];
-    final local = ref.watch(localReleasedNoticesProvider).asData?.value ?? [];
-    final count = {
-      for (final stop in eligible) stop.routeStopId,
-      for (final notice in local) notice.routeStopId,
-    }.length;
-    final button = IconButton(
-      icon: const Icon(Icons.gavel_outlined),
-      tooltip: AppStrings.appealsTooltip,
-      onPressed: () => context.push('/recursos'),
-    );
-    if (count == 0) return button;
-    return Badge(label: Text('$count'), child: button);
-  }
+/// The stops the worker can still contest or settle: the server's eligible
+/// list and this device's own release notices, each stop once. Drives the
+/// badge on the home's account avatar.
+///
+///     final count = watchAppealableCount(ref);
+int watchAppealableCount(WidgetRef ref) {
+  final eligible = ref.watch(appealEligibleProvider).asData?.value ?? [];
+  final local = ref.watch(localReleasedNoticesProvider).asData?.value ?? [];
+  return {
+    for (final stop in eligible) stop.routeStopId,
+    for (final notice in local) notice.routeStopId,
+  }.length;
 }

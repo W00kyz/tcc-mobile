@@ -11,6 +11,7 @@ import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -77,6 +78,9 @@ class _DrainingSyncWorker implements SyncWorker {
 
   @override
   Future<void> unblock(String operationId) async {}
+
+  @override
+  Stream<SyncProgress> get progress => const Stream.empty();
 
   @override
   Future<void> dispose() => _status.close();

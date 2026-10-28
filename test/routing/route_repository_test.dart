@@ -21,7 +21,9 @@ Map<String, dynamic> _stopPayload({
   'service_point_id': 'sp-$id',
   'service_point_name': 'Sala $id',
   'floor_label': 'Térreo',
+  'building_id': 'b-caa',
   'building_name': 'CAA',
+  'done_at': null,
   'latitude': -7.21,
   'longitude': -35.91,
   'distance_from_prev_m': null,
@@ -135,6 +137,24 @@ void main() {
       ]);
     });
 
+    test('parses the building, floor and done_at of a stop', () async {
+      final payload = _routePayload();
+      final stops = payload['stops'] as List<dynamic>;
+      (stops[0] as Map<String, dynamic>)['done_at'] =
+          '2026-10-20T10:20:00+00:00';
+      final repository = DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: payload)),
+      );
+
+      final route = (await repository.fetchMyDay()).route!;
+
+      expect(route.stops[0].buildingId, 'b-caa');
+      expect(route.stops[0].buildingName, 'CAA');
+      expect(route.stops[0].floorLabel, 'Térreo');
+      expect(route.stops[0].doneAt, DateTime.parse('2026-10-20T10:20:00Z'));
+      expect(route.stops[1].doneAt, isNull);
+    });
+
     test('derives the done count over every batch of the day', () async {
       final repository = DioRouteRepository(
         _dioAnswering(200, _myDayPayload(route: _routePayload())),
@@ -145,26 +165,12 @@ void main() {
       expect(route.doneToday, 1);
     });
 
-    test("parses a stop's service type and form when present", () async {
+    test("parses a stop's service type when present", () async {
       final route = _routePayload();
       final stops = (route['stops'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
       stops[2]['service_type_id'] = 'st1';
       stops[2]['service_type_name'] = 'Limpeza';
-      stops[2]['form'] = {
-        'form_version_id': 'v1',
-        'questions': [
-          {
-            'stable_key': 'k1',
-            'order_index': 0,
-            'prompt': 'p',
-            'question_type': 'TEXT',
-            'required': true,
-            'options': <String>[],
-            'content_hash': 'h1',
-          },
-        ],
-      };
       final repository = DioRouteRepository(
         _dioAnswering(200, _myDayPayload(route: route)),
       );
@@ -173,9 +179,24 @@ void main() {
 
       expect(stop.serviceTypeId, 'st1');
       expect(stop.serviceTypeName, 'Limpeza');
-      expect(stop.form!.formVersionId, 'v1');
-      expect(stop.form!.questions.single.stableKey, 'k1');
     });
+    test(
+      'requires_evidence is read from the stop, false when absent',
+      () async {
+        final route = _routePayload();
+        final stops = (route['stops'] as List<dynamic>)
+            .cast<Map<String, dynamic>>();
+        stops[2]['requires_evidence'] = true;
+        final repository = DioRouteRepository(
+          _dioAnswering(200, _myDayPayload(route: route)),
+        );
+
+        final parsed = (await repository.fetchMyDay()).route!.stops;
+
+        expect(parsed[2].requiresEvidence, isTrue);
+        expect(parsed[0].requiresEvidence, isFalse);
+      },
+    );
   });
 
   group('current batch', () {
@@ -257,6 +278,27 @@ void main() {
           _offlineDio(),
           cache: cache,
           userId: 'u2',
+        ).fetchMyDay(),
+        throwsA(isA<OfflineException>()),
+      );
+    });
+
+    test('a snapshot from before the building fields is no snapshot', () async {
+      final route = _routePayload();
+      for (final stop in route['stops'] as List<dynamic>) {
+        (stop as Map<String, dynamic>)
+          ..remove('building_id')
+          ..remove('building_name')
+          ..remove('floor_label');
+      }
+      final cache = InMemoryRouteSnapshotCache()
+        ..snapshots['u1'] = jsonEncode(_myDayPayload(route: route));
+
+      await expectLater(
+        DioRouteRepository(
+          _offlineDio(),
+          cache: cache,
+          userId: 'u1',
         ).fetchMyDay(),
         throwsA(isA<OfflineException>()),
       );

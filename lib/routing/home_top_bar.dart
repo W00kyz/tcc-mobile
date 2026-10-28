@@ -1,0 +1,189 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import 'package:route_monitor/appeals/appeals_screen.dart';
+import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/monitoring/monitoring_providers.dart';
+import 'package:route_monitor/monitoring/notifications_screen.dart';
+import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/ui/app_theme.dart';
+
+/// Past this many points the dots would not fit the pill; the text alone
+/// carries the count.
+const int _maxProgressDots = 12;
+
+/// The floating white pill over the map (redesign §6.2): the account
+/// avatar, the worker's name with "Lote 2 · 3 de 8 pontos hoje" and its
+/// progress dots, the sync slot and the bell.
+///
+///     HomeTopBar(route: route, done: 3, total: 8, syncSlot: slot)
+class HomeTopBar extends StatelessWidget {
+  const HomeTopBar({
+    this.route,
+    this.done = 0,
+    this.total = 0,
+    this.syncSlot,
+    super.key,
+  });
+
+  /// Today's route, when there is one: its worker name and batch.
+  final RouteSummary? route;
+
+  /// Points done today (server + device, spec §6.8) out of [total].
+  final int done;
+  final int total;
+
+  /// The sync indicator's place (`RouteSyncIndicator`).
+  final Widget? syncSlot;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    final slot = syncSlot;
+    return Material(
+      color: p.white,
+      elevation: 3,
+      shadowColor: p.ink,
+      shape: const StadiumBorder(),
+      child: SizedBox(
+        height: 56,
+        child: Row(
+          children: [
+            const SizedBox(width: 8),
+            _AccountAvatar(name: route?.fieldWorkerName ?? ''),
+            const SizedBox(width: 10),
+            Expanded(child: _progress(p)),
+            ?slot,
+            const _NotificationsBell(),
+            const SizedBox(width: 2),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _progress(FieldPalette p) {
+    final current = route;
+    if (current == null) return const SizedBox.shrink();
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          current.fieldWorkerName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: p.ink,
+          ),
+        ),
+        Text(
+          AppStrings.dayProgress(current.currentBatch, done, total),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 12, color: p.muted),
+        ),
+        if (total > 0 && total <= _maxProgressDots)
+          _ProgressDots(done: done, total: total, palette: p),
+      ],
+    );
+  }
+}
+
+/// One circle per point of the day, the done ones filled moss.
+class _ProgressDots extends StatelessWidget {
+  const _ProgressDots({
+    required this.done,
+    required this.total,
+    required this.palette,
+  });
+
+  final int done;
+  final int total;
+  final FieldPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Row(
+          children: [
+            for (var i = 0; i < total; i++)
+              Container(
+                key: ValueKey('progress-dot-${i < done ? 'on' : 'off'}-$i'),
+                width: 7,
+                height: 7,
+                margin: const EdgeInsets.only(right: 4),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: i < done ? palette.moss : palette.rule,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The ink avatar with the worker's initial; a tap opens Perfil, whose
+/// shortcuts reach Meus dados and Recursos. Badged with the points the worker
+/// can contest, so a pending appeal is visible from the map.
+class _AccountAvatar extends ConsumerWidget {
+  const _AccountAvatar({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = watchAppealableCount(ref);
+    final avatar = _initialAvatar(context);
+    // IconButton keeps the 48dp target a bare 40dp avatar would lack.
+    return IconButton(
+      tooltip: AppStrings.profileTooltip,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+      onPressed: () => unawaited(context.push('/perfil')),
+      icon: count == 0 ? avatar : Badge(label: Text('$count'), child: avatar),
+    );
+  }
+
+  Widget _initialAvatar(BuildContext context) {
+    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    return CircleAvatar(
+      radius: 20,
+      backgroundColor: p.ink,
+      foregroundColor: p.white,
+      child: name.isEmpty
+          ? const Icon(Icons.person_outline)
+          : Text(name.characters.first.toUpperCase()),
+    );
+  }
+}
+
+/// The bell that opens [NotificationsScreen], with a count badge while there
+/// are unread notifications (RF49). A failed/loading count shows no badge
+/// rather than a spinner in the header.
+class _NotificationsBell extends ConsumerWidget {
+  const _NotificationsBell();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final unread = ref.watch(unreadCountProvider).asData?.value ?? 0;
+    final button = IconButton(
+      icon: const Icon(Icons.notifications_outlined),
+      tooltip: AppStrings.routeNotificationsTooltip,
+      onPressed: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+      ),
+    );
+    if (unread == 0) return button;
+    return Badge(label: Text('$unread'), child: button);
+  }
+}

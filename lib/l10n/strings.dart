@@ -8,7 +8,7 @@
 ///
 /// Example:
 /// ```dart
-/// AppBar(title: const Text(AppStrings.routeAppBarTitle));
+/// FilledButton(onPressed: scan, child: const Text(AppStrings.scanQrButton));
 /// Text(AppStrings.routePendingSync(count));
 /// ```
 abstract final class AppStrings {
@@ -90,6 +90,8 @@ abstract final class AppStrings {
       'Seu cadastro não foi aprovado.';
   static const String approvalDeactivatedMessage =
       'Seu cadastro foi desativado pelo gestor.';
+  static const String approvalEmptyCard =
+      'Seu cartão chega quando a gestora aprovar o cadastro';
   static const String approvalRefreshButton = 'Atualizar';
   static const String approvalExitButton = 'Sair';
   static const String approvalStillPending =
@@ -101,18 +103,9 @@ abstract final class AppStrings {
   static String approvalRejectionReason(String reason) => 'Motivo: $reason';
 
   // --- route screen ---
-  static const String routeAppBarTitle = 'Rota de hoje';
   static const String routeLoadError = 'Não foi possível carregar sua rota.';
-  static const String routeViewMapButton = 'Ver no mapa';
   static const String routeStartButton = 'Iniciar rota';
-  static const String routeCheckInButton = 'Fazer check-in';
-  static const String formMediaTakePhoto = 'Tirar foto';
-  static const String formMediaRemove = 'Remover foto';
-  static const String formMediaLimit = 'Limite de 10 fotos por pergunta.';
   static const String routeConcludeButton = 'Concluir';
-  static const String routeFillFormButton = 'Preencher formulário';
-  static const String routeFormIncompleteHint =
-      'Preencha o formulário para concluir.';
   static const String routeSignalImpossibilityButton =
       'Sinalizar impossibilidade';
   static const String routeNotificationsTooltip = 'Notificações';
@@ -122,7 +115,7 @@ abstract final class AppStrings {
   static const String routeLocationUnavailable =
       'Não foi possível obter sua localização.';
   static const String routeLocationUnavailableCheckIn =
-      'Não foi possível obter sua localização; check-in seguirá sem GPS.';
+      'Sem localização agora. O registro foi feito mesmo assim.';
 
   // --- route screen · batches (spec 2026-10-20-alocacao-automatica §6.4) ---
   static const String routeNotServiceDay = 'Hoje não é dia de serviço.';
@@ -135,7 +128,7 @@ abstract final class AppStrings {
   static const String routeCheckAgainButton = 'Verificar de novo';
   static const String routeStartFailed =
       'Não foi possível iniciar a rota. Tente novamente.';
-  static const String routePausedTitle = 'Seus pontos foram liberados';
+  static const String routePausedTitle = 'Rota pausada';
   static const String routeNextBatchOffline =
       'Conecte-se para receber mais pontos';
 
@@ -143,11 +136,6 @@ abstract final class AppStrings {
   /// `Liberado` when the server sent no reason.
   static String routeStopReleased(String? reason) =>
       reason == null ? 'Liberado' : 'Liberado · $reason';
-
-  /// `Lote <n> · <x> ponto(s) feito(s) hoje`.
-  static String routeBatchHeader(int batch, int doneToday) =>
-      'Lote $batch · $doneToday '
-      '${doneToday == 1 ? 'ponto feito' : 'pontos feitos'} hoje';
 
   /// Why a paused route's points went back to the pool.
   static String routePausedReason(String reason) => 'Motivo: $reason';
@@ -165,8 +153,38 @@ abstract final class AppStrings {
   // --- route screen · sync banner ---
   static const String routeSyncBlockedBanner =
       'Sincronização bloqueada — toque para ver';
-  static const String routeSyncNowButton = 'Sincronizar agora';
-  static const String routeAllSynced = 'Tudo sincronizado';
+  static const String routeAllSynced = 'Tudo enviado';
+  // --- sync snackbars and detail sheet (redesign §6.7) ---
+  static String syncSending(int n) =>
+      'Enviando $n ${n == 1 ? 'registro' : 'registros'}…';
+  static String syncWaiting(int n) =>
+      '$n ${n == 1 ? 'registro aguardando' : 'registros aguardando'} envio';
+  static String syncBlockedNotice(int n) => n == 1
+      ? '1 registro não pôde ser enviado'
+      : '$n registros não puderam ser enviados';
+  static const String syncSendAction = 'Enviar';
+  static const String syncSeeAction = 'Ver';
+  static const String syncDetailTitle = 'Envio de registros';
+  static String syncDetailPending(int n) => '$n aguardando envio';
+  static String syncDetailBlocked(int n) => '$n bloqueados';
+  static const String syncSendNow = 'Enviar agora';
+  static const String syncSeeBlocked = 'Ver registros bloqueados';
+
+  // --- background sync notifications (redesign §6.9) ---
+  static const String syncNotificationChannelName = 'Envio de registros';
+  static const String syncNotificationChannelDescription =
+      'Mostra o envio dos registros feito com o app fechado.';
+  static const String syncAttentionChannelName = 'Registros com problema';
+  static const String syncAttentionChannelDescription =
+      'Avisa quando um registro não pôde ser enviado.';
+  static String syncNotificationProgress(int done, int total) =>
+      'Enviando registros · $done de $total';
+  static String syncNotificationFinished(int n) =>
+      'Registros enviados · $n ${n == 1 ? 'registro' : 'registros'}';
+  static String syncNotificationAttention(int n) => n == 1
+      ? '1 registro precisa de atenção'
+      : '$n registros precisam de atenção';
+
   static const String routeChipPending = 'Pendente';
   static const String routeChipBlocked = 'Bloqueado';
 
@@ -177,26 +195,77 @@ abstract final class AppStrings {
   /// The travel-from-previous leg line, e.g. `a 120 m · 2 min`.
   static String routeLeg(String leg) => 'a $leg';
 
-  // --- route screen · evidence ---
-  static const String routeAddPhotoButton = 'Adicionar foto';
-  static const String routeAddNoteButton = 'Adicionar observação';
-  static const String routeNoteHint = 'Descreva a observação';
-  static const String routeEvidencePhotoLabel = 'Foto';
-  static const String routeEvidenceLoadError =
-      'Não foi possível carregar as evidências.';
-  static const String routePhotoAdded = 'Foto adicionada.';
-  static const String routePhotoAddError = 'Não foi possível adicionar a foto.';
-  static const String routeNoteAdded = 'Observação adicionada.';
-  static const String routeNoteAddError =
-      'Não foi possível adicionar a observação.';
+  // --- in-progress block (redesign §6.2) ---
+  static const String takePhotosButton = 'Tirar fotos';
 
-  // --- map screen ---
-  static const String mapAppBarTitle = 'Trajeto da rota';
+  /// `Em andamento · desde <HH:mm>`, the check-in hour of the stop.
+  static String inProgressSince(String hour) => 'Em andamento · desde $hour';
+
+  /// `<n> de 2 fotos obrigatórias` on a stop that requires evidence.
+  static String requiredPhotosProgress(int n) => '$n de 2 fotos obrigatórias';
+
+  /// Under a closed "Concluir": `Falta 1 foto` / `Faltam <n> fotos`
+  /// (ruling R11).
+  static String missingPhotos(int n) =>
+      n == 1 ? 'Falta 1 foto' : 'Faltam $n fotos';
+
+  // --- conclusion sheet (redesign §6.6) ---
+  static const String concludeTakeMore = 'Tirar mais';
+  static const String concludeObservationLabel = 'Observação (opcional)';
+  static const String concludeObservationHelper =
+      'Reclamações e sugestões também vão aqui';
+  static const String concludeScanExitButton = 'Escanear QR de saída';
+
+  /// `Concluir <prédio> · <andar>`.
+  static String concludeSheetTitle(String building, String floor) =>
+      'Concluir $building · $floor';
+
+  // --- photo-sequence camera ---
+  static const String photoSequenceDone = 'Pronto';
+  static const String photoSequenceDelete = 'Apagar';
+  static const String photoSequenceShutter = 'Tirar foto';
+  static const String photoSequenceClose = 'Fechar';
+  static const String photoSequenceSynced = 'Foto já enviada';
+  static const String photoSequenceNotSent = 'Foto ainda não enviada';
+  static const String photoSequenceBlocked = 'Foto não pôde ser enviada';
+  static const String photoSequenceCameraError =
+      'Não foi possível abrir a câmera.';
+  static const String photoSequenceSaveError =
+      'Não foi possível salvar a foto.';
+  static const String photoSequenceDeleteError =
+      'Não foi possível apagar a foto.';
+  static String photoSequenceTitle(String building, String floor) =>
+      '$building · $floor';
+  static String photoSequenceRequiredCounter(int n, int minimum) =>
+      '$n de $minimum obrigatórias';
+  static String photoSequenceCounter(int n) => n == 1 ? '1 foto' : '$n fotos';
+  static String photoSequenceMissing(int n) => 'Falta $n';
+  static String photoSequencePhoto(int n) => 'Foto $n';
+  static String photoSequencePending(int n) => 'Foto $n pendente';
+
+  // --- map ---
   static const String mapApproximateLegLabel = 'trajeto aproximado';
 
   // --- scan screen ---
-  static const String scanAppBarTitle = 'Ler QR Code';
-  static const String scanInvalidQr = 'QR Code inválido ou adulterado.';
+  static const String scanInvalidQr =
+      'Esse QR não é do sistema. Tente o QR fixado no andar.';
+  static const String scanFramingPrompt = 'Aponte para o QR Code do andar';
+  static const String scanTorch = 'Lanterna';
+  static const String scanCancel = 'Cancelar';
+  static const String scanPermissionTitle = 'A câmera está desligada';
+  static const String scanPermissionBody =
+      'O app precisa da câmera para ler o QR Code fixado no andar e '
+      'confirmar que você está no lugar certo.';
+  static const String scanOpenSettings = 'Abrir configurações';
+  static const String scanCameraError = 'Não foi possível abrir a câmera.';
+
+  /// Context line under the frame at check-in: `Entrada · <prédio>`.
+  static String scanEntryContext(String building) => 'Entrada · $building';
+
+  /// Context line under the frame at check-out:
+  /// `Saída · <prédio> · <andar>`.
+  static String scanExitContext(String building, String floor) =>
+      'Saída · $building · $floor';
 
   // --- blocked sync screen ---
   static const String blockedSyncAppBarTitle = 'Sincronização bloqueada';
@@ -221,7 +290,7 @@ abstract final class AppStrings {
   static const String releasedStopDiscardButton = 'Descartar';
   static const String releasedStopDiscardTitle = 'Descartar dados deste ponto?';
   static const String releasedStopDiscardBody =
-      'As fotos, respostas e registros feitos offline neste ponto serão '
+      'As fotos e registros feitos offline neste ponto serão '
       'apagados do aparelho.';
   static const String releasedStopDiscarded = 'Dados do ponto descartados.';
 
@@ -257,6 +326,9 @@ abstract final class AppStrings {
   static const String appealsEligibleTitle =
       'Pontos liberados que você pode contestar';
   static const String appealsEligibleEmpty = 'Nenhum ponto para contestar.';
+  static const String appealsEmptyTitle = 'Nenhum recurso por enquanto';
+  static const String appealsEmptyBody =
+      'Quando um ponto seu for liberado, você poderá contestar por aqui.';
   static const String appealsMineTitle = 'Meus recursos';
   static const String appealsMineEmpty = 'Você ainda não enviou recursos.';
   static const String appealsLoadError =
@@ -301,7 +373,7 @@ abstract final class AppStrings {
   static const String appealClaimedTimeNone = 'Não informado';
   static const String appealSubmit = 'Enviar recurso';
   static const String appealLocalDataWarning =
-      'As fotos e respostas feitas offline neste ponto não serão enviadas com '
+      'As fotos feitas offline neste ponto não serão enviadas com '
       'o recurso e serão apagadas do aparelho.';
   static const String appealWarningConfirm = 'Enviar';
   static const String appealSent = 'Recurso enviado.';
@@ -328,25 +400,13 @@ abstract final class AppStrings {
     _ => appealSendError,
   };
 
-  // --- form screen ---
-  static const String formAppBarTitle = 'Formulário';
-  static const String formLoadError = 'Não foi possível carregar o formulário.';
-  static const String formQuestionChanged =
-      'Esta pergunta mudou — responda de novo.';
-  static const String formComplete = 'Formulário completo';
-  static const String formAddNoteDialogTitle = 'Adicionar observação';
-
-  /// A required question's prompt, suffixed `(obrigatória)`.
-  static String formRequiredPrompt(String prompt) => '$prompt (obrigatória)';
-
-  /// `<n> pendências` remaining in the draft footer.
-  static String formPending(int n) => '$n pendências';
-
   // --- notifications screen ---
   static const String notificationsAppBarTitle = 'Notificações';
   static const String notificationsLoadError =
       'Não foi possível carregar as notificações.';
   static const String notificationsEmpty = 'Nenhuma notificação.';
+  static const String notificationsEmptyBody =
+      'Avisos da gestora e alertas da rota aparecem aqui.';
   static const String notificationKindAlert = 'Alerta';
   static const String notificationKindImpedimentReported = 'Impossibilidade';
   static const String notificationKindAppealFiled = 'Recurso';
@@ -412,8 +472,6 @@ abstract final class AppStrings {
   static const String collectionNotificationBody =
       'Sua localização está sendo registrada durante a rota para fins de '
       'fiscalização.';
-  static const String collectionBannerText =
-      'Coleta de localização ativa durante a rota.';
   static const String collectionNotificationChannelName =
       'Coleta de localização';
   static const String collectionNotificationChannelDescription =
@@ -452,4 +510,88 @@ abstract final class AppStrings {
   static String silenceWarningPastRelease(int silent) =>
       'Sem enviar sua localização há $silent min. Seus pontos podem ter '
       'sido liberados. Abra o app ou procure sinal.';
+
+  // --- batch card atoms (not-by-colour labels) ---
+  static String slotDone(String hour) => 'Concluído às $hour';
+
+  /// A stop done with no known hour (an old server answer without
+  /// `done_at`).
+  static const String slotDoneNoHour = 'Concluído';
+  static String slotReleased(String? reason) =>
+      reason == null ? 'Liberado' : 'Liberado: $reason';
+  static const String slotPending = 'Pendente';
+  static const String slotNext = 'Próximo';
+  static const String slotInProgress = 'Em andamento';
+  static const String slotPendingSync = 'aguardando envio';
+  static String batchCardTitle(int n) => 'CARTÃO DO LOTE $n';
+  static String batchCardSubtitle(int total) => 'Junte os $total carimbos';
+  static String batchReleasedCount(int n) =>
+      n == 1 ? '1 liberado' : '$n liberados';
+
+  // --- map home (redesign §6.2, §6.10) ---
+  static const String scanQrButton = 'Escanear QR';
+  static const String nextStopLabel = 'Próxima parada';
+  static const String myPositionTooltip = 'Minha posição';
+  static const String profileTooltip = 'Abrir perfil';
+  static const String collectionChip = 'Coleta de localização ativa';
+  static const String dayNoService = 'Hoje não tem serviço para você';
+  static const String dayResumeButton = 'Retomar';
+  static const String dayDoneTitle = 'Dia concluído';
+  static const String retryButton = 'Tentar de novo';
+
+  /// `Lote <n> · <done> de <total> pontos hoje` (top bar).
+  static String dayProgress(int batch, int done, int total) =>
+      'Lote $batch · $done de $total pontos hoje';
+
+  /// The day's summary under "Dia concluído".
+  static String dayDoneSummary(int done) =>
+      done == 1 ? '1 ponto concluído hoje' : '$done pontos concluídos hoje';
+
+  /// The silence chip over the map: `Sem localização há <min> min`.
+  static String silenceChip(int minutes) => 'Sem localização há $minutes min';
+
+  /// A building's floor line in the sheet: `<prédio> · <andar>`.
+  static String buildingFloor(String building, String floor) =>
+      '$building · $floor';
+
+  // --- gamification (redesign §6.8): full card, profile, achievements ---
+  static const String fullCardTitle = 'CARTÃO COMPLETO!';
+  static const String fullCardNextBatch = 'Pegar próximo lote';
+  static const String fullCardSeeMap = 'Ver mapa';
+  static const String profileTitle = 'Seu perfil';
+  static const String profileAchievements = 'Conquistas';
+  static const String profileStreakNote =
+      'Dia sem serviço não quebra a sequência.';
+  static const String profileSignOut = 'Sair';
+  static const String profileNoServiceDay = 'Sem serviço';
+
+  /// `Lote <n> · <total> pontos em <h> h <min> min` under the full card.
+  static String fullCardSummary(int batch, int total, Duration elapsed) =>
+      'Lote $batch · $total pontos em ${elapsed.inHours} h '
+      '${elapsed.inMinutes.remainder(60)} min';
+
+  /// `<n> dias seguidos` (the streak); singular for one, as R10/R11 did.
+  static String streakDays(int n) =>
+      n == 1 ? '1 dia seguido' : '$n dias seguidos';
+
+  /// Seg..Dom, indexed by `DateTime.weekday - 1`.
+  static const List<String> weekdayShort = [
+    'Seg',
+    'Ter',
+    'Qua',
+    'Qui',
+    'Sex',
+    'Sáb',
+    'Dom',
+  ];
+
+  static const String achievementFirstCard = 'Primeiro cartão completo';
+  static const String achievementStreak5 = '5 dias seguidos';
+  static const String achievementStreak20 = '20 dias seguidos';
+  static const String achievementPoints100 = '100 pontos concluídos';
+  static const String achievementCleanCard = 'Cartão completo sem pendências';
+
+  /// A locked achievement's progress: `12/20`.
+  static String achievementProgress(int current, int target) =>
+      '$current/$target';
 }

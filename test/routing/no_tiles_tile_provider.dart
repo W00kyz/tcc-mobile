@@ -12,7 +12,7 @@ final Uint8List _transparentPng = base64Decode(
 
 /// Base-tile provider that keeps a widget test off vector_map_tiles' real
 /// (async, timer-scheduling) tile pipeline. Inject it as
-/// `CampusMap.tileProviderOverride` / `MapScreen.tileProviderOverride`.
+/// `CampusMap.tileProviderOverride` / `MapHomeScreen.mapTileProvider`.
 class NoTilesTileProvider extends TileProvider {
   @override
   ImageProvider<Object> getImage(

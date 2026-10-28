@@ -136,8 +136,20 @@ void main() {
     await tester.pumpWidget(_app(RecordingAppealApi()));
     await tester.pumpAndSettle();
 
+    expect(find.text(AppStrings.appealsEmptyTitle), findsOneWidget);
+    expect(find.text(AppStrings.appealsEmptyBody), findsOneWidget);
+  });
+
+  testWidgets('with only filed appeals, the eligible list says it is empty', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(RecordingAppealApi(myAppeals: [_appeal(status: 'PENDING')])),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.appealsEmptyTitle), findsNothing);
     expect(find.text(AppStrings.appealsEligibleEmpty), findsOneWidget);
-    expect(find.text(AppStrings.appealsMineEmpty), findsOneWidget);
   });
 
   testWidgets('a failed load says so', (tester) async {
@@ -316,7 +328,7 @@ void main() {
       );
 
       testWidgets(
-        'the entry badge counts device stops and server points, each once',
+        'the appealable count covers device stops and server points, each once',
         (tester) async {
           final db = await deviceWith(
             'rs-1',
@@ -338,53 +350,18 @@ void main() {
                 ],
               ),
               db: db,
-              home: Scaffold(
-                appBar: AppBar(actions: const [AppealsEntryButton()]),
+              home: Consumer(
+                builder: (_, ref, _) =>
+                    Text('count:${watchAppealableCount(ref)}'),
               ),
             ),
           );
           await tester.pumpAndSettle();
 
           // rs-1 (both), rs-2 (server), rs-9 (device).
-          expect(find.widgetWithText(Badge, '3'), findsOneWidget);
+          expect(find.text('count:3'), findsOneWidget);
         },
       );
     },
   );
-
-  group('the route screen entry', () {
-    Widget entry(AppealApi api) => _app(
-      api,
-      home: Scaffold(appBar: AppBar(actions: const [AppealsEntryButton()])),
-    );
-
-    testWidgets('shows a badge with the count of contestable points', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        entry(
-          RecordingAppealApi(
-            eligibleStops: [
-              _eligible(),
-              _eligible(id: 'rs-2'),
-            ],
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.byTooltip(AppStrings.appealsTooltip), findsOneWidget);
-      expect(find.widgetWithText(Badge, '2'), findsOneWidget);
-    });
-
-    testWidgets('shows no badge when there is nothing to contest', (
-      tester,
-    ) async {
-      await tester.pumpWidget(entry(RecordingAppealApi()));
-      await tester.pumpAndSettle();
-
-      expect(find.byTooltip(AppStrings.appealsTooltip), findsOneWidget);
-      expect(find.byType(Badge), findsNothing);
-    });
-  });
 }

@@ -83,9 +83,6 @@ void main() {
         'execution_id': 'throwaway',
         'route_stop_id': 's1',
         'scanned_at': '2026-10-21T13:40:00.000Z',
-        'answers': [
-          {'stable_key': 'q1', 'value': 'limpo'},
-        ],
       },
     );
     await outbox.markStopReleased('out-s1', routeStopId: 's1', error: '409');
@@ -193,7 +190,7 @@ void main() {
   });
 
   testWidgets(
-    'warns that the offline photos and answers will be erased; cancelling '
+    'warns that the offline photos will be erased; cancelling '
     'sends nothing and keeps them',
     (tester) async {
       await parkedReleasedStop();
@@ -213,7 +210,7 @@ void main() {
   );
 
   testWidgets(
-    'sends the declaration and then deletes the local evidence, answers and '
+    'sends the declaration and then deletes the local evidence and '
     'outbox rows of the stop',
     (tester) async {
       await parkedReleasedStop();

@@ -32,18 +32,28 @@ void main() {
     tester,
   ) async {
     await pump(tester);
-    expect(find.text(AppStrings.silenceWarning(30, 15)), findsNothing);
+    expect(find.text(AppStrings.silenceChip(30)), findsNothing);
 
     now = t0.add(const Duration(minutes: 30));
     await tester.pump(SilenceBanner.refreshInterval);
 
-    expect(find.text(AppStrings.silenceWarning(30, 15)), findsOneWidget);
+    expect(find.text(AppStrings.silenceChip(30)), findsOneWidget);
+  });
+
+  testWidgets('a tap opens the whole warning', (tester) async {
+    now = t0.add(const Duration(minutes: 31));
+    await pump(tester);
+
+    await tester.tap(find.text(AppStrings.silenceChip(31)));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.silenceWarning(31, 14)), findsOneWidget);
   });
 
   testWidgets('goes away after the next activity', (tester) async {
     now = t0.add(const Duration(minutes: 31));
     await pump(tester);
-    expect(find.text(AppStrings.silenceWarning(31, 14)), findsOneWidget);
+    expect(find.text(AppStrings.silenceChip(31)), findsOneWidget);
 
     watchdog.onActivity();
     await tester.pump(SilenceBanner.refreshInterval);

@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/monitoring/notification_plugin.dart';
 
 /// The persistent "location collection is active" OS notification shown while
 /// a route is `IN_PROGRESS` (LGPD transparency, RNF11). A thin seam over
@@ -43,11 +44,8 @@ class LocalOngoingNotification implements OngoingNotification {
 
   Future<void> _ensureInit() async {
     if (_initialized) return;
-    await _plugin.initialize(
-      settings: const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      ),
-    );
+    // The shared init: a tap callback of its own would replace the app's.
+    await initializeNotificationPlugin(_plugin);
     await _plugin
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin

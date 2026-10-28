@@ -1,6 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:route_monitor/forms/form_draft_store.dart';
-import 'package:route_monitor/forms/form_schema.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
@@ -16,7 +14,6 @@ void main() {
   late DriftLocalWriteStore outbox;
   late DriftReleasedStopStore released;
   late DriftStopProgressStore progress;
-  late DriftFormDraftStore drafts;
 
   setUp(() {
     db = inMemoryDatabase();
@@ -27,7 +24,6 @@ void main() {
       now: () => DateTime.utc(2026, 10, 21, 15),
     );
     progress = DriftStopProgressStore(db);
-    drafts = DriftFormDraftStore(db);
   });
 
   /// Stop [stop]'s offline work: a check-in (execution `exec-<stop>`), a
@@ -64,9 +60,6 @@ void main() {
         'execution_id': 'throwaway-$stop',
         'route_stop_id': stop,
         'scanned_at': _checkOutAt,
-        'answers': [
-          {'stable_key': 'q1', 'value': 'limpo'},
-        ],
       },
     );
     await progress.upsertInProgress(stop, 'exec-$stop');
@@ -155,29 +148,11 @@ void main() {
 
   group('discardStop', () {
     test(
-      "deletes the stop's outbox rows, evidence, answers, progress and "
+      "deletes the stop's outbox rows, evidence, progress and "
       'notice — and nothing of another stop',
       () async {
         await workedOffline('s1');
         await workedOffline('s2');
-        await drafts.snapshotFrom(
-          'exec-s1',
-          's1',
-          const FormSchema(
-            formVersionId: 'v1',
-            questions: [
-              FormQuestion(
-                stableKey: 'q1',
-                orderIndex: 0,
-                prompt: 'Estado',
-                type: QuestionType.text,
-                required: true,
-                options: [],
-                contentHash: 'h1',
-              ),
-            ],
-          ),
-        );
         await outbox.markStopReleased(
           'out-s1',
           routeStopId: 's1',
@@ -199,7 +174,6 @@ void main() {
           'out-s2',
         });
         expect(await outbox.blockedForRoute('r1'), isEmpty);
-        expect(await drafts.itemsFor('exec-s1'), isEmpty);
         expect(await progress.progressFor('s1'), isNull);
         expect(await progress.progressFor('s2'), isNotNull);
         expect(await released.noticeFor('s1'), isNull);

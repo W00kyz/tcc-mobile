@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:dio/dio.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 
@@ -37,8 +38,8 @@ class EvidenceListEntry {
   /// `apiBaseUrlFromEnvironment()` to render `Image.network`.
   final String? contentUrl;
 
-  /// The upload's key, local or synced alike — how a MEDIA form answer finds
-  /// its photos in this list.
+  /// The upload's key, local or synced alike — how a local photo and its
+  /// synced copy are matched in this list.
   final String? idempotencyKey;
 }
 
@@ -63,6 +64,26 @@ EvidenceListEntry _fromApiItem(EvidenceItem item) => EvidenceListEntry(
   idempotencyKey: item.idempotencyKey,
 );
 
+/// The backend's synced items, or none when the device has no connection.
+///
+/// WHY: offline-first, the local SQLite rows are the truth (RNF06): the
+/// evidence count that gates "Concluir" must work in a basement. Synced
+/// photos are then undercounted, which errs on the safe side. Only a
+/// transport failure (a `DioException` with no HTTP response, the same
+/// definition `classifySyncError` uses) is tolerated; an HTTP error or
+/// anything else still propagates.
+Future<List<EvidenceItem>> _syncedItemsOrNone(
+  EvidenceApi api,
+  String executionId,
+) async {
+  try {
+    return await api.listEvidence(executionId);
+  } on DioException catch (error) {
+    if (error.response != null) rethrow;
+    return const [];
+  }
+}
+
 /// Loads one stop's evidence list for its [executionId]: the backend's
 /// synced items plus [store]'s still-unsynced rows for the same execution,
 /// oldest first.
@@ -72,7 +93,7 @@ Future<List<EvidenceListEntry>> loadStopEvidence({
   required String routeId,
   required String executionId,
 }) async {
-  final synced = await api.listEvidence(executionId);
+  final synced = await _syncedItemsOrNone(api, executionId);
   final unsynced = await store.unsyncedForRoute(routeId);
   final localEntries = unsynced.where(
     (row) =>
