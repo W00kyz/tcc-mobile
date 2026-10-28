@@ -11,6 +11,7 @@ import 'package:route_monitor/routing/route_providers.dart' show myDayProvider;
 import 'package:route_monitor/routing/route_repository.dart' show MyDay;
 import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
+import 'package:route_monitor/ui/snackbar_lane.dart';
 
 /// Listens for the stops the sync worker finds released (spec
 /// 2026-10-20-alocacao-automatica §7.5). Each refreshes the appeals badge;
@@ -21,8 +22,14 @@ import 'package:route_monitor/sync/sync_providers.dart';
 ///
 ///     Scaffold(body: ReleasedStopListener(child: body))
 class ReleasedStopListener extends ConsumerWidget {
-  const ReleasedStopListener({required this.child, super.key});
+  const ReleasedStopListener({
+    required this.lane,
+    required this.child,
+    super.key,
+  });
 
+  /// The home's snackbar line: the offer floats above the map sheet.
+  final SnackbarLane lane;
   final Widget child;
 
   @override
@@ -49,18 +56,18 @@ class ReleasedStopListener extends ConsumerWidget {
 
   void _offerAppeal(BuildContext context, WidgetRef ref) {
     // One snackbar for the batch of releases a sync pass finds, not a
-    // queue of identical ones.
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: const Text(AppStrings.releasedStopsSnackbar),
-          action: SnackBarAction(
-            label: AppStrings.releasedStopsSnackbarAction,
-            onPressed: () => unawaited(_openAppeal(context, ref)),
-          ),
+    // queue of identical ones: the lane keeps only the newest.
+    lane.show(
+      SnackKind.appeal,
+      (margin) => SnackBar(
+        content: const Text(AppStrings.releasedStopsSnackbar),
+        margin: margin,
+        action: SnackBarAction(
+          label: AppStrings.releasedStopsSnackbarAction,
+          onPressed: () => unawaited(_openAppeal(context, ref)),
         ),
-      );
+      ),
+    );
   }
 
   Future<void> _openAppeal(BuildContext context, WidgetRef ref) async {

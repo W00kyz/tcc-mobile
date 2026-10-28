@@ -498,11 +498,8 @@ void main() {
         final messenger = ScaffoldMessenger.of(
           tester.element(find.byType(MapHomeScreen)),
         );
-        // Twice: a sync notice queued behind it would follow.
-        for (var i = 0; i < 2; i++) {
-          messenger.clearSnackBars();
-          await settle(tester);
-        }
+        messenger.clearSnackBars();
+        await settle(tester);
 
         await openAppeals(tester);
         expect(find.text(AppStrings.appealsLocalTitle), findsOneWidget);

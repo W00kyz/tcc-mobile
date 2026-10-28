@@ -24,6 +24,7 @@ import 'package:route_monitor/routing/stop_actions.dart';
 import 'package:route_monitor/sync/sync_snackbars.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/map_sheet.dart';
+import 'package:route_monitor/ui/snackbar_lane.dart';
 import 'package:route_monitor/ui/sync_indicator.dart';
 
 /// The building whose pin the worker tapped: the sheet lists its stops
@@ -69,6 +70,10 @@ class MapHomeScreen extends ConsumerStatefulWidget {
 class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   final MapController _map = MapController();
   final DraggableScrollableController _sheet = DraggableScrollableController();
+  late final SnackbarLane _lane = SnackbarLane(
+    contextOf: () => mounted ? context : null,
+    sheet: _sheet,
+  );
   LatLng? _workerPosition;
 
   /// The card last drawn, so the stamp listener finds the stop's building.
@@ -109,9 +114,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         // The "Recorrer" snackbar when a late write finds its stop released
         // (spec §7.5).
         body: ReleasedStopListener(
+          lane: _lane,
           child: SyncSnackbars(
             routeId: route?.id,
-            sheet: _sheet,
+            lane: _lane,
             child: LayoutBuilder(
               builder: (context, constraints) => Stack(
                 children: [

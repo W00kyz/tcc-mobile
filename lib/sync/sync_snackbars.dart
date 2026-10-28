@@ -10,16 +10,16 @@ import 'package:route_monitor/routing/day_state_panels.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_snackbar_queue.dart';
 import 'package:route_monitor/sync/sync_status.dart';
-import 'package:route_monitor/ui/map_sheet.dart';
+import 'package:route_monitor/ui/snackbar_lane.dart';
 
 /// Reports the sync with snackbars while the app is open (redesign §6.7): at
 /// most one at a time, floating above the map sheet so "Escanear QR" is
 /// never covered.
 ///
-///     SyncSnackbars(routeId: route.id, sheet: controller, child: body)
+///     SyncSnackbars(routeId: route.id, lane: lane, child: body)
 class SyncSnackbars extends ConsumerStatefulWidget {
   const SyncSnackbars({
-    required this.sheet,
+    required this.lane,
     required this.child,
     this.routeId,
     super.key,
@@ -28,8 +28,8 @@ class SyncSnackbars extends ConsumerStatefulWidget {
   /// Today's route, when there is one; no sync status to report without it.
   final String? routeId;
 
-  /// The map sheet's controller: its height lifts the snackbars.
-  final DraggableScrollableController sheet;
+  /// The home's snackbar line: it lifts them over the map sheet.
+  final SnackbarLane lane;
   final Widget child;
 
   @override
@@ -38,12 +38,19 @@ class SyncSnackbars extends ConsumerStatefulWidget {
 
 class _SyncSnackbarsState extends ConsumerState<SyncSnackbars> {
   final SyncSnackbarQueue _queue = SyncSnackbarQueue();
-  RouteSyncStatus _last = const RouteSyncStatus(
+  static const RouteSyncStatus _quiet = RouteSyncStatus(
     routeId: '',
     state: RouteSyncState.idle,
     pending: 0,
     blocked: 0,
   );
+  RouteSyncStatus _last = _quiet;
+
+  @override
+  void didUpdateWidget(SyncSnackbars oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.routeId != widget.routeId) _last = _quiet;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -72,52 +79,18 @@ class _SyncSnackbarsState extends ConsumerState<SyncSnackbars> {
     if (notice != null) _show(notice);
   }
 
-  /// The sync snackbar on screen, when it is the one showing.
-  ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? _visible;
-
-  /// A sync snackbar is queued or showing: a newer notice waits in [_pending]
-  /// and replaces it, but never closes another feature's (the "Recorrer"
-  /// offer).
-  bool _active = false;
-  SyncNotice? _pending;
-
   void _show(SyncNotice notice) {
-    if (!_active) return _display(notice);
-    _pending = notice;
-    _visible?.close();
-  }
-
-  void _display(SyncNotice notice) {
     final (text, label, onPressed) = _content(notice);
-    _active = true;
-    late final ScaffoldFeatureController<SnackBar, SnackBarClosedReason> shown;
-    shown = ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
+    widget.lane.show(
+      SnackKind.sync,
+      (margin) => SnackBar(
         content: Text(text),
-        margin: _margin(context),
-        onVisible: () => _visible = shown,
+        margin: margin,
         action: label == null
             ? null
             : SnackBarAction(label: label, onPressed: onPressed!),
       ),
     );
-    unawaited(shown.closed.then((_) => _onClosed()));
-  }
-
-  void _onClosed() {
-    _visible = null;
-    _active = false;
-    final next = _pending;
-    _pending = null;
-    if (next != null && mounted) _show(next);
-  }
-
-  /// Bottom margin equal to the sheet's current height.
-  EdgeInsets _margin(BuildContext context) {
-    final sheet = widget.sheet;
-    final fraction = sheet.isAttached ? sheet.size : kMapSheetInitial;
-    final height = MediaQuery.sizeOf(context).height * fraction;
-    return EdgeInsets.fromLTRB(16, 0, 16, height + 8);
   }
 
   (String, String?, VoidCallback?) _content(SyncNotice notice) =>

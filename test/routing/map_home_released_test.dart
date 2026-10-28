@@ -133,6 +133,39 @@ void main() {
       },
     );
 
+    testWidgets('the "Recorrer" snackbar floats above "Escanear QR"', (
+      tester,
+    ) async {
+      final db = await dbWithNotice();
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(route),
+          releasedStopStore: DriftReleasedStopStore(db),
+        ),
+      );
+
+      for (final size in [0.5, 0.22]) {
+        await snapSheetTo(tester, size);
+        announce(tester, appealable: true);
+        await tester.pumpAndSettle();
+        final snack = tester.getRect(
+          find
+              .descendant(
+                of: find.byType(SnackBar),
+                matching: find.byType(Material),
+              )
+              .first,
+        );
+        final scan = tester.getRect(scanQrButton());
+        expect(snack.bottom, lessThanOrEqualTo(scan.top), reason: 'at $size');
+        ScaffoldMessenger.of(
+          tester.element(find.byType(MapHomeScreen)),
+        ).clearSnackBars();
+        await tester.pumpAndSettle();
+      }
+    });
+
     testWidgets('a release the worker cannot appeal shows no snackbar', (
       tester,
     ) async {

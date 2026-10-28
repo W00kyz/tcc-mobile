@@ -16,6 +16,18 @@ import 'map_home_harness.dart';
 // top-bar indicator and its detail sheet), the per-stop outbox chips and the
 // next-batch pull.
 
+/// Records when `syncAll` runs, to be read against the pull.
+class _OrderedWorker extends RecordingSyncWorker {
+  _OrderedWorker(this.events);
+  final List<String> events;
+
+  @override
+  Future<void> syncAll() {
+    events.add('syncAll');
+    return super.syncAll();
+  }
+}
+
 RouteSummary _pendingRoute() => routeWith(stops: [stopIn(id: 's1')]);
 
 RouteSyncStatus _statusOf({
@@ -350,6 +362,43 @@ void main() {
         ),
         findsOneWidget,
       );
+    });
+
+    testWidgets('the snackbar\'s "Tentar de novo" syncs, then pulls, in that '
+        'order', (tester) async {
+      final events = <String>[];
+      final connectivity = FakeConnectivity();
+      addTearDown(connectivity.dispose);
+      final progress = FakeStopProgressStore({'s1': 'exec-1'});
+      await progress.markDone('s1');
+      final repository = repositoryWith(lastStopInProgress());
+      handOutSecondBatch(repository);
+      final pull = repository.allocate!;
+      repository.allocate = () {
+        events.add('pull');
+        return pull();
+      };
+      await pumpHome(
+        tester,
+        homeWith(
+          repository,
+          connectivity: connectivity,
+          stopProgressStore: progress,
+          syncWorker: _OrderedWorker(events),
+        ),
+      );
+      // Back online without the regained edge: only the tap may pull.
+      connectivity.isOnlineValue = true;
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(SnackBar),
+          matching: find.text(AppStrings.retryButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(events, ['syncAll', 'pull']);
     });
 
     testWidgets(
