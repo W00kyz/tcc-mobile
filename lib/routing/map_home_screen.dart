@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 
 import 'package:route_monitor/appeals/released_stop_listener.dart';
 import 'package:route_monitor/execution/observation_draft.dart';
+import 'package:route_monitor/execution/task_dialog.dart';
 import 'package:route_monitor/gamification/full_card_trigger.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/collection_banner.dart';
@@ -412,16 +413,15 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
           ),
         ],
       ),
-      body: _floorCard(building),
+      body: _floorCard(route, building),
       stickyFooter: scanFooterFor(route, buildings, building),
     );
   }
 
-  Widget _floorCard(DayBuilding building) => FloorCard(
+  Widget _floorCard(RouteSummary route, DayBuilding building) => FloorCard(
     key: ValueKey('floor-card-of-${building.buildingId}'),
     building: building,
-    // The task dialog (Task 7) opens from here.
-    onSlotTap: (_, _) {},
+    onSlotTap: (slot, _) => showSlotTask(context, ref, route, slot),
     animateStopId: ref.watch(lastStampedStopProvider),
     animateImpededStopId: ref.watch(lastImpededStopProvider),
   );

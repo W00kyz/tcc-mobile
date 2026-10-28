@@ -122,6 +122,17 @@ abstract final class AppStrings {
   static String floorCheckInDone(int n) =>
       'Check-in do andar feito · $n ${n == 1 ? 'tarefa' : 'tarefas'}';
 
+  // --- task dialog and impossibility reason ---
+  static const String taskObservationLabel =
+      'Observação, sugestão ou reclamação';
+  static const String taskAddPhotos = 'Adicionar fotos';
+  static const String taskRemovePhoto = 'Remover foto';
+  static const String taskNeedsFloorCheckIn =
+      'Faça o check-in do andar para registrar esta tarefa';
+  static const String taskConclude = 'Concluir tarefa';
+  static const String taskRequiresPhotos = 'Exige pelo menos 2 fotos';
+  static const String impossibilityReasonTitle = 'Por que não é possível?';
+
   // --- building sheet: header, floor card, scan footer ---
   static const String buildingSheetNext = 'Próximo ponto';
   static const String buildingSheetSelected = 'Prédio selecionado';

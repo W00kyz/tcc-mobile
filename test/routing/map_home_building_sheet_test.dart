@@ -310,4 +310,29 @@ void main() {
     expect(checkIns.map((row) => row.payload['route_stop_id']), ['s1']);
     expect(find.text(AppStrings.floorCheckInDone(1)), findsOneWidget);
   });
+
+  testWidgets('tapping an open task slot opens its task dialog', (
+    tester,
+  ) async {
+    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+
+    await tapInSheet(tester, slotOf('s2'));
+
+    expect(find.byType(Dialog), findsOneWidget);
+    expect(find.text('Sala s2'), findsOneWidget);
+  });
+
+  testWidgets('tapping a done task slot opens nothing', (tester) async {
+    final route = routeWith(
+      stops: [
+        stopIn(id: 's1', status: 'DONE'),
+        stopIn(id: 's2', orderIndex: 2),
+      ],
+    );
+    await pumpHome(tester, homeWith(repositoryWith(route)));
+
+    await tapInSheet(tester, slotOf('s1'));
+
+    expect(find.byType(Dialog), findsNothing);
+  });
 }

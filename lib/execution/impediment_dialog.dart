@@ -1,18 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:route_monitor/execution/impossibility_reason_dialog.dart';
 import 'package:route_monitor/l10n/strings.dart';
-
-/// The reason options offered by [ImpedimentDialog]. The first element of each
-/// pair is the backend wire value (see
-/// `backend/app/domain/impediments/models.py::ImpedimentReason`) — it is what
-/// gets sent as `reason`; the second is the pt-BR label shown to the field
-/// worker (from [AppStrings], RNF02).
-const _reasonOptions = <(String, String)>[
-  ('ACCESS_BLOCKED', AppStrings.impedimentReasonAccessBlocked),
-  ('SITE_REFUSAL', AppStrings.impedimentReasonSiteRefusal),
-  ('HEALTH_ISSUE', AppStrings.impedimentReasonHealthIssue),
-  ('OTHER', AppStrings.impedimentReasonOther),
-];
 
 /// The outcome of [ImpedimentDialog]: the reason wire value, the derived
 /// `scope`, and an optional free-text note. `null` from the dialog means the
@@ -30,8 +19,8 @@ class ImpedimentChoice {
   /// pauses (spec 2026-10-20-alocacao-automatica §7.1).
   final String scope;
 
-  /// A wire value from [_reasonOptions] — `ACCESS_BLOCKED`, `SITE_REFUSAL`,
-  /// `HEALTH_ISSUE` or `OTHER`.
+  /// A wire value from [impossibilityReasons] — `ACCESS_BLOCKED`,
+  /// `SITE_REFUSAL`, `HEALTH_ISSUE` or `OTHER`.
   final String reason;
 
   /// The trimmed note, or `null` when the field left it blank.
@@ -136,7 +125,7 @@ class _ImpedimentDialogState extends State<ImpedimentDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final (value, label) in _reasonOptions)
+          for (final (value, label) in impossibilityReasons)
             RadioListTile<String>(
               contentPadding: EdgeInsets.zero,
               value: value,
