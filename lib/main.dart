@@ -13,6 +13,7 @@ import 'package:route_monitor/privacy/consent_screen.dart';
 import 'package:route_monitor/privacy/my_data_screen.dart';
 import 'package:route_monitor/routing/route_screen.dart';
 import 'package:route_monitor/sync/sync_triggers.dart';
+import 'package:route_monitor/ui/app_theme.dart';
 
 void main() {
   runApp(const ProviderScope(child: RouteMonitorApp()));
@@ -106,10 +107,7 @@ class RouteMonitorApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp.router(
       title: 'Monitoramento de Rotas',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1B4332)),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       routerConfig: ref.watch(routerProvider),
       builder: (context, child) => SyncTriggers(
         child: PositionReportingTrigger(
