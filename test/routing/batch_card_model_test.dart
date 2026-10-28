@@ -110,6 +110,21 @@ void main() {
       expect(slot.stampedAt!.minute, 20);
     });
 
+    test('a local stamp is not next: the next slot moves on', () {
+      final card = buildBatchCard(
+        _fixture(),
+        {
+          'caa1': LocalStopState(
+            status: StopLocalStatus.stamped,
+            updatedAt: DateTime(2026, 10, 27, 9),
+          ),
+        },
+        {},
+      );
+      expect(_slot(card, 'caa1').state, SlotState.stamped);
+      expect(_slot(card, 'caa2').state, SlotState.next);
+    });
+
     test('server done uses doneAt', () {
       final at = DateTime(2026, 10, 27, 9, 5);
       final card = buildBatchCard(_fixture(caa2DoneAt: at), {}, {});

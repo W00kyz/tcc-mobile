@@ -84,10 +84,10 @@ class _StampSlotState extends State<StampSlot>
 
   String _stateLabel() => switch (widget.slot.state) {
     SlotState.done => AppStrings.slotDone(_hour()),
-    SlotState.released => AppStrings.slotReleased(_reason),
+    SlotState.released || SlotState.impeded => AppStrings.slotReleased(_reason),
     SlotState.pending => AppStrings.slotPending,
     SlotState.next => AppStrings.slotNext,
-    SlotState.inProgress => AppStrings.slotInProgress,
+    SlotState.inProgress || SlotState.stamped => AppStrings.slotInProgress,
   };
 
   @override
@@ -140,8 +140,8 @@ class _StampSlotState extends State<StampSlot>
     if (slot.state == SlotState.done) return _stamp(p);
     final kind = switch (slot.state) {
       SlotState.next => RingKind.next,
-      SlotState.inProgress => RingKind.inProgress,
-      SlotState.released => RingKind.released,
+      SlotState.inProgress || SlotState.stamped => RingKind.inProgress,
+      SlotState.released || SlotState.impeded => RingKind.released,
       _ => RingKind.pending,
     };
     return CustomPaint(

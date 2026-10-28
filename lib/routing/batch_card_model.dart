@@ -2,8 +2,10 @@ import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
-/// How one stop of the batch card is drawn.
-enum SlotState { done, next, inProgress, pending, released }
+/// How one stop of the batch card is drawn. `stamped` is a task finished on
+/// its floor whose check-out has not been made; `impeded` is a task the
+/// worker could not do (an impediment report), closed without being done.
+enum SlotState { done, stamped, impeded, next, inProgress, pending, released }
 
 /// What this device knows about a stop, from its local progress row.
 class LocalStopState {
@@ -58,7 +60,10 @@ class BuildingGroup {
   /// Released stops are not counted: they went back to the pool.
   int get total => slots.where((s) => s.state != SlotState.released).length;
 
-  bool get complete => total > 0 && done == total;
+  /// Impeded stops count as closed: nothing more can be done about them.
+  int get impeded => slots.where((s) => s.state == SlotState.impeded).length;
+
+  bool get complete => total > 0 && done + impeded == total;
 }
 
 class BatchCard {
@@ -178,8 +183,8 @@ CardSlot _slotOf(
 }
 
 /// The stop's effective state: released, then a local or server done, then
-/// a local or server in-progress; otherwise the first open stop is `next`
-/// when [mayBeNext], and the rest are pending.
+/// a local stamp, then a local or server in-progress; otherwise the first
+/// open stop is `next` when [mayBeNext], and the rest are pending.
 SlotState _slotStateOf(
   RouteStopSummary stop,
   LocalStopState? localState, {
@@ -189,6 +194,7 @@ SlotState _slotStateOf(
   if (localState?.status == StopLocalStatus.done || stop.status == 'DONE') {
     return SlotState.done;
   }
+  if (localState?.status == StopLocalStatus.stamped) return SlotState.stamped;
   if (localState?.status == StopLocalStatus.inProgress ||
       stop.status == 'IN_PROGRESS') {
     return SlotState.inProgress;

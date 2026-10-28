@@ -106,9 +106,9 @@ class StopRow extends ConsumerWidget {
   String _stateLabel() => switch (slot.state) {
     SlotState.done => _doneLabel(slot.stampedAt),
     SlotState.next => AppStrings.slotNext,
-    SlotState.inProgress => AppStrings.slotInProgress,
+    SlotState.inProgress || SlotState.stamped => AppStrings.slotInProgress,
     SlotState.pending => AppStrings.slotPending,
-    SlotState.released => AppStrings.routeStopReleased(
+    SlotState.released || SlotState.impeded => AppStrings.routeStopReleased(
       stop.releaseReason == null
           ? null
           : AppStrings.releaseReasonLabel(stop.releaseReason!),

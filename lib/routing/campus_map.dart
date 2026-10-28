@@ -176,7 +176,7 @@ RouteMapLeg _approachLeg(LiveApproach approach) => RouteMapLeg(
 );
 
 LegKind _legKind(SlotState? destination) => switch (destination) {
-  SlotState.done || SlotState.released => LegKind.walked,
+  SlotState.done || SlotState.released || SlotState.impeded => LegKind.walked,
   SlotState.next => LegKind.next,
   _ => LegKind.rest,
 };
