@@ -391,8 +391,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   /// After a written check-out (redesign §6.6): the map centres on the
   /// stop's building and the sheet comes to half height, where the card —
-  /// and the stamp falling on it — shows.
+  /// and the stamp falling on it — shows. A selected building would keep
+  /// the card off the sheet, so the selection goes first (final review I-5).
   void _onStamped(String stopId) {
+    _clearSelection();
     final group = _card?.groups
         .where((g) => g.slots.any((slot) => slot.stopId == stopId))
         .firstOrNull;
