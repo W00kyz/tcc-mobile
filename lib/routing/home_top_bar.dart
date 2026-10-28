@@ -132,10 +132,9 @@ class _ProgressDots extends StatelessWidget {
   }
 }
 
-enum _AccountEntry { profile, myData, appeals }
-
-/// The ink avatar with the worker's initial; its menu holds "Perfil", "Meus
-/// dados" and "Recursos", badged with the points the worker can contest.
+/// The ink avatar with the worker's initial; a tap opens Perfil, whose
+/// shortcuts reach Meus dados and Recursos. Badged with the points the worker
+/// can contest, so a pending appeal is visible from the map.
 class _AccountAvatar extends ConsumerWidget {
   const _AccountAvatar({required this.name});
 
@@ -143,9 +142,21 @@ class _AccountAvatar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
     final count = watchAppealableCount(ref);
-    final avatar = CircleAvatar(
+    final avatar = _initialAvatar(context);
+    // IconButton keeps the 48dp target a bare 40dp avatar would lack.
+    return IconButton(
+      tooltip: AppStrings.profileTooltip,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+      onPressed: () => unawaited(context.push('/perfil')),
+      icon: count == 0 ? avatar : Badge(label: Text('$count'), child: avatar),
+    );
+  }
+
+  Widget _initialAvatar(BuildContext context) {
+    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    return CircleAvatar(
       radius: 20,
       backgroundColor: p.ink,
       foregroundColor: p.white,
@@ -153,44 +164,6 @@ class _AccountAvatar extends ConsumerWidget {
           ? const Icon(Icons.person_outline)
           : Text(name.characters.first.toUpperCase()),
     );
-    return PopupMenuButton<_AccountEntry>(
-      tooltip: AppStrings.accountMenuTooltip,
-      // A bare child gets a shrink-wrapped 40dp target; pad it to 48dp.
-      style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.padded),
-      onSelected: (entry) => _open(context, entry),
-      itemBuilder: (_) => [
-        const PopupMenuItem(
-          value: _AccountEntry.profile,
-          child: Text(AppStrings.profileMenuEntry),
-        ),
-        const PopupMenuItem(
-          value: _AccountEntry.myData,
-          child: Text(AppStrings.myDataTitle),
-        ),
-        PopupMenuItem(
-          value: _AccountEntry.appeals,
-          child: _appealsEntry(count),
-        ),
-      ],
-      child: count == 0 ? avatar : Badge(label: Text('$count'), child: avatar),
-    );
-  }
-
-  Widget _appealsEntry(int count) {
-    const label = Text(AppStrings.appealsTooltip);
-    if (count == 0) return label;
-    return Badge(label: Text('$count'), child: label);
-  }
-
-  void _open(BuildContext context, _AccountEntry entry) {
-    switch (entry) {
-      case _AccountEntry.profile:
-        unawaited(context.push('/perfil'));
-      case _AccountEntry.myData:
-        unawaited(context.push('/meus-dados'));
-      case _AccountEntry.appeals:
-        unawaited(context.push('/recursos'));
-    }
   }
 }
 

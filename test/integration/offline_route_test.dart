@@ -24,6 +24,7 @@ import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
+import 'package:route_monitor/gamification/profile_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
@@ -433,8 +434,8 @@ void main() {
     }
 
     Future<void> openAppeals(WidgetTester tester) async {
-      // "Recursos" sits in the account avatar's menu.
-      await tester.tap(find.byTooltip(AppStrings.accountMenuTooltip));
+      // The account avatar opens Perfil, whose shortcuts include "Recursos".
+      await tester.tap(find.byTooltip(AppStrings.profileTooltip));
       await settle(tester);
       await tester.tap(find.text(AppStrings.appealsTooltip));
       await settle(tester);
@@ -744,6 +745,7 @@ class _Fixture {
               MapHomeScreen(mapTileProvider: NoTilesTileProvider()),
         ),
         GoRoute(path: '/recursos', builder: (_, _) => const AppealsScreen()),
+        GoRoute(path: '/perfil', builder: (_, _) => const ProfileScreen()),
       ],
     );
     addTearDown(router.dispose);

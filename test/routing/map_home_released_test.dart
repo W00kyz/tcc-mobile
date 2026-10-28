@@ -217,8 +217,8 @@ void main() {
     });
 
     testWidgets(
-      'the account avatar counts the points the worker can contest, and its '
-      'menu leads to them',
+      'the account avatar counts the points the worker can contest and is a '
+      'direct link to Perfil, with no menu',
       (tester) async {
         await pumpHome(
           tester,
@@ -239,20 +239,9 @@ void main() {
           ),
         );
 
-        expect(find.byTooltip(AppStrings.accountMenuTooltip), findsOneWidget);
+        expect(find.byTooltip(AppStrings.profileTooltip), findsOneWidget);
         expect(find.widgetWithText(Badge, '1'), findsOneWidget);
-
-        await tester.tap(find.byTooltip(AppStrings.accountMenuTooltip));
-        await tester.pumpAndSettle();
-
-        expect(find.text(AppStrings.profileMenuEntry), findsOneWidget);
-        expect(find.text(AppStrings.myDataTitle), findsOneWidget);
-        expect(find.text(AppStrings.appealsTooltip), findsOneWidget);
-        // Perfil comes first (redesign §6.12).
-        expect(
-          tester.getTopLeft(find.text(AppStrings.profileMenuEntry)).dy,
-          lessThan(tester.getTopLeft(find.text(AppStrings.myDataTitle)).dy),
-        );
+        expect(find.byType(PopupMenuButton<Object>), findsNothing);
       },
     );
   });

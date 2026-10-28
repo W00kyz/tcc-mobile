@@ -532,7 +532,7 @@ abstract final class AppStrings {
   static const String scanQrButton = 'Escanear QR';
   static const String nextStopLabel = 'Próxima parada';
   static const String myPositionTooltip = 'Minha posição';
-  static const String accountMenuTooltip = 'Menu da conta';
+  static const String profileTooltip = 'Abrir perfil';
   static const String collectionChip = 'Coleta de localização ativa';
   static const String dayNoService = 'Hoje não tem serviço para você';
   static const String dayResumeButton = 'Retomar';
@@ -558,7 +558,6 @@ abstract final class AppStrings {
   static const String fullCardTitle = 'CARTÃO COMPLETO!';
   static const String fullCardNextBatch = 'Pegar próximo lote';
   static const String fullCardSeeMap = 'Ver mapa';
-  static const String profileMenuEntry = 'Perfil';
   static const String profileTitle = 'Seu perfil';
   static const String profileAchievements = 'Conquistas';
   static const String profileStreakNote =

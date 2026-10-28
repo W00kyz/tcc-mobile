@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:route_monitor/appeals/appeals_screen.dart';
 
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/gamification/achievement_grid.dart';
@@ -215,13 +216,15 @@ class _ProfileShortcuts extends ConsumerWidget {
       ),
       child: Column(
         children: [
-          _row(Icons.badge_outlined, AppStrings.myDataTitle, () {
+          _row(const Icon(Icons.badge_outlined), AppStrings.myDataTitle, () {
             unawaited(context.push('/meus-dados'));
           }),
-          _row(Icons.flag_outlined, AppStrings.appealsTooltip, () {
-            unawaited(context.push('/recursos'));
-          }),
-          _row(Icons.logout, AppStrings.profileSignOut, () {
+          _row(
+            _badged(Icons.flag_outlined, watchAppealableCount(ref)),
+            AppStrings.appealsTooltip,
+            () => unawaited(context.push('/recursos')),
+          ),
+          _row(const Icon(Icons.logout), AppStrings.profileSignOut, () {
             unawaited(ref.read(sessionProvider.notifier).logout());
           }),
         ],
@@ -229,9 +232,13 @@ class _ProfileShortcuts extends ConsumerWidget {
     );
   }
 
-  Widget _row(IconData icon, String label, VoidCallback onTap) => ListTile(
+  /// The points the worker can contest, carried over from the map avatar.
+  Widget _badged(IconData icon, int count) =>
+      count == 0 ? Icon(icon) : Badge(label: Text('$count'), child: Icon(icon));
+
+  Widget _row(Widget leading, String label, VoidCallback onTap) => ListTile(
     minTileHeight: 56,
-    leading: Icon(icon),
+    leading: leading,
     title: Text(label),
     onTap: onTap,
   );

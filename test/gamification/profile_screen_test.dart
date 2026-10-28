@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/appeals/appeal_api.dart';
+import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/gamification/gamification_providers.dart';
 import 'package:route_monitor/gamification/profile_screen.dart';
@@ -34,7 +37,17 @@ List<DayLogEntry> _log() => [
   _day(DateTime(2026, 10, 22)),
 ];
 
-Future<void> _pump(WidgetTester tester) async {
+/// The Recursos badge reads the appeal lists; keep them off the network and
+/// the database.
+List<Override> _noAppealsBut(List<AppealableStop> contestable) => [
+  appealEligibleProvider.overrideWith((_) async => contestable),
+  localReleasedNoticesProvider.overrideWith((_) async => const []),
+];
+
+Future<void> _pump(
+  WidgetTester tester, {
+  List<AppealableStop> contestable = const [],
+}) async {
   tester.view
     ..physicalSize = const Size(420, 1400)
     ..devicePixelRatio = 1;
@@ -46,6 +59,7 @@ Future<void> _pump(WidgetTester tester) async {
           RecordingDayLogStore(entries: _log()),
         ),
         gamificationClockProvider.overrideWithValue(() => _today),
+        ..._noAppealsBut(contestable),
       ],
       child: MaterialApp(theme: buildAppTheme(), home: const ProfileScreen()),
     ),
@@ -119,6 +133,7 @@ void main() {
         overrides: [
           dayLogStoreProvider.overrideWithValue(store),
           gamificationClockProvider.overrideWithValue(() => _today),
+          ..._noAppealsBut(const []),
         ],
         child: MaterialApp(
           theme: buildAppTheme(),
@@ -164,6 +179,32 @@ void main() {
       expect(tile, findsOneWidget);
       expect(tester.getSize(tile).height, greaterThanOrEqualTo(48));
     }
+  });
+
+  testWidgets('the Recursos row carries the contestable-points badge that '
+      'used to sit in the avatar menu', (tester) async {
+    await _pump(
+      tester,
+      contestable: [
+        AppealableStop(
+          routeStopId: 's1',
+          servicePointName: 'Sala 101',
+          buildingName: 'Bloco CAA',
+          floorLabel: 'Térreo',
+          releaseReason: 'LOCATION_SILENCE',
+          deadline: DateTime.utc(2026, 10, 22, 14),
+        ),
+      ],
+    );
+
+    final row = find.ancestor(
+      of: find.text('Recursos'),
+      matching: find.byType(ListTile),
+    );
+    expect(
+      find.descendant(of: row, matching: find.widgetWithText(Badge, '1')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('no ranking and no other worker', (tester) async {

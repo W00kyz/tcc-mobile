@@ -339,9 +339,7 @@ void main() {
     testWidgets('the account avatar is a 48dp touch target', (tester) async {
       await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
 
-      final size = tester.getSize(
-        find.byWidgetPredicate((widget) => widget is PopupMenuButton),
-      );
+      final size = tester.getSize(find.byTooltip(AppStrings.profileTooltip));
       expect(size.width, greaterThanOrEqualTo(48));
       expect(size.height, greaterThanOrEqualTo(48));
     });
