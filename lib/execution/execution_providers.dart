@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/misc.dart' show FutureProviderFamily;
 import 'package:route_monitor/api/env.dart';
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
+import 'package:route_monitor/execution/evidence_camera.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/execution/execution_api.dart';
@@ -71,11 +72,18 @@ final evidenceApiProvider = Provider<EvidenceApi>((ref) {
   return DioEvidenceApi(dio);
 });
 
-/// Real camera capture in production; the map home's tests override this
-/// with a fake `EvidenceCapture` instead of touching the platform camera.
-final evidenceCaptureProvider = Provider<EvidenceCapture>(
-  (ref) => DeviceEvidenceCapture(),
+/// The in-app photo camera; the photo-sequence tests override it with a fake
+/// `EvidenceCamera` instead of touching the platform camera.
+final evidenceCameraProvider = Provider<EvidenceCamera>(
+  (ref) => DeviceEvidenceCamera(),
 );
+
+/// Compresses a camera file into a `CapturedPhoto`; a seam so tests skip the
+/// platform compression channel.
+final capturedFileCompressorProvider =
+    Provider<Future<CapturedPhoto> Function(String path)>(
+      (ref) => compressCapturedFile,
+    );
 
 final executionRepositoryProvider = Provider<ExecutionRepository>(
   (ref) => ExecutionRepository(

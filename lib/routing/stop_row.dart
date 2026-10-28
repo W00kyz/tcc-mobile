@@ -66,6 +66,8 @@ class StopRow extends ConsumerWidget {
               routeId: route.id,
               routeStopId: stop.id,
               requiresEvidence: stop.requiresEvidence,
+              buildingName: stop.buildingName,
+              floorLabel: stop.floorLabel,
             ),
         ],
       ),

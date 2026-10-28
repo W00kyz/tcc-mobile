@@ -1,0 +1,267 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/execution/evidence_capture.dart';
+import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/photo_sequence_screen.dart';
+import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/local/local_write_store.dart';
+import 'package:route_monitor/sync/sync_providers.dart';
+import 'package:route_monitor/ui/app_theme.dart';
+
+import '../routing/map_home_fakes.dart';
+import '../support/fake_evidence_camera.dart';
+
+const _shutter = Key('photo-shutter');
+const _done = Key('photo-done');
+
+/// A store whose `enqueue` waits on [gate] when set, to observe the screen
+/// between "shutter tapped" and "row written".
+class _GatedStore extends InMemoryLocalWriteStore {
+  Completer<void>? gate;
+  Error? failure;
+
+  @override
+  Future<void> enqueue({
+    required String id,
+    required PendingOpKind kind,
+    required Map<String, dynamic> payload,
+    required String routeId,
+  }) async {
+    await gate?.future;
+    if (failure != null) throw failure!;
+    return super.enqueue(
+      id: id,
+      kind: kind,
+      payload: payload,
+      routeId: routeId,
+    );
+  }
+}
+
+Future<void> _pump(
+  WidgetTester tester, {
+  required InMemoryLocalWriteStore store,
+  int? minimum,
+  FakeEvidenceCamera? camera,
+}) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        localWriteStoreProvider.overrideWithValue(store),
+        evidenceCameraProvider.overrideWithValue(
+          camera ?? FakeEvidenceCamera(),
+        ),
+        capturedFileCompressorProvider.overrideWithValue(
+          (path) async => CapturedPhoto(bytes: onePixelPng, sha256: path),
+        ),
+        evidenceApiProvider.overrideWithValue(FakeEvidenceApi()),
+        stopProgressStoreProvider.overrideWithValue(FakeStopProgressStore()),
+        syncWorkerProvider.overrideWithValue(RecordingSyncWorker()),
+        apiBaseUrlProvider.overrideWithValue('http://test-base'),
+      ],
+      child: MaterialApp(
+        theme: buildAppTheme(),
+        home: PhotoSequenceScreen(
+          routeId: 'r1',
+          executionId: 'exec-1',
+          title: AppStrings.photoSequenceTitle('CAA', '1º andar'),
+          minimum: minimum,
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<void> _shoot(WidgetTester tester) async {
+  await tester.tap(find.byKey(_shutter));
+  await tester.pumpAndSettle();
+}
+
+bool _doneEnabled(WidgetTester tester) =>
+    tester
+        .widget<InkWell>(
+          find.descendant(
+            of: find.byKey(_done),
+            matching: find.byType(InkWell),
+          ),
+        )
+        .onTap !=
+    null;
+
+void main() {
+  testWidgets('each shot is enqueued before its thumbnail appears', (
+    tester,
+  ) async {
+    final store = _GatedStore()..gate = Completer<void>();
+    await _pump(tester, store: store, minimum: 2);
+
+    await tester.tap(find.byKey(_shutter));
+    await tester.pump();
+    expect(find.byKey(const Key('photo-thumb-0')), findsNothing);
+    expect(await store.localPhotoCountFor('exec-1'), 0);
+
+    store.gate!.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('photo-thumb-0')), findsOneWidget);
+    final rows = await store.unsyncedForRoute('r1');
+    expect(rows.single.kind, PendingOpKind.evidencePhoto);
+    expect(rows.single.payload['sha256'], '/fake/shot-1.jpg');
+  });
+
+  testWidgets('counter shows "1 de 2 obrigatórias", Pronto needs 2 shots', (
+    tester,
+  ) async {
+    await _pump(tester, store: InMemoryLocalWriteStore(), minimum: 2);
+    expect(find.text('0 de 2 obrigatórias'), findsOneWidget);
+
+    await _shoot(tester);
+
+    expect(find.text('1 de 2 obrigatórias'), findsOneWidget);
+    expect(find.text('Falta 1'), findsOneWidget);
+    expect(_doneEnabled(tester), isFalse);
+
+    await _shoot(tester);
+
+    expect(find.text('2 de 2 obrigatórias'), findsOneWidget);
+    expect(find.text('Falta 1'), findsNothing);
+    expect(_doneEnabled(tester), isTrue);
+  });
+
+  testWidgets('non-evidence stop shows "{n} fotos", Pronto always enabled', (
+    tester,
+  ) async {
+    await _pump(tester, store: InMemoryLocalWriteStore());
+    expect(find.text('0 fotos'), findsOneWidget);
+    expect(_doneEnabled(tester), isTrue);
+
+    await _shoot(tester);
+    await _shoot(tester);
+    await _shoot(tester);
+
+    expect(find.text('3 fotos'), findsOneWidget);
+    expect(_doneEnabled(tester), isTrue);
+  });
+
+  testWidgets('Apagar removes an unsynced photo and the counter decrements', (
+    tester,
+  ) async {
+    final store = InMemoryLocalWriteStore();
+    await _pump(tester, store: store, minimum: 2);
+    await _shoot(tester);
+    await _shoot(tester);
+
+    await tester.tap(find.byKey(const Key('photo-thumb-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('photo-delete')));
+    await tester.pumpAndSettle();
+
+    expect(await store.unsyncedForRoute('r1'), hasLength(1));
+    expect(find.byKey(const Key('photo-thumb-1')), findsNothing);
+    expect(find.text('1 de 2 obrigatórias'), findsOneWidget);
+    expect(_doneEnabled(tester), isFalse);
+  });
+
+  testWidgets('Apagar is not offered for a synced photo: cloud icon instead', (
+    tester,
+  ) async {
+    final store = InMemoryLocalWriteStore();
+    await _pump(tester, store: store);
+    await _shoot(tester);
+    final id = (await store.unsyncedForRoute('r1')).single.id;
+    await store.markSynced(id);
+
+    await tester.tap(find.byKey(const Key('photo-thumb-0')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('photo-delete')), findsNothing);
+    expect(find.text(AppStrings.photoSequenceDelete), findsNothing);
+    expect(find.byIcon(Icons.cloud_done), findsWidgets);
+    expect(find.text(AppStrings.photoSequenceSynced), findsOneWidget);
+  });
+
+  testWidgets('no gallery entry point', (tester) async {
+    await _pump(tester, store: InMemoryLocalWriteStore(), minimum: 2);
+
+    expect(find.byIcon(Icons.photo_library), findsNothing);
+    expect(find.byIcon(Icons.photo_library_outlined), findsNothing);
+  });
+
+  testWidgets('a camera that cannot open shows the message, stays closable', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      store: InMemoryLocalWriteStore(),
+      camera: FakeEvidenceCamera(openError: StateError('denied')),
+    );
+
+    expect(find.text(AppStrings.photoSequenceCameraError), findsOneWidget);
+    expect(find.byKey(const Key('photo-close')), findsOneWidget);
+  });
+
+  testWidgets('a failed save shows the error and adds no thumbnail', (
+    tester,
+  ) async {
+    final store = _GatedStore();
+    await _pump(tester, store: store);
+    store.failure = StateError('disk full');
+
+    await _shoot(tester);
+
+    expect(find.text(AppStrings.photoSequenceSaveError), findsOneWidget);
+    expect(find.byKey(const Key('photo-thumb-0')), findsNothing);
+  });
+
+  testWidgets('openPhotoSequence returns the photos kept in the session', (
+    tester,
+  ) async {
+    final store = InMemoryLocalWriteStore();
+    var result = -1;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localWriteStoreProvider.overrideWithValue(store),
+          evidenceCameraProvider.overrideWithValue(FakeEvidenceCamera()),
+          capturedFileCompressorProvider.overrideWithValue(
+            (path) async => CapturedPhoto(bytes: onePixelPng, sha256: path),
+          ),
+          evidenceApiProvider.overrideWithValue(FakeEvidenceApi()),
+          stopProgressStoreProvider.overrideWithValue(FakeStopProgressStore()),
+          syncWorkerProvider.overrideWithValue(RecordingSyncWorker()),
+          apiBaseUrlProvider.overrideWithValue('http://test-base'),
+        ],
+        child: MaterialApp(
+          theme: buildAppTheme(),
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async => result = await openPhotoSequence(
+                context,
+                routeId: 'r1',
+                executionId: 'exec-1',
+                buildingName: 'CAA',
+                floorLabel: '1º andar',
+                minimum: null,
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(find.text('CAA · 1º andar'), findsOneWidget);
+    await _shoot(tester);
+    await _shoot(tester);
+
+    await tester.tap(find.byKey(_done));
+    await tester.pumpAndSettle();
+
+    expect(result, 2);
+  });
+}

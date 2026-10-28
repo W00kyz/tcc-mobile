@@ -301,4 +301,36 @@ void main() {
       },
     );
   });
+
+  group('deletePendingPhoto', () {
+    Future<void> enqueue(String id, PendingOpKind kind) => store.enqueue(
+      id: id,
+      kind: kind,
+      payload: {'execution_id': 'exec-1'},
+      routeId: 'route-A',
+    );
+
+    test('deletes a pending or failed photo and returns true', () async {
+      await enqueue('p-pending', PendingOpKind.evidencePhoto);
+      await enqueue('p-failed', PendingOpKind.evidencePhoto);
+      await store.markFailed('p-failed', 'boom');
+
+      expect(await store.deletePendingPhoto('p-pending'), isTrue);
+      expect(await store.deletePendingPhoto('p-failed'), isTrue);
+      expect(await store.unsyncedForRoute('route-A'), isEmpty);
+      expect(await store.localPhotoCountFor('exec-1'), 0);
+    });
+
+    test('returns false for synced and non-photo rows, leaving them', () async {
+      await enqueue('p-synced', PendingOpKind.evidencePhoto);
+      await enqueue('note', PendingOpKind.evidenceNote);
+      await store.markSynced('p-synced');
+
+      expect(await store.deletePendingPhoto('p-synced'), isFalse);
+      expect(await store.deletePendingPhoto('note'), isFalse);
+      expect(await store.deletePendingPhoto('missing'), isFalse);
+      expect(await store.localPhotoCountFor('exec-1'), 1);
+      expect(await store.unsyncedForRoute('route-A'), hasLength(1));
+    });
+  });
 }

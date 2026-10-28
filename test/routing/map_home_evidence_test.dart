@@ -5,11 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
-import 'package:route_monitor/execution/evidence_capture.dart';
+import 'package:route_monitor/execution/photo_sequence_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
+import '../support/fake_evidence_camera.dart';
 import '../support/fake_network_images.dart';
 import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
@@ -185,78 +186,22 @@ void main() {
   );
 
   testWidgets(
-    'tapping "Adicionar foto" captures, enqueues the photo and shows success',
+    'tapping "Adicionar foto" opens the photo sequence for the stop',
     (tester) async {
-      final store = InMemoryLocalWriteStore();
+      final camera = FakeEvidenceCamera();
       await pumpHome(
         tester,
         homeWith(
           repositoryWith(_inProgressStopRoute()),
           stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
-          localWriteStore: store,
-          evidenceCapture: FakeEvidenceCapture(
-            // A real (1x1) PNG — the pending row renders as an Image.memory
-            // thumbnail in the evidence list, which decodes eagerly.
-            photo: CapturedPhoto(bytes: onePixelPng, sha256: 'abc123'),
-          ),
+          evidenceCamera: camera,
         ),
       );
 
       await tapInSheet(tester, _addPhoto());
 
-      final rows = await store.unsyncedForRoute('r1');
-      expect(rows, hasLength(1));
-      expect(rows.single.kind, PendingOpKind.evidencePhoto);
-      expect(rows.single.payload['execution_id'], 'exec-1');
-      expect(rows.single.payload['sha256'], 'abc123');
-      expect(find.text(AppStrings.routePhotoAdded), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'does nothing when the field worker cancels the camera (takePhoto '
-    'returns null)',
-    (tester) async {
-      final evidenceApi = FakeEvidenceApi();
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(_inProgressStopRoute()),
-          stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
-          evidenceApi: evidenceApi,
-          evidenceCapture: FakeEvidenceCapture(),
-        ),
-      );
-
-      await tapInSheet(tester, _addPhoto());
-
-      expect(evidenceApi.uploadedPhotoExecutionIds, isEmpty);
-      expect(find.text(AppStrings.routePhotoAdded), findsNothing);
-      expect(find.text(AppStrings.routePhotoAddError), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'shows a failure snackbar when the camera itself throws (e.g. '
-    'compression failed)',
-    (tester) async {
-      final evidenceApi = FakeEvidenceApi();
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(_inProgressStopRoute()),
-          stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
-          evidenceApi: evidenceApi,
-          evidenceCapture: FakeEvidenceCapture(
-            error: StateError('Photo compression failed for "x.jpg".'),
-          ),
-        ),
-      );
-
-      await tapInSheet(tester, _addPhoto());
-
-      expect(evidenceApi.uploadedPhotoExecutionIds, isEmpty);
-      expect(find.text(AppStrings.routePhotoAddError), findsOneWidget);
+      expect(find.byType(PhotoSequenceScreen), findsOneWidget);
+      expect(find.byKey(const Key('fake-preview')), findsOneWidget);
     },
   );
 

@@ -228,6 +228,10 @@ class _FakeSyncMetaStore implements SyncMetaStore {
 }
 
 class _FakeLocalWriteStore implements LocalWriteStore {
+  @override
+  Future<bool> deletePendingPhoto(String operationId) =>
+      throw UnimplementedError();
+
   final Map<String, PendingOperationRow> rows = {};
 
   void seed(

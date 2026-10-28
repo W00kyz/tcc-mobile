@@ -6,6 +6,7 @@ import 'package:route_monitor/execution/evidence_photo_count.dart';
 import 'package:route_monitor/execution/evidence_requirement.dart';
 import 'package:route_monitor/execution/evidence_thumbnail.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/photo_sequence_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/local/stop_progress_store.dart'
@@ -29,12 +30,16 @@ class StopEvidenceSection extends ConsumerWidget {
     required this.routeId,
     required this.routeStopId,
     required this.requiresEvidence,
+    required this.buildingName,
+    required this.floorLabel,
     super.key,
   });
 
   final String routeId;
   final String routeStopId;
   final bool requiresEvidence;
+  final String buildingName;
+  final String floorLabel;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -49,6 +54,8 @@ class StopEvidenceSection extends ConsumerWidget {
               routeId: routeId,
               executionId: entry.executionId,
               requiresEvidence: requiresEvidence,
+              buildingName: buildingName,
+              floorLabel: floorLabel,
             ),
       loading: () => const SizedBox.shrink(),
       error: (_, _) => const SizedBox.shrink(),
@@ -63,11 +70,15 @@ class _EvidenceSection extends ConsumerWidget {
     required this.routeId,
     required this.executionId,
     required this.requiresEvidence,
+    required this.buildingName,
+    required this.floorLabel,
   });
 
   final String routeId;
   final String executionId;
   final bool requiresEvidence;
+  final String buildingName;
+  final String floorLabel;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -118,7 +129,7 @@ class _EvidenceSection extends ConsumerWidget {
                 requiresEvidence: requiresEvidence,
                 photoCount: photoCount ?? 0,
               )
-              ? () => _addPhoto(context, ref, query)
+              ? () => _addPhoto(context)
               : null,
           icon: const Icon(Icons.add_a_photo),
           label: const Text(AppStrings.routeAddPhotoButton),
@@ -132,38 +143,15 @@ class _EvidenceSection extends ConsumerWidget {
     );
   }
 
-  Future<void> _addPhoto(
-    BuildContext context,
-    WidgetRef ref,
-    (String, String) query,
-  ) async {
-    try {
-      final photo = await ref.read(evidenceCaptureProvider).takePhoto();
-      if (photo == null) return; // The field worker cancelled the camera.
-      await ref
-          .read(executionRepositoryProvider)
-          .addPhoto(routeId: query.$1, executionId: query.$2, photo: photo);
-      ref
-        ..invalidate(stopEvidenceProvider(query))
-        ..invalidate(localPhotoCountProvider(query.$2));
-      if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
-          const SnackBar(content: Text(AppStrings.routePhotoAdded)),
-        );
-      }
-      // Deliberately broad: a compression failure (StateError), a network
-      // failure (DioException) or any other capture/upload error all map to
-      // the same generic message here, same discipline as check-in/out.
-      // ignore: avoid_catches_without_on_clauses
-    } catch (_) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text(AppStrings.routePhotoAddError)),
-        );
-      }
-    }
+  Future<void> _addPhoto(BuildContext context) async {
+    await openPhotoSequence(
+      context,
+      routeId: routeId,
+      executionId: executionId,
+      buildingName: buildingName,
+      floorLabel: floorLabel,
+      minimum: requiresEvidence ? minEvidencePhotos : null,
+    );
   }
 
   Future<void> _addNote(

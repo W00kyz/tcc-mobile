@@ -19,6 +19,31 @@ const Color kScanScrim = Color(0x99000000);
 /// Brackets, scan line and copy over the QR camera (spec section 6.4).
 const Color kScanOverlayWhite = Color(0xFFFFFFFF);
 
+/// Photo-camera chrome (spec section 6.5; prototype 05-camera-fotos).
+/// Page behind the viewfinder.
+const Color kCameraChrome = Color(0xFF121211);
+
+/// The thumbnail dock: chrome at 88%.
+const Color kCameraDock = Color(0xE0121211);
+
+/// Fade under the title bar: chrome at 85%, fading to nothing.
+const Color kCameraTopFade = Color(0xD9121211);
+
+/// Disabled "Pronto" fill: white at 12%.
+const Color kCameraControlFill = Color(0x1FFAFAF8);
+
+/// Disabled "Pronto" outline: white at 18%.
+const Color kCameraControlLine = Color(0x2EFAFAF8);
+
+/// Dashed outline of a pending-photo slot: white at 55%.
+const Color kCameraSlotLine = Color(0x8CFAFAF8);
+
+/// Secondary copy on the dock (hints, "Falta n").
+const Color kCameraSoftText = Color(0xFFD8D8D2);
+
+/// Label of a disabled "Pronto".
+const Color kCameraDisabledText = Color(0xFFA3A39C);
+
 /// Field-app colour tokens (spec section 6.1). Read with
 /// `Theme.of(context).extension<FieldPalette>()!`.
 @immutable

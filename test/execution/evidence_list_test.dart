@@ -44,6 +44,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   final List<PendingOperationRow> rows;
 
   @override
+  Future<bool> deletePendingPhoto(String operationId) =>
+      throw UnimplementedError();
+
+  @override
   Future<void> enqueue({
     required String id,
     required PendingOpKind kind,

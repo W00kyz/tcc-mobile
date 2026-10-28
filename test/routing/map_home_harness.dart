@@ -9,7 +9,7 @@ import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/checkin/scan_screen.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
-import 'package:route_monitor/execution/evidence_capture.dart';
+import 'package:route_monitor/execution/evidence_camera.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/l10n/strings.dart';
@@ -44,7 +44,7 @@ Widget homeWith(
   LocationService? locationService,
   bool realExecutionRepository = true,
   EvidenceApi? evidenceApi,
-  EvidenceCapture? evidenceCapture,
+  EvidenceCamera? evidenceCamera,
   StopProgressStore? stopProgressStore,
   LocalWriteStore? localWriteStore,
   SyncWorker? syncWorker,
@@ -98,8 +98,8 @@ Widget homeWith(
         silenceWatchdogProvider.overrideWithValue(silenceWatchdog),
       if (session != null)
         sessionProvider.overrideWith(() => FixedSession(session)),
-      if (evidenceCapture != null)
-        evidenceCaptureProvider.overrideWithValue(evidenceCapture),
+      if (evidenceCamera != null)
+        evidenceCameraProvider.overrideWithValue(evidenceCamera),
       // The repository never calls the network (spec Ruling 2): it enqueues
       // into `store`, updates `progress`, then kicks the recording worker.
       if (realExecutionRepository)

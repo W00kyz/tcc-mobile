@@ -175,6 +175,25 @@ abstract final class AppStrings {
   static const String routeNoteAddError =
       'Não foi possível adicionar a observação.';
 
+  // --- photo-sequence camera ---
+  static const String photoSequenceDone = 'Pronto';
+  static const String photoSequenceDelete = 'Apagar';
+  static const String photoSequenceShutter = 'Tirar foto';
+  static const String photoSequenceClose = 'Fechar';
+  static const String photoSequenceSynced = 'Foto já enviada';
+  static const String photoSequenceCameraError =
+      'Não foi possível abrir a câmera.';
+  static const String photoSequenceSaveError =
+      'Não foi possível salvar a foto.';
+  static String photoSequenceTitle(String building, String floor) =>
+      '$building · $floor';
+  static String photoSequenceRequiredCounter(int n, int minimum) =>
+      '$n de $minimum obrigatórias';
+  static String photoSequenceCounter(int n) => n == 1 ? '1 foto' : '$n fotos';
+  static String photoSequenceMissing(int n) => 'Falta $n';
+  static String photoSequencePhoto(int n) => 'Foto $n';
+  static String photoSequencePending(int n) => 'Foto $n pendente';
+
   // --- route screen · evidence requirement ---
   /// `Tire pelo menos 2 fotos (faltam N)`.
   static String evidenceMissingHint(int missing) =>

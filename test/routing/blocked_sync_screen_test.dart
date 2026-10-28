@@ -14,6 +14,10 @@ import 'package:route_monitor/sync/sync_worker.dart';
 /// A minimal in-memory [LocalWriteStore] for the blocked-rows list — only
 /// `blockedForRoute` and `resetToPending` are exercised here.
 class _FakeLocalWriteStore implements LocalWriteStore {
+  @override
+  Future<bool> deletePendingPhoto(String operationId) =>
+      throw UnimplementedError();
+
   final Map<String, PendingOperationRow> rows = {};
 
   void seedBlocked(

@@ -125,6 +125,11 @@ abstract class LocalWriteStore {
   /// Backs `SyncWorker.unblock` (the "Tentar de novo" button on the
   /// blocked-rows list, spec Ruling 6).
   Future<void> resetToPending(String id);
+
+  /// Deletes [operationId] only if it is an `evidencePhoto` row not yet
+  /// delivered (`pending` or `failed`); returns whether it did. A synced,
+  /// blocked or non-photo row is left untouched and yields `false`.
+  Future<bool> deletePendingPhoto(String operationId);
 }
 
 class DriftLocalWriteStore implements LocalWriteStore {
@@ -213,6 +218,21 @@ class DriftLocalWriteStore implements LocalWriteStore {
         releasedStopId: const Value(null),
       ),
     );
+  }
+
+  @override
+  Future<bool> deletePendingPhoto(String operationId) async {
+    final delete = _db.delete(_db.pendingOperations)
+      ..where(
+        (row) =>
+            row.id.equals(operationId) &
+            row.kind.equals(PendingOpKind.evidencePhoto.name) &
+            row.state.isIn([
+              PendingOpState.pending.name,
+              PendingOpState.failed.name,
+            ]),
+      );
+    return await delete.go() > 0;
   }
 
   Future<void> _setState(

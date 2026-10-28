@@ -6,7 +6,6 @@ import 'package:flutter/services.dart' show PlatformException;
 import 'package:route_monitor/auth/auth_providers.dart';
 import 'package:route_monitor/auth/auth_repository.dart';
 import 'package:route_monitor/execution/evidence_api.dart';
-import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
@@ -147,6 +146,18 @@ class FakeMonitoringApi implements MonitoringApi {
 /// store instance.
 class InMemoryLocalWriteStore implements LocalWriteStore {
   final Map<String, PendingOperationRow> _rows = {};
+
+  @override
+  Future<bool> deletePendingPhoto(String operationId) async {
+    final row = _rows[operationId];
+    final deletable =
+        row != null &&
+        row.kind == PendingOpKind.evidencePhoto &&
+        (row.state == PendingOpState.pending ||
+            row.state == PendingOpState.failed);
+    if (deletable) _rows.remove(operationId);
+    return deletable;
+  }
 
   @override
   Future<void> enqueue({
@@ -329,24 +340,6 @@ class FakeEvidenceApi implements EvidenceApi {
   @override
   Future<List<EvidenceItem>> listEvidence(String executionId) async =>
       syncedItems;
-}
-
-/// A fake camera — returns [photo] (or throws [error]) instead of opening
-/// the real camera app.
-class FakeEvidenceCapture implements EvidenceCapture {
-  FakeEvidenceCapture({this.photo, this.error});
-
-  final CapturedPhoto? photo;
-
-  /// `Error?`, not `Exception?`: the real `DeviceEvidenceCapture.takePhoto`
-  /// can throw a `StateError` (a compression failure).
-  final Error? error;
-
-  @override
-  Future<CapturedPhoto?> takePhoto() async {
-    if (error != null) throw error!;
-    return photo;
-  }
 }
 
 /// Location permissions as the device would answer them: "while in use"

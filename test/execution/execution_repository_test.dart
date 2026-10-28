@@ -14,6 +14,10 @@ import 'package:route_monitor/sync/sync_worker.dart';
 /// local_write_store_test.dart. Just enough here to inspect the outbox rows
 /// ExecutionRepository writes.
 class _FakeLocalWriteStore implements LocalWriteStore {
+  @override
+  Future<bool> deletePendingPhoto(String operationId) =>
+      throw UnimplementedError();
+
   final Map<String, PendingOperationRow> _rows = {};
 
   @override
