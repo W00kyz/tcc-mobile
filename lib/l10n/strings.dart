@@ -151,7 +151,23 @@ abstract final class AppStrings {
   // --- route screen · sync banner ---
   static const String routeSyncBlockedBanner =
       'Sincronização bloqueada — toque para ver';
-  static const String routeAllSynced = 'Tudo sincronizado';
+  static const String routeAllSynced = 'Tudo enviado';
+  // --- sync snackbars and detail sheet (redesign §6.7) ---
+  static String syncSending(int n) =>
+      'Enviando $n ${n == 1 ? 'registro' : 'registros'}…';
+  static String syncWaiting(int n) =>
+      '$n ${n == 1 ? 'registro aguardando' : 'registros aguardando'} envio';
+  static String syncBlockedNotice(int n) => n == 1
+      ? '1 registro não pôde ser enviado'
+      : '$n registros não puderam ser enviados';
+  static const String syncSendAction = 'Enviar';
+  static const String syncSeeAction = 'Ver';
+  static const String syncDetailTitle = 'Envio de registros';
+  static String syncDetailPending(int n) => '$n aguardando envio';
+  static String syncDetailBlocked(int n) => '$n bloqueados';
+  static const String syncSendNow = 'Enviar agora';
+  static const String syncSeeBlocked = 'Ver registros bloqueados';
+
   static const String routeChipPending = 'Pendente';
   static const String routeChipBlocked = 'Bloqueado';
 

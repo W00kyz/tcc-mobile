@@ -21,8 +21,10 @@ import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/stop_actions.dart';
+import 'package:route_monitor/sync/sync_snackbars.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/map_sheet.dart';
+import 'package:route_monitor/ui/sync_indicator.dart';
 
 /// The building whose pin the worker tapped: the sheet lists its stops
 /// alone and the other pins dim (redesign §6.3). Null shows the whole batch.
@@ -107,16 +109,20 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         // The "Recorrer" snackbar when a late write finds its stop released
         // (spec §7.5).
         body: ReleasedStopListener(
-          child: LayoutBuilder(
-            builder: (context, constraints) => Stack(
-              children: [
-                Positioned.fill(
-                  child: _campusMap(route, card, selected, constraints),
-                ),
-                _topOverlay(route, local),
-                _myPositionButton(constraints.maxHeight),
-                _sheetFor(dayAsync, local, card, selected, nextBatch),
-              ],
+          child: SyncSnackbars(
+            routeId: route?.id,
+            sheet: _sheet,
+            child: LayoutBuilder(
+              builder: (context, constraints) => Stack(
+                children: [
+                  Positioned.fill(
+                    child: _campusMap(route, card, selected, constraints),
+                  ),
+                  _topOverlay(route, local),
+                  _myPositionButton(constraints.maxHeight),
+                  _sheetFor(dayAsync, local, card, selected, nextBatch),
+                ],
+              ),
             ),
           ),
         ),
@@ -237,10 +243,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       done: dayDoneCount(route, local),
       total: route.stops.where((s) => s.status != 'RELEASED').length,
       syncSlot: route.status == 'IN_PROGRESS'
-          ? SyncSlotButton(
-              routeId: route.id,
-              onSyncNow: () => sendAllAndPull(ref),
-            )
+          ? RouteSyncIndicator(routeId: route.id)
           : null,
     );
   }

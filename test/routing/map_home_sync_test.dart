@@ -12,8 +12,8 @@ import '../support/fake_connectivity.dart';
 import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
 
-// Ported from the deleted route_screen_test.dart: the sync state (now a
-// top-bar slot until Task 10's indicator), the per-stop outbox chips and the
+// Ported from the deleted route_screen_test.dart: the sync state (now the
+// top-bar indicator and its detail sheet), the per-stop outbox chips and the
 // next-batch pull.
 
 RouteSummary _pendingRoute() => routeWith(stops: [stopIn(id: 's1')]);
@@ -48,6 +48,8 @@ void main() {
         expect(find.byTooltip(AppStrings.routePendingSync(2)), findsOneWidget);
         await tester.tap(find.byTooltip(AppStrings.routePendingSync(2)));
         await tester.pumpAndSettle();
+        await tester.tap(find.text(AppStrings.syncSendNow));
+        await tester.pumpAndSettle();
         expect(worker.syncAllCount, 1);
       },
     );
@@ -81,6 +83,23 @@ void main() {
       expect(find.byTooltip(AppStrings.routePendingSync(0)), findsNothing);
     });
 
+    testWidgets('a tap on the indicator opens the detail sheet', (
+      tester,
+    ) async {
+      final worker = RecordingSyncWorker(
+        statusStream: Stream<RouteSyncStatus>.value(_statusOf(pending: 2)),
+      );
+      await pumpHome(
+        tester,
+        homeWith(repositoryWith(_pendingRoute()), syncWorker: worker),
+      );
+
+      await tester.tap(find.byTooltip(AppStrings.routePendingSync(2)));
+      await tester.pumpAndSettle();
+      expect(find.text(AppStrings.syncSendNow), findsOneWidget);
+      expect(find.text(AppStrings.syncDetailPending(2)), findsOneWidget);
+    });
+
     testWidgets('a blocked status opens BlockedSyncScreen', (tester) async {
       final store = InMemoryLocalWriteStore();
       await store.enqueue(
@@ -105,6 +124,8 @@ void main() {
       );
 
       await tester.tap(find.byTooltip(AppStrings.routeSyncBlockedBanner));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(AppStrings.syncSeeBlocked));
       await tester.pumpAndSettle();
       expect(find.byType(BlockedSyncScreen), findsOneWidget);
     });
@@ -296,17 +317,40 @@ void main() {
           ),
         );
 
-        expect(find.text(AppStrings.routeNextBatchOffline), findsOneWidget);
+        expect(nextBatchOfflinePanel(), findsOneWidget);
         expect(repository.allocationCalls, isEmpty);
 
         connectivity.goOnline();
         await tester.pumpAndSettle();
 
         expect(repository.allocationCalls, ['nextBatch:r1']);
-        expect(find.text(AppStrings.routeNextBatchOffline), findsNothing);
+        expect(nextBatchOfflinePanel(), findsNothing);
         expect(find.text('Sala 202'), findsOneWidget);
       },
     );
+
+    testWidgets('offline, the finished batch also says so in a snackbar', (
+      tester,
+    ) async {
+      final progress = FakeStopProgressStore({'s1': 'exec-1'});
+      await progress.markDone('s1');
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(lastStopInProgress()),
+          connectivity: FakeConnectivity(),
+          stopProgressStore: progress,
+        ),
+      );
+
+      expect(
+        find.descendant(
+          of: find.byType(SnackBar),
+          matching: find.text(AppStrings.routeNextBatchOffline),
+        ),
+        findsOneWidget,
+      );
+    });
 
     testWidgets(
       '"Tentar de novo" drains the outbox and then re-runs the pull that was '
@@ -336,12 +380,17 @@ void main() {
         );
         status.add(_statusOf(pending: 1));
         await tester.pumpAndSettle();
-        expect(find.text(AppStrings.routeNextBatchOffline), findsOneWidget);
+        expect(nextBatchOfflinePanel(), findsOneWidget);
         expect(repository.allocationCalls, isEmpty);
 
         // The server is reachable again; the worker taps "Tentar de novo".
         worker.drains = store;
-        await tester.tap(find.text(AppStrings.retryButton));
+        await tester.tap(
+          find.descendant(
+            of: find.byType(DraggableScrollableSheet),
+            matching: find.text(AppStrings.retryButton),
+          ),
+        );
         await tester.pumpAndSettle();
 
         expect(worker.syncAllCount, 1);

@@ -192,6 +192,7 @@ ThemeData buildAppTheme() {
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       backgroundColor: kInverseSurface,
+      actionTextColor: p.white,
       contentTextStyle: TextStyle(fontFamily: kUiFont, color: p.white),
     ),
     bottomSheetTheme: BottomSheetThemeData(

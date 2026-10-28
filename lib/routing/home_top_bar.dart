@@ -8,10 +8,7 @@ import 'package:route_monitor/appeals/appeals_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/notifications_screen.dart';
-import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
-import 'package:route_monitor/sync/sync_providers.dart';
-import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 /// Past this many points the dots would not fit the pill; the text alone
@@ -39,7 +36,7 @@ class HomeTopBar extends StatelessWidget {
   final int done;
   final int total;
 
-  /// The sync indicator's place (Task 10 fills it with `SyncIndicator`).
+  /// The sync indicator's place (`RouteSyncIndicator`).
   final Widget? syncSlot;
 
   @override
@@ -209,54 +206,5 @@ class _NotificationsBell extends ConsumerWidget {
     );
     if (unread == 0) return button;
     return Badge(label: Text('$unread'), child: button);
-  }
-}
-
-/// A stop-gap sync slot until Task 10's indicator: renders nothing while the
-/// status stream has not emitted; blocked opens [BlockedSyncScreen]; rows
-/// waiting send now and re-run the next-batch pull; idle shows a check.
-class SyncSlotButton extends ConsumerWidget {
-  const SyncSlotButton({
-    required this.routeId,
-    required this.onSyncNow,
-    super.key,
-  });
-
-  final String routeId;
-
-  /// "Sincronizar agora": drains the outbox, then retries the pull.
-  final Future<void> Function() onSyncNow;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final status = ref.watch(routeSyncStatusProvider(routeId)).asData?.value;
-    if (status == null) return const SizedBox.shrink();
-    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
-    if (status.state == RouteSyncState.blocked || status.blocked > 0) {
-      return IconButton(
-        icon: Icon(Icons.sync_problem, color: p.brick),
-        tooltip: AppStrings.routeSyncBlockedBanner,
-        onPressed: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => BlockedSyncScreen(routeId: routeId),
-          ),
-        ),
-      );
-    }
-    if (status.pending > 0) {
-      return IconButton(
-        icon: Badge(
-          label: Text('${status.pending}'),
-          child: Icon(Icons.cloud_upload_outlined, color: p.ink),
-        ),
-        tooltip: AppStrings.routePendingSync(status.pending),
-        onPressed: onSyncNow,
-      );
-    }
-    return IconButton(
-      icon: Icon(Icons.cloud_done_outlined, color: p.moss),
-      tooltip: AppStrings.routeAllSynced,
-      onPressed: null,
-    );
   }
 }

@@ -61,6 +61,12 @@ import '../support/in_memory_database.dart';
 /// (not `integration_test/`) on purpose: `flutter test` special-cases the
 /// `integration_test/` directory and forces on-device mode for anything in it,
 /// which would make this deliverable unrunnable in CI without an emulator.
+/// The reconnect panel in the sheet — not the snackbar that says the same.
+Finder _nextBatchOfflinePanel() => find.descendant(
+  of: find.byType(DraggableScrollableSheet),
+  matching: find.text(AppStrings.routeNextBatchOffline),
+);
+
 void main() {
   // The scenario drives the REAL SyncWorker + real Drift outbox, whose futures
   // ride the real event loop and real timers. `flutter_test`'s default
@@ -109,7 +115,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.byTooltip(AppStrings.routePendingSync(5)), findsOneWidget);
-      expect(find.text(AppStrings.routeNextBatchOffline), findsOneWidget);
+      expect(_nextBatchOfflinePanel(), findsOneWidget);
       expect(fixture.routeApi.nextBatchCalls, 0);
 
       // ---- Timestamp-preservation proof (the RF35 crux) -------------------
@@ -183,7 +189,7 @@ void main() {
       // The second batch is on screen and the slot flips to all-clear.
       expect(find.text(AppStrings.dayProgress(2, 2, 3)), findsOneWidget);
       expect(find.text('Sala 201'), findsOneWidget);
-      expect(find.text(AppStrings.routeNextBatchOffline), findsNothing);
+      expect(_nextBatchOfflinePanel(), findsNothing);
       expect(find.byTooltip(AppStrings.routeAllSynced), findsOneWidget);
 
       // ---- Idempotent re-drain -----------------------------------------
@@ -328,6 +334,9 @@ void main() {
       expect(notice.localCheckOutAt, isNotNull);
 
       // ---- The snackbar offers the appeal ---------------------------------
+      // A sync notice may have been up first: the appeal offer replaces it.
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 400));
       expect(find.text(AppStrings.releasedStopsSnackbar), findsOneWidget);
       await tester.tap(find.text(AppStrings.releasedStopsSnackbarAction));
       await tester.pump(const Duration(milliseconds: 100));
@@ -484,11 +493,16 @@ void main() {
         expect(find.byTooltip(AppStrings.routeSyncBlockedBanner), findsNothing);
         // The snackbar offered the appeal too; this test takes the other
         // road, so it is put away (it would sit over the form's button).
-        expect(find.text(AppStrings.releasedStopsSnackbar), findsOneWidget);
-        ScaffoldMessenger.of(
-          tester.element(find.byType(MapHomeScreen)),
-        ).removeCurrentSnackBar();
         await settle(tester);
+        expect(find.text(AppStrings.releasedStopsSnackbar), findsOneWidget);
+        final messenger = ScaffoldMessenger.of(
+          tester.element(find.byType(MapHomeScreen)),
+        );
+        // Twice: a sync notice queued behind it would follow.
+        for (var i = 0; i < 2; i++) {
+          messenger.clearSnackBars();
+          await settle(tester);
+        }
 
         await openAppeals(tester);
         expect(find.text(AppStrings.appealsLocalTitle), findsOneWidget);
@@ -844,7 +858,16 @@ class _Fixture {
   }
 
   /// The route's outbox status as the worker reports it to a new listener.
-  Future<RouteSyncStatus> syncStatus() => worker.statusFor(_routeId).first;
+  /// The status after one more (empty) pass: a broadcast stream only
+  /// re-reads the outbox for its first listener, and the screen is one.
+  Future<RouteSyncStatus> syncStatus() async {
+    RouteSyncStatus? last;
+    final listening = worker.statusFor(_routeId).listen((s) => last = s);
+    await worker.syncRoute(_routeId);
+    await Future<void>.delayed(Duration.zero);
+    await listening.cancel();
+    return last!;
+  }
 
   /// Every outbox row of [stop], its evidence (of [executionId]) included.
   Future<List<String>> rowsOfStop(String stop, String executionId) async {

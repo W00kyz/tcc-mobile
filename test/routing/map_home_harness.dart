@@ -138,6 +138,13 @@ Future<void> snapSheetTo(WidgetTester tester, double size) async {
   await tester.pumpAndSettle();
 }
 
+/// The "Sem conexão para o próximo lote" panel in the sheet — not the
+/// snackbar that says the same.
+Finder nextBatchOfflinePanel() => find.descendant(
+  of: find.byType(DraggableScrollableSheet),
+  matching: find.text(AppStrings.routeNextBatchOffline),
+);
+
 Finder scanQrButton() => find.text(AppStrings.scanQrButton);
 
 /// Taps a widget in the sheet, scrolling it into view first.
