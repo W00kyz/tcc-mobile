@@ -129,11 +129,18 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
       ..invalidate(stopEvidenceProvider(_query));
   }
 
+  /// Floats the message under the title bar so it never covers the shutter.
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    final size = MediaQuery.sizeOf(context);
+    final top = MediaQuery.paddingOf(context).top + 96;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(16, 0, 16, size.height - top - 56),
+      ),
+    );
   }
 
   Future<void> _openShot(SessionShot shot) async {
@@ -151,7 +158,10 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
     final removed = await ref
         .read(localWriteStoreProvider)
         .deletePendingPhoto(shot.id);
-    if (!removed) return;
+    if (!removed) {
+      _showError(AppStrings.photoSequenceDeleteError);
+      return;
+    }
     _invalidateCounts();
     if (mounted) setState(() => _shots.remove(shot));
   }
@@ -164,7 +174,8 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _close();
+        // A shot in flight must land in SQLite first: back is a no-op then.
+        if (!didPop && !_busy) _close();
       },
       child: Scaffold(
         backgroundColor: kCameraChrome,
@@ -215,7 +226,7 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
                   ),
                   tooltip: AppStrings.photoSequenceClose,
                   icon: const Icon(Icons.close, color: kScanOverlayWhite),
-                  onPressed: _close,
+                  onPressed: _busy ? null : _close,
                 ),
                 Expanded(child: _title()),
                 CounterPill(count: count, minimum: widget.minimum),
@@ -314,7 +325,7 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
             child: DoneButton(
               key: const Key('photo-done'),
               missing: missing,
-              onTap: missing == 0 ? _close : null,
+              onTap: missing == 0 && !_busy ? _close : null,
             ),
           ),
         ],

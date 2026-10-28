@@ -264,4 +264,129 @@ void main() {
 
     expect(result, 2);
   });
+
+  testWidgets('Pronto, X and back wait for a shot in flight (RNF06)', (
+    tester,
+  ) async {
+    final store = _GatedStore()..gate = Completer<void>();
+    var result = -1;
+    await _pumpOpened(tester, store, (r) => result = r);
+
+    await tester.tap(find.byKey(_shutter));
+    await tester.pump();
+    await tester.tap(find.byKey(_done), warnIfMissed: false);
+    await tester.tap(find.byKey(const Key('photo-close')), warnIfMissed: false);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+
+    expect(find.byType(PhotoSequenceScreen), findsOneWidget);
+    expect(result, -1);
+
+    store.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(await store.unsyncedForRoute('r1'), hasLength(1));
+    expect(find.byType(PhotoSequenceScreen), findsOneWidget);
+
+    await tester.tap(find.byKey(_done));
+    await tester.pumpAndSettle();
+    expect(result, 1);
+  });
+
+  testWidgets('Apagar on a row the store refuses shows a message', (
+    tester,
+  ) async {
+    final store = InMemoryLocalWriteStore();
+    await _pump(tester, store: store);
+    await _shoot(tester);
+    await store.markBlocked(
+      (await store.unsyncedForRoute('r1')).single.id,
+      'gave up',
+    );
+
+    await tester.tap(find.byKey(const Key('photo-thumb-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('photo-delete')));
+    await tester.pumpAndSettle();
+
+    expect(find.text(AppStrings.photoSequenceDeleteError), findsOneWidget);
+    expect(find.byKey(const Key('photo-thumb-0')), findsOneWidget);
+  });
+
+  testWidgets('the camera is closed when the screen goes away', (
+    tester,
+  ) async {
+    final camera = FakeEvidenceCamera();
+    await _pump(tester, store: InMemoryLocalWriteStore(), camera: camera);
+    expect(camera.closed, isFalse);
+
+    await tester.pumpWidget(const SizedBox());
+
+    expect(camera.closed, isTrue);
+  });
+
+  testWidgets('a takePicture failure shows the error and the shutter works', (
+    tester,
+  ) async {
+    final camera = FakeEvidenceCamera()..shotError = StateError('busy');
+    await _pump(tester, store: InMemoryLocalWriteStore(), camera: camera);
+
+    await _shoot(tester);
+    expect(find.text(AppStrings.photoSequenceSaveError), findsOneWidget);
+    expect(find.byKey(const Key('photo-thumb-0')), findsNothing);
+
+    await _shoot(tester);
+    expect(find.byKey(const Key('photo-thumb-0')), findsOneWidget);
+  });
+
+  testWidgets('counter is singular for 1 and plural for 3', (tester) async {
+    await _pump(tester, store: InMemoryLocalWriteStore());
+    await _shoot(tester);
+    expect(find.text('1 foto'), findsOneWidget);
+
+    await _shoot(tester);
+    await _shoot(tester);
+    expect(find.text('3 fotos'), findsOneWidget);
+  });
+}
+
+Future<void> _pumpOpened(
+  WidgetTester tester,
+  InMemoryLocalWriteStore store,
+  void Function(int) onResult,
+) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        localWriteStoreProvider.overrideWithValue(store),
+        evidenceCameraProvider.overrideWithValue(FakeEvidenceCamera()),
+        capturedFileCompressorProvider.overrideWithValue(
+          (path) async => CapturedPhoto(bytes: onePixelPng, sha256: path),
+        ),
+        evidenceApiProvider.overrideWithValue(FakeEvidenceApi()),
+        stopProgressStoreProvider.overrideWithValue(FakeStopProgressStore()),
+        syncWorkerProvider.overrideWithValue(RecordingSyncWorker()),
+        apiBaseUrlProvider.overrideWithValue('http://test-base'),
+      ],
+      child: MaterialApp(
+        theme: buildAppTheme(),
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () async => onResult(
+              await openPhotoSequence(
+                context,
+                routeId: 'r1',
+                executionId: 'exec-1',
+                buildingName: 'CAA',
+                floorLabel: '1º andar',
+                minimum: null,
+              ),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.tap(find.text('open'));
+  await tester.pumpAndSettle();
 }

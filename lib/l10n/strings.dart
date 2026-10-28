@@ -185,6 +185,8 @@ abstract final class AppStrings {
       'Não foi possível abrir a câmera.';
   static const String photoSequenceSaveError =
       'Não foi possível salvar a foto.';
+  static const String photoSequenceDeleteError =
+      'Não foi possível apagar a foto.';
   static String photoSequenceTitle(String building, String floor) =>
       '$building · $floor';
   static String photoSequenceRequiredCounter(int n, int minimum) =>
