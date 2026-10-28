@@ -121,6 +121,24 @@ void main() {
     expect(find.byKey(const Key('approval-empty-card')), findsOneWidget);
   });
 
+  testWidgets('at text scale 1.3 on a small phone nothing overflows and '
+      '"Sair" can be reached', (tester) async {
+    tester.view
+      ..physicalSize = const Size(320, 420)
+      ..devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+    addTearDown(tester.view.reset);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+    await _pump(tester, standing: _pending);
+
+    expect(tester.takeException(), isNull);
+    final exit = find.text(AppStrings.approvalExitButton);
+    await tester.ensureVisible(exit);
+    await tester.pumpAndSettle();
+    expect(exit.hitTestable(), findsOneWidget);
+  });
+
   testWidgets('a rejected worker sees no empty card', (tester) async {
     await _pump(
       tester,
