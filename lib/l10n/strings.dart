@@ -189,8 +189,25 @@ abstract final class AppStrings {
   static const String mapApproximateLegLabel = 'trajeto aproximado';
 
   // --- scan screen ---
-  static const String scanAppBarTitle = 'Ler QR Code';
-  static const String scanInvalidQr = 'QR Code inválido ou adulterado.';
+  static const String scanInvalidQr =
+      'Esse QR não é do sistema. Tente o QR fixado no andar.';
+  static const String scanFramingPrompt = 'Aponte para o QR Code do andar';
+  static const String scanTorch = 'Lanterna';
+  static const String scanCancel = 'Cancelar';
+  static const String scanPermissionTitle = 'A câmera está desligada';
+  static const String scanPermissionBody =
+      'O app precisa da câmera para ler o QR Code fixado no andar e '
+      'confirmar que você está no lugar certo.';
+  static const String scanOpenSettings = 'Abrir configurações';
+  static const String scanCameraError = 'Não foi possível abrir a câmera.';
+
+  /// Context line under the frame at check-in: `Entrada · <prédio>`.
+  static String scanEntryContext(String building) => 'Entrada · $building';
+
+  /// Context line under the frame at check-out:
+  /// `Saída · <prédio> · <andar>`.
+  static String scanExitContext(String building, String floor) =>
+      'Saída · $building · $floor';
 
   // --- blocked sync screen ---
   static const String blockedSyncAppBarTitle = 'Sincronização bloqueada';

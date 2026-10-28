@@ -49,7 +49,7 @@ Future<void> startCheckIn(
   WidgetRef ref,
   RouteSummary route,
 ) async {
-  final scan = await _scanAndLocate(context, ref);
+  final scan = await _scanAndLocate(context, ref, _entryContext(route));
   if (scan == null || !context.mounted) return;
 
   final routeStopId = await _resolveCheckInStop(context, route, scan);
@@ -73,6 +73,16 @@ Future<void> startCheckIn(
       context,
     ).showSnackBar(const SnackBar(content: Text(AppStrings.routeCheckInDone)));
   }
+}
+
+/// The QR resolves the stop only after the scan, so the entry line names the
+/// building of the batch's next pending stop.
+ScanContext _entryContext(RouteSummary route) {
+  final next = route.currentBatchStops.firstWhere(
+    (stop) => stop.status == 'PENDING',
+    orElse: () => route.currentBatchStops.first,
+  );
+  return EntryScan(next.buildingName);
 }
 
 /// The stop a check-in scan belongs to, or null when the worker dismissed
@@ -129,7 +139,11 @@ Future<void> checkOutStop(
     complaints = answer.text;
   }
   if (!context.mounted) return;
-  final scan = await _scanAndLocate(context, ref);
+  final scan = await _scanAndLocate(
+    context,
+    ref,
+    ExitScan(stop.buildingName, stop.floorLabel),
+  );
   if (scan == null || !context.mounted) return;
 
   // Check-out is always per-stop — the UI already knows which IN_PROGRESS
@@ -202,9 +216,15 @@ Future<void> signalImpossibility(
 /// check-out (Ruling 16: check-out reuses check-in's scan+GPS dance).
 /// Returns null when the scan was dismissed or the context is no longer
 /// mounted afterward.
-Future<_Scan?> _scanAndLocate(BuildContext context, WidgetRef ref) async {
+Future<_Scan?> _scanAndLocate(
+  BuildContext context,
+  WidgetRef ref,
+  ScanContext scanContext,
+) async {
   final rawValue = await Navigator.of(context).push<String>(
-    MaterialPageRoute<String>(builder: (_) => const ScanScreen()),
+    MaterialPageRoute<String>(
+      builder: (_) => ScanScreen(context: scanContext),
+    ),
   );
   if (rawValue == null || !context.mounted) return null;
 

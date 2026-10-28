@@ -13,6 +13,12 @@ const Color kInverseSurface = Color(0xFF2F2F2C);
 /// The soft halo around the worker's position dot: `ink` at 13%.
 const Color kPositionHalo = Color(0x211F1F1D);
 
+/// Scrim over the QR camera: black at 60% (spec section 6.4).
+const Color kScanScrim = Color(0x99000000);
+
+/// Brackets, scan line and copy over the QR camera (spec section 6.4).
+const Color kScanOverlayWhite = Color(0xFFFFFFFF);
+
 /// Field-app colour tokens (spec section 6.1). Read with
 /// `Theme.of(context).extension<FieldPalette>()!`.
 @immutable
