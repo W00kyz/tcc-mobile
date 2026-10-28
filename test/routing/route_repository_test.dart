@@ -21,7 +21,9 @@ Map<String, dynamic> _stopPayload({
   'service_point_id': 'sp-$id',
   'service_point_name': 'Sala $id',
   'floor_label': 'Térreo',
+  'building_id': 'b-caa',
   'building_name': 'CAA',
+  'done_at': null,
   'latitude': -7.21,
   'longitude': -35.91,
   'distance_from_prev_m': null,
@@ -133,6 +135,24 @@ void main() {
         [-35.91, -7.21],
         [-35.92, -7.22],
       ]);
+    });
+
+    test('parses the building, floor and done_at of a stop', () async {
+      final payload = _routePayload();
+      final stops = payload['stops'] as List<dynamic>;
+      (stops[0] as Map<String, dynamic>)['done_at'] =
+          '2026-10-20T10:20:00+00:00';
+      final repository = DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: payload)),
+      );
+
+      final route = (await repository.fetchMyDay()).route!;
+
+      expect(route.stops[0].buildingId, 'b-caa');
+      expect(route.stops[0].buildingName, 'CAA');
+      expect(route.stops[0].floorLabel, 'Térreo');
+      expect(route.stops[0].doneAt, DateTime.parse('2026-10-20T10:20:00Z'));
+      expect(route.stops[1].doneAt, isNull);
     });
 
     test('derives the done count over every batch of the day', () async {

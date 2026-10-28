@@ -106,6 +106,7 @@ class _FakeStopProgressStore implements StopProgressStore {
   Future<void> upsertInProgress(String routeStopId, String executionId) async {
     calls.add('inProgress:$routeStopId:$executionId');
     _rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
       routeStopId: routeStopId,
       executionId: executionId,
       status: StopLocalStatus.inProgress,
@@ -118,6 +119,7 @@ class _FakeStopProgressStore implements StopProgressStore {
     final existing = _rows[routeStopId];
     if (existing == null) return;
     _rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
       routeStopId: existing.routeStopId,
       executionId: existing.executionId,
       status: StopLocalStatus.done,

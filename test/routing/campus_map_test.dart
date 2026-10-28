@@ -13,6 +13,9 @@ RouteStopSummary _stop({
   List<List<double>>? legGeometry,
   int batch = 1,
 }) => RouteStopSummary(
+  buildingId: 'b1',
+  buildingName: 'Prédio',
+  floorLabel: 'Térreo',
   id: id,
   orderIndex: order,
   batchNumber: batch,

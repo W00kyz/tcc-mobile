@@ -9,6 +9,9 @@ RouteStopSummary _stop(
   String? name,
   String status = 'PENDING',
 }) => RouteStopSummary(
+  buildingId: 'b1',
+  buildingName: 'Prédio',
+  floorLabel: 'Térreo',
   id: id,
   orderIndex: 1,
   batchNumber: 1,

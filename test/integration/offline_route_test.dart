@@ -1059,6 +1059,9 @@ class _RecordingRouteRepository implements RouteRepository {
     currentBatch: batchesHandedOut == 0 ? 1 : 2,
     stops: [
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: _stop1,
         orderIndex: 1,
         batchNumber: 1,
@@ -1069,6 +1072,9 @@ class _RecordingRouteRepository implements RouteRepository {
         longitude: -35.88,
       ),
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: _stop2,
         orderIndex: 2,
         batchNumber: 1,
@@ -1080,6 +1086,9 @@ class _RecordingRouteRepository implements RouteRepository {
       ),
       if (batchesHandedOut > 0)
         const RouteStopSummary(
+          buildingId: 'b1',
+          buildingName: 'Prédio',
+          floorLabel: 'Térreo',
           id: 's3',
           orderIndex: 3,
           batchNumber: 2,

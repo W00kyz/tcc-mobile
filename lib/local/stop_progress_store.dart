@@ -17,11 +17,15 @@ class StopProgressEntry {
     required this.routeStopId,
     required this.executionId,
     required this.status,
+    required this.updatedAt,
   });
 
   final String routeStopId;
   final String executionId;
   final StopLocalStatus status;
+
+  /// Last local change to the row (check-in or check-out time).
+  final DateTime updatedAt;
 }
 
 /// One row per stop the worker touched: written `inProgress` on check-in
@@ -100,6 +104,7 @@ class DriftStopProgressStore implements StopProgressStore {
       routeStopId: row.routeStopId,
       executionId: row.executionId,
       status: _statusFromColumn(row.localStatus),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(row.updatedAt),
     );
   }
 

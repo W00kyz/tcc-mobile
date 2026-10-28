@@ -381,6 +381,7 @@ class _FakeStopProgressStore implements StopProgressStore {
   _FakeStopProgressStore([Map<String, String> seed = const {}]) {
     seed.forEach((routeStopId, executionId) {
       _rows[routeStopId] = StopProgressEntry(
+        updatedAt: DateTime(2026),
         routeStopId: routeStopId,
         executionId: executionId,
         status: StopLocalStatus.inProgress,
@@ -396,6 +397,7 @@ class _FakeStopProgressStore implements StopProgressStore {
     String executionId,
   ) async {
     _rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
       routeStopId: routeStopId,
       executionId: executionId,
       status: StopLocalStatus.inProgress,
@@ -407,6 +409,7 @@ class _FakeStopProgressStore implements StopProgressStore {
     final existing = _rows[routeStopId];
     if (existing == null) return;
     _rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
       routeStopId: existing.routeStopId,
       executionId: existing.executionId,
       status: StopLocalStatus.done,
@@ -1177,6 +1180,9 @@ void main() {
           _routeWith(
             stops: const [
               RouteStopSummary(
+                buildingId: 'b1',
+                buildingName: 'Prédio',
+                floorLabel: 'Térreo',
                 id: 's1',
                 orderIndex: 1,
                 batchNumber: 1,
@@ -1186,6 +1192,9 @@ void main() {
                 longitude: -35.91,
               ),
               RouteStopSummary(
+                buildingId: 'b1',
+                buildingName: 'Prédio',
+                floorLabel: 'Térreo',
                 id: 's2',
                 orderIndex: 2,
                 batchNumber: 1,
@@ -1262,6 +1271,9 @@ void main() {
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
+                  buildingId: 'b1',
+                  buildingName: 'Prédio',
+                  floorLabel: 'Térreo',
                   id: 's1',
                   orderIndex: 1,
                   batchNumber: 1,
@@ -1294,6 +1306,9 @@ void main() {
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
+                  buildingId: 'b1',
+                  buildingName: 'Prédio',
+                  floorLabel: 'Térreo',
                   id: 's1',
                   orderIndex: 1,
                   batchNumber: 1,
@@ -1331,6 +1346,9 @@ void main() {
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
+                  buildingId: 'b1',
+                  buildingName: 'Prédio',
+                  floorLabel: 'Térreo',
                   id: 's1',
                   orderIndex: 1,
                   batchNumber: 1,
@@ -1357,6 +1375,9 @@ void main() {
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's1',
         orderIndex: 1,
         batchNumber: 1,
@@ -1411,6 +1432,9 @@ void main() {
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's1',
         orderIndex: 1,
         batchNumber: 1,
@@ -1524,6 +1548,9 @@ void main() {
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's1',
         orderIndex: 1,
         batchNumber: 1,
@@ -1533,6 +1560,9 @@ void main() {
         longitude: -35.88,
       ),
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's2',
         orderIndex: 2,
         batchNumber: 1,
@@ -1549,6 +1579,9 @@ void main() {
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's1',
         orderIndex: 1,
         batchNumber: 1,
@@ -1558,6 +1591,9 @@ void main() {
         longitude: -35.88,
       ),
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's2',
         orderIndex: 2,
         batchNumber: 1,
@@ -1831,6 +1867,9 @@ void main() {
       startedAt: DateTime(2026, 8, 25, 8),
       stops: const [
         RouteStopSummary(
+          buildingId: 'b1',
+          buildingName: 'Prédio',
+          floorLabel: 'Térreo',
           id: 's1',
           orderIndex: 1,
           batchNumber: 1,
@@ -2100,6 +2139,9 @@ void main() {
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
+                  buildingId: 'b1',
+                  buildingName: 'Prédio',
+                  floorLabel: 'Térreo',
                   id: 's1',
                   orderIndex: 1,
                   batchNumber: 1,
@@ -2109,6 +2151,9 @@ void main() {
                   longitude: -35.91,
                 ),
                 RouteStopSummary(
+                  buildingId: 'b1',
+                  buildingName: 'Prédio',
+                  floorLabel: 'Térreo',
                   id: 's2',
                   orderIndex: 2,
                   batchNumber: 1,
@@ -2118,6 +2163,9 @@ void main() {
                   longitude: -35.92,
                 ),
                 RouteStopSummary(
+                  buildingId: 'b1',
+                  buildingName: 'Prédio',
+                  floorLabel: 'Térreo',
                   id: 's3',
                   orderIndex: 3,
                   batchNumber: 1,
@@ -2585,6 +2633,9 @@ void main() {
               startedAt: DateTime(2026, 8, 25, 8),
               stops: const [
                 RouteStopSummary(
+                  buildingId: 'b1',
+                  buildingName: 'Prédio',
+                  floorLabel: 'Térreo',
                   id: 's1',
                   orderIndex: 1,
                   batchNumber: 1,
@@ -2594,6 +2645,9 @@ void main() {
                   longitude: -35.91,
                 ),
                 RouteStopSummary(
+                  buildingId: 'b1',
+                  buildingName: 'Prédio',
+                  floorLabel: 'Térreo',
                   id: 's2',
                   orderIndex: 2,
                   batchNumber: 1,
@@ -2734,6 +2788,9 @@ void main() {
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's1',
         orderIndex: 1,
         batchNumber: 1,
@@ -2743,6 +2800,9 @@ void main() {
         longitude: -35.91,
       ),
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's2',
         orderIndex: 2,
         batchNumber: 1,
@@ -2752,6 +2812,9 @@ void main() {
         longitude: -35.92,
       ),
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's3',
         orderIndex: 3,
         batchNumber: 1,
@@ -2888,6 +2951,9 @@ void main() {
     startedAt: DateTime(2026, 8, 25, 8),
     stops: const [
       RouteStopSummary(
+        buildingId: 'b1',
+        buildingName: 'Prédio',
+        floorLabel: 'Térreo',
         id: 's1',
         orderIndex: 1,
         batchNumber: 1,

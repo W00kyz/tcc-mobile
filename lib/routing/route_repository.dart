@@ -14,9 +14,13 @@ class RouteStopSummary {
     required this.batchNumber,
     required this.status,
     required this.servicePointName,
+    required this.buildingId,
+    required this.buildingName,
+    required this.floorLabel,
     required this.latitude,
     required this.longitude,
     this.releaseReason,
+    this.doneAt,
     this.distanceFromPrevM,
     this.durationFromPrevS,
     this.legGeometry,
@@ -33,6 +37,10 @@ class RouteStopSummary {
         status: json['status'] as String,
         releaseReason: json['release_reason'] as String?,
         servicePointName: json['service_point_name'] as String,
+        buildingId: json['building_id'] as String,
+        buildingName: json['building_name'] as String,
+        floorLabel: json['floor_label'] as String,
+        doneAt: _parseOptionalTimestamp(json['done_at']),
         latitude: (json['latitude'] as num).toDouble(),
         longitude: (json['longitude'] as num).toDouble(),
         distanceFromPrevM: (json['distance_from_prev_m'] as num?)?.toDouble(),
@@ -67,6 +75,12 @@ class RouteStopSummary {
   /// null for any other status.
   final String? releaseReason;
   final String servicePointName;
+  final String buildingId;
+  final String buildingName;
+  final String floorLabel;
+
+  /// When the server recorded the stop done; null until then.
+  final DateTime? doneAt;
   final double latitude;
   final double longitude;
   final double? distanceFromPrevM;
