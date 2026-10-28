@@ -158,6 +158,8 @@ class _AccountAvatar extends ConsumerWidget {
     );
     return PopupMenuButton<_AccountEntry>(
       tooltip: AppStrings.accountMenuTooltip,
+      // A bare child gets a shrink-wrapped 40dp target; pad it to 48dp.
+      style: const ButtonStyle(tapTargetSize: MaterialTapTargetSize.padded),
       onSelected: (entry) => _open(context, entry),
       itemBuilder: (_) => [
         const PopupMenuItem(

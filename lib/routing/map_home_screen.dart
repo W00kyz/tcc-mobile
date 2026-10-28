@@ -76,6 +76,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    _clearSelectionOnNewBatch();
     final dayAsync = ref.watch(myDayProvider);
     // Watched here so the automatic next-batch pull lives as long as the
     // screen does (spec §6.4), and its offline panel shows in the sheet.
@@ -128,6 +129,21 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     if (day != null) return _daySheet(day, local, card, selected, nextBatch);
     if (dayAsync.hasError) return _panelSheet(const LoadErrorPanel());
     return _panelSheet(const _CardSkeleton());
+  }
+
+  /// A new batch (or route) starts with the whole card: a selection left
+  /// from the last batch would reopen in building mode — with no card — when
+  /// the next batch is in the same building (the common case).
+  void _clearSelectionOnNewBatch() {
+    ref.listen<AsyncValue<MyDay>>(myDayProvider, (previous, next) {
+      final before = previous?.value?.route;
+      final after = next.value?.route;
+      if (before?.id == after?.id &&
+          before?.currentBatch == after?.currentBatch) {
+        return;
+      }
+      _clearSelection();
+    });
   }
 
   /// A route whose batch is on the map: anything but paused or done.

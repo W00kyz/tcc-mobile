@@ -67,9 +67,7 @@ class _StampSlotState extends State<StampSlot>
 
   String _hour() {
     final at = widget.slot.stampedAt;
-    if (at == null) return '';
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(at.hour)}:${two(at.minute)}';
+    return at == null ? '' : stampHour(at);
   }
 
   String _label() {
@@ -232,4 +230,15 @@ class _StampSlotState extends State<StampSlot>
       style: TextStyle(fontSize: 11, height: 12 / 11, color: p.muted),
     );
   }
+}
+
+/// `HH:mm` of a stamp, read straight off the timestamp with no `.toLocal()`:
+/// the app's wall-clock-tagged-UTC convention (same as the notifications
+/// list). Shared by the card's stamp and the sheet's stop row so both read
+/// the same hour.
+///
+///     stampHour(DateTime.utc(2026, 10, 20, 10, 5)); // '10:05'
+String stampHour(DateTime at) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(at.hour)}:${two(at.minute)}';
 }

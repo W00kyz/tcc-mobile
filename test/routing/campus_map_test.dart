@@ -324,6 +324,18 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.byKey(const ValueKey('worker-position')), findsOneWidget);
+      final halo = tester.widget<DecoratedBox>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('worker-position')),
+              matching: find.byType(DecoratedBox),
+            )
+            .first,
+      );
+      expect(
+        (halo.decoration as BoxDecoration).color,
+        FieldPalette.light.positionHalo,
+      );
     });
 
     testWidgets('feeds the base layer from the injected provider', (

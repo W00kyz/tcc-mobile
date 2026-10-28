@@ -4,9 +4,47 @@ import 'package:flutter/material.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 /// The three heights of the home sheet (spec §6.2): closed, half (initial)
-/// and open.
+/// and open. The closed one grows past 0.22 on a short screen (see
+/// [mapSheetSnaps]).
 const List<double> kMapSheetSnaps = [0.22, 0.5, 0.9];
 const double kMapSheetInitial = 0.5;
+
+/// What the closed sheet must show whole: the handle, one 56dp header row
+/// (the next stop) and the footer (56dp button + 8dp above and at least 8dp
+/// below).
+const double _handleHeight = 24;
+const double _closedHeaderHeight = 56;
+const double _footerHeight = 56 + 8;
+const double _footerMinBottom = 8;
+
+/// The closed snap never goes past this, so it stays below the half height.
+const double _maxClosedSize = 0.45;
+
+/// The sheet's snaps for a [parentHeight]-tall screen whose system bar takes
+/// [bottomInset]: the closed height is 22% unless that cannot fit the next
+/// stop and "Escanear QR" (spec §6.2) — on a small phone with a gesture bar
+/// it grows to the pixels they need.
+///
+///     mapSheetSnaps(640, bottomInset: 48, hasFooter: true); // [0.3, 0.5, 0.9]
+List<double> mapSheetSnaps(
+  double parentHeight, {
+  required double bottomInset,
+  required bool hasFooter,
+}) {
+  if (parentHeight <= 0) return kMapSheetSnaps;
+  final bottom = bottomInset > _footerMinBottom
+      ? bottomInset
+      : _footerMinBottom;
+  final needed =
+      _handleHeight +
+      _closedHeaderHeight +
+      (hasFooter ? _footerHeight + bottom : bottomInset);
+  final closed = (needed / parentHeight).clamp(
+    kMapSheetSnaps.first,
+    _maxClosedSize,
+  );
+  return [closed, kMapSheetSnaps[1], kMapSheetSnaps.last];
+}
 
 /// The bottom sheet over the map: a drag handle, a scrolling [header] +
 /// [body], and an optional [stickyFooter] that never scrolls away — "Escanear
@@ -48,24 +86,36 @@ class _MapSheetState extends State<MapSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
     return LayoutBuilder(
-      builder: (context, constraints) => DraggableScrollableSheet(
-        controller: _controller,
-        // Spelled out although it is the default: the half height is a
-        // design decision (spec §6.2), not an accident of the framework.
-        // ignore: avoid_redundant_argument_values
-        initialChildSize: kMapSheetInitial,
-        minChildSize: kMapSheetSnaps.first,
-        maxChildSize: kMapSheetSnaps.last,
-        snap: true,
-        snapSizes: kMapSheetSnaps,
-        builder: (context, scrollController) =>
-            _surface(scrollController, constraints.maxHeight),
-      ),
+      builder: (context, constraints) {
+        final snaps = mapSheetSnaps(
+          constraints.maxHeight,
+          bottomInset: bottomInset,
+          hasFooter: widget.stickyFooter != null,
+        );
+        return DraggableScrollableSheet(
+          controller: _controller,
+          // Spelled out although it is the default: the half height is a
+          // design decision (spec §6.2), not an accident of the framework.
+          // ignore: avoid_redundant_argument_values
+          initialChildSize: kMapSheetInitial,
+          minChildSize: snaps.first,
+          maxChildSize: snaps.last,
+          snap: true,
+          snapSizes: snaps,
+          builder: (context, scrollController) =>
+              _surface(scrollController, constraints.maxHeight, snaps),
+        );
+      },
     );
   }
 
-  Widget _surface(ScrollController scrollController, double parentHeight) {
+  Widget _surface(
+    ScrollController scrollController,
+    double parentHeight,
+    List<double> snaps,
+  ) {
     final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
     final footer = widget.stickyFooter;
     return Material(
@@ -82,6 +132,7 @@ class _MapSheetState extends State<MapSheet> {
             controller: _controller,
             palette: p,
             parentHeight: parentHeight,
+            snaps: snaps,
           ),
           Expanded(child: _scrollArea(scrollController)),
           if (footer != null) _footer(footer),
@@ -120,9 +171,13 @@ class _SheetHandle extends StatelessWidget {
     required this.controller,
     required this.palette,
     required this.parentHeight,
+    required this.snaps,
   });
 
   final DraggableScrollableController controller;
+
+  /// Where a release settles: the sheet's own snaps.
+  final List<double> snaps;
   final FieldPalette palette;
 
   /// The height the sheet's fractions are of.
@@ -136,7 +191,7 @@ class _SheetHandle extends StatelessWidget {
       onVerticalDragUpdate: (details) => _dragBy(details.delta.dy),
       onVerticalDragEnd: (_) => _snap(),
       child: SizedBox(
-        height: 24,
+        height: _handleHeight,
         width: double.infinity,
         child: Center(
           child: Container(
@@ -155,8 +210,8 @@ class _SheetHandle extends StatelessWidget {
   void _dragBy(double dy) {
     if (!controller.isAttached || parentHeight <= 0) return;
     final next = (controller.size - dy / parentHeight).clamp(
-      kMapSheetSnaps.first,
-      kMapSheetSnaps.last,
+      snaps.first,
+      snaps.last,
     );
     controller.jumpTo(next);
   }
@@ -164,7 +219,7 @@ class _SheetHandle extends StatelessWidget {
   void _snap() {
     if (!controller.isAttached) return;
     final size = controller.size;
-    final nearest = kMapSheetSnaps.reduce(
+    final nearest = snaps.reduce(
       (a, b) => (a - size).abs() <= (b - size).abs() ? a : b,
     );
     unawaited(

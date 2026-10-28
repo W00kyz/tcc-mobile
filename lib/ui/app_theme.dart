@@ -10,6 +10,9 @@ const String kDisplayFont = 'BowlbyOneSC';
 /// Snackbar surface (not part of the token table).
 const Color kInverseSurface = Color(0xFF2F2F2C);
 
+/// The soft halo around the worker's position dot: `ink` at 13%.
+const Color kPositionHalo = Color(0x211F1F1D);
+
 /// Field-app colour tokens (spec section 6.1). Read with
 /// `Theme.of(context).extension<FieldPalette>()!`.
 @immutable
@@ -53,6 +56,10 @@ class FieldPalette extends ThemeExtension<FieldPalette> {
   final Color mapGround;
   final Color mapRoad;
   final Color mapBuilding;
+
+  /// The halo around the worker's dot on the map (not a token of its own:
+  /// `ink` at 13%).
+  Color get positionHalo => kPositionHalo;
 
   @override
   FieldPalette copyWith({

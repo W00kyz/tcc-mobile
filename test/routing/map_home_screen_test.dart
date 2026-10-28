@@ -6,6 +6,7 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
+import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/ui/batch_card.dart';
 import 'package:route_monitor/ui/building_pin.dart';
@@ -326,5 +327,82 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(scanQrButton().hitTestable(), findsOneWidget);
+  });
+
+  group('fix round 1', () {
+    testWidgets('the account avatar is a 48dp touch target', (tester) async {
+      await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+
+      final size = tester.getSize(
+        find.byWidgetPredicate((widget) => widget is PopupMenuButton),
+      );
+      expect(size.width, greaterThanOrEqualTo(48));
+      expect(size.height, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('the row and the stamp read the same hour for a server-done '
+        'stop (wall-clock-tagged UTC, no toLocal)', (tester) async {
+      final route = routeWith(
+        stops: [
+          stopIn(
+            id: 's1',
+            status: 'DONE',
+            doneAt: DateTime.utc(2026, 10, 20, 10, 5),
+          ),
+          stopIn(id: 's2', orderIndex: 2),
+        ],
+      );
+      await pumpHome(tester, homeWith(repositoryWith(route)));
+
+      expect(find.text(AppStrings.slotDone('10:05')), findsOneWidget);
+      expect(find.text('10:05'), findsOneWidget);
+    });
+
+    testWidgets('a new batch clears the building selection, even in the '
+        'same building', (tester) async {
+      final repository = repositoryWith(
+        routeWith(
+          stops: [stopIn(id: 's1', servicePointName: 'Sala 1')],
+        ),
+      );
+      await pumpHome(tester, homeWith(repository));
+      await tester.tap(_pinCircle('b1'));
+      await tester.pumpAndSettle();
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(MapHomeScreen)),
+      );
+      expect(container.read(selectedBuildingProvider), 'b1');
+
+      repository.day = myDayWith(
+        routeWith(
+          currentBatch: 2,
+          stops: [
+            stopIn(id: 's1', status: 'DONE'),
+            stopIn(id: 's2', orderIndex: 2, batchNumber: 2),
+          ],
+        ),
+      );
+      container.invalidate(myDayProvider);
+      await tester.pumpAndSettle();
+
+      expect(container.read(selectedBuildingProvider), isNull);
+      expect(find.byType(BatchCardView), findsOneWidget);
+    });
+
+    testWidgets('on a small phone the closed sheet still shows the next stop '
+        'and Escanear QR', (tester) async {
+      tester.view
+        ..physicalSize = const Size(360, 640)
+        ..devicePixelRatio = 1
+        ..padding = const FakeViewPadding(bottom: 48);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(homeWith(repositoryWith(_twoBuildings())));
+      await tester.pumpAndSettle();
+
+      await snapSheetTo(tester, 0.22);
+
+      expect(find.text(AppStrings.nextStopLabel).hitTestable(), findsOneWidget);
+      expect(scanQrButton().hitTestable(), findsOneWidget);
+    });
   });
 }

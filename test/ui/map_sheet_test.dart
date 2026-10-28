@@ -32,6 +32,11 @@ Widget _harness({
 
 void main() {
   testWidgets('snaps at 0.22 / 0.5 / 0.9 and starts at 0.5', (tester) async {
+    // A typical phone: 390×844.
+    tester.view
+      ..physicalSize = const Size(390, 844)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(_harness());
 
     final sheet = tester.widget<DraggableScrollableSheet>(
@@ -86,5 +91,31 @@ void main() {
 
     expect(find.text('rodape'), findsNothing);
     expect(find.text('cabecalho'), findsOneWidget);
+  });
+
+  group('mapSheetSnaps', () {
+    test('a regular phone closes at 0.22', () {
+      expect(mapSheetSnaps(844, bottomInset: 24, hasFooter: true), const [
+        0.22,
+        0.5,
+        0.9,
+      ]);
+    });
+
+    test('a small phone with a gesture bar closes high enough for the next '
+        'stop and the button', () {
+      final snaps = mapSheetSnaps(640, bottomInset: 48, hasFooter: true);
+
+      // handle 24 + next stop 56 + button 64 + inset 48 = 192 px.
+      expect(snaps.first * 640, closeTo(192, 0.001));
+      expect(snaps.sublist(1), const [0.5, 0.9]);
+    });
+
+    test('the closed height never reaches the half one', () {
+      expect(
+        mapSheetSnaps(200, bottomInset: 48, hasFooter: true).first,
+        lessThan(0.5),
+      );
+    });
   });
 }

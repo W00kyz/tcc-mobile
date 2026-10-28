@@ -85,7 +85,7 @@ Marker workerMarker(LatLng position, FieldPalette p) {
     child: DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: p.ink.withValues(alpha: 0.13),
+        color: p.positionHalo,
       ),
       child: Center(
         child: Container(

@@ -11,6 +11,7 @@ import 'package:route_monitor/routing/stop_actions.dart';
 import 'package:route_monitor/routing/stop_evidence_section.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
+import 'package:route_monitor/ui/stamp_slot.dart';
 
 /// Formats the travel-from-previous leg as `N m · N min` (RF12). Returns `null`
 /// when the distance is unknown; drops the time part when the duration is.
@@ -162,13 +163,8 @@ class StopRow extends ConsumerWidget {
   }
 }
 
-String _doneLabel(DateTime? at) {
-  if (at == null) return AppStrings.slotDoneNoHour;
-  final local = at.toLocal();
-  final h = local.hour.toString().padLeft(2, '0');
-  final m = local.minute.toString().padLeft(2, '0');
-  return AppStrings.slotDone('$h:$m');
-}
+String _doneLabel(DateTime? at) =>
+    at == null ? AppStrings.slotDoneNoHour : AppStrings.slotDone(stampHour(at));
 
 /// A compact inline chip flagging a stop's outbox state — "Pendente" for a
 /// not-yet-synced row, "Bloqueado" (brick) for a hard-blocked one.

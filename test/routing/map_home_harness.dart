@@ -192,6 +192,7 @@ RouteStopSummary stopIn({
   double? durationFromPrevS,
   bool requiresEvidence = false,
   String? releaseReason,
+  DateTime? doneAt,
 }) => RouteStopSummary(
   buildingId: buildingId,
   buildingName: buildingName,
@@ -207,6 +208,7 @@ RouteStopSummary stopIn({
   durationFromPrevS: durationFromPrevS,
   requiresEvidence: requiresEvidence,
   releaseReason: releaseReason,
+  doneAt: doneAt,
 );
 
 /// Shared by tests that only need the type to exist in the tree.
