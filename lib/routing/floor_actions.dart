@@ -184,22 +184,44 @@ Future<void> checkOutFloor(
   RouteSummary route,
   FloorRow floor,
 ) async {
-  final stamped = [
-    for (final slot in floor.slots)
-      if (slot.state == SlotState.stamped) slot.stopId,
-  ];
+  final stamped = _stampedStopIds(floor);
   if (stamped.isEmpty) return;
   final notify = homeNotifier(ref, context);
   final building = route.stops.firstWhere((s) => s.id == stamped.first);
   final exit = ExitScan(building.buildingName, floor.label);
   final scan = await scanAndLocate(context, ref, exit);
   if (scan == null) return;
+  if (!await _isFloorExitQr(ref, floor, scan, notify)) return;
 
   for (final stopId in stamped) {
     await _checkOutStamped(ref, route, stopId, scan);
   }
   ref.invalidate(myDayProvider);
   notify(AppStrings.floorCheckOutDone);
+}
+
+List<String> _stampedStopIds(FloorRow floor) => [
+  for (final slot in floor.slots)
+    if (slot.state == SlotState.stamped) slot.stopId,
+];
+
+/// Whether [scan] is a verified QR of [floor], saying why not otherwise. A
+/// floor of a snapshot cached before the backend sent floor ids has nothing to
+/// compare with, so any verified QR passes (the backend still checks it).
+Future<bool> _isFloorExitQr(
+  WidgetRef ref,
+  FloorRow floor,
+  ScanResult scan,
+  void Function(String) notify,
+) async {
+  final qr = await ref.read(qrVerifierProvider).verify(scan.rawValue);
+  if (qr == null) {
+    notify(AppStrings.scanInvalidQr);
+    return false;
+  }
+  final wrongFloor = floor.floorId != null && qr.floorId != floor.floorId;
+  if (wrongFloor) notify(AppStrings.exitQrWrongFloor(floor.label));
+  return !wrongFloor;
 }
 
 /// One stamped task's check-out, with the observation read back from the

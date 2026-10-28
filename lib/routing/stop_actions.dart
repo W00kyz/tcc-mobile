@@ -201,6 +201,7 @@ Future<void> _recordCheckOut(
   ScanResult scan,
 ) async {
   final draft = observationDraftProvider(stop.id);
+  await _releaseHeldPhotos(ref, stop);
   // Check-out is always per-stop — the UI already knows which IN_PROGRESS
   // stop it is concluding, so there is no room to resolve. The repository
   // only enqueues + writes local state (spec Ruling 2): no
@@ -218,6 +219,16 @@ Future<void> _recordCheckOut(
       );
   ref.read(draft.notifier).clear();
   _showStopDone(ref, stop);
+}
+
+/// LEGACY: this path has no "Concluir tarefa" stamp, so the stop's photos
+/// (taken `held`) are cleared to leave here, before the check-out that closes
+/// the stop. Without it they would never upload.
+Future<void> _releaseHeldPhotos(WidgetRef ref, RouteStopSummary stop) async {
+  final entry = await ref.read(stopProgressStoreProvider).progressFor(stop.id);
+  final executionId = entry?.executionId;
+  if (executionId == null) return;
+  await ref.read(localWriteStoreProvider).releaseHeldPhotos(executionId);
 }
 
 /// What follows a written check-out on screen.

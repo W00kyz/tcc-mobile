@@ -119,6 +119,8 @@ abstract final class AppStrings {
   static const String floorCheckOutDone =
       'Andar concluído · enviado quando houver rede';
   static const String taskImpededDone = 'Impossibilidade registrada';
+  static String exitQrWrongFloor(String floorLabel) =>
+      'Este QR não é do $floorLabel';
   static String floorCheckInDone(int n) =>
       'Check-in do andar feito · $n ${n == 1 ? 'tarefa' : 'tarefas'}';
   static const String routeLocationUnavailable =

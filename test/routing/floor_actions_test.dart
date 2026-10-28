@@ -261,6 +261,52 @@ void main() {
       expect(find.text(AppStrings.floorCheckOutDone), findsOneWidget);
       expect(container.read(lastStampedStopProvider), isNull);
     });
+
+    Future<void> scanExitExpectingNoCheckOut(
+      WidgetTester tester,
+      String rawValue,
+      String notice,
+    ) async {
+      final route = _route([_stop('s1', 1)]);
+      await progress.upsertInProgress('s1', 'exec-s1');
+      await progress.markStamped('s1');
+      final floor = await _floorOf(
+        route,
+        progress,
+        expected: [SlotState.stamped],
+      );
+      await pumpHost(
+        tester,
+        (context, ref) => checkOutFloor(context, ref, route, floor),
+      );
+
+      await scanWith(tester, rawValue);
+
+      expect(await store.unsyncedForRoute('r1'), isEmpty);
+      expect(
+        (await progress.progressFor('s1'))?.status,
+        StopLocalStatus.stamped,
+      );
+      expect(find.text(notice), findsOneWidget);
+    }
+
+    testWidgets('a QR that does not verify checks nothing out', (tester) async {
+      await scanExitExpectingNoCheckOut(
+        tester,
+        'not-a-qr',
+        AppStrings.scanInvalidQr,
+      );
+    });
+
+    testWidgets("another floor's QR checks nothing out and names the floor", (
+      tester,
+    ) async {
+      await scanExitExpectingNoCheckOut(
+        tester,
+        'v1.f2.1.exit',
+        AppStrings.exitQrWrongFloor('Andar f1'),
+      );
+    });
   });
 
   group('task flows', () {
@@ -331,18 +377,19 @@ void main() {
 /// from the device's progress rows.
 Future<FloorRow> _floorOf(
   RouteSummary route,
-  StopProgressStore progress,
-) async {
+  StopProgressStore progress, {
+  List<SlotState> expected = const [
+    SlotState.stamped,
+    SlotState.stamped,
+    SlotState.inProgress,
+  ],
+}) async {
   final entries = await progress.allForRoute(route.stops.map((s) => s.id));
   final local = {
     for (final e in entries)
       e.routeStopId: LocalStopState(status: e.status, updatedAt: e.updatedAt),
   };
   final floor = buildDayBuildings(route, local, {}, {}).single.floors.single;
-  expect(floor.slots.map((s) => s.state), [
-    SlotState.stamped,
-    SlotState.stamped,
-    SlotState.inProgress,
-  ]);
+  expect(floor.slots.map((s) => s.state), expected);
   return floor;
 }
