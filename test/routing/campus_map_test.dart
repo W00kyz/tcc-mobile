@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/ui/app_theme.dart';
@@ -127,39 +128,60 @@ void main() {
     expect(data.legs, isEmpty);
   });
 
-  test('only the current batch is drawn, without released stops', () {
-    final data = buildRouteMapData(
-      RouteSummary(
-        id: 'r1',
-        fieldWorkerName: 'João',
-        routeDate: DateTime(2026, 8, 25),
-        status: 'IN_PROGRESS',
-        startedAt: null,
-        currentBatch: 2,
-        stops: [
-          _stop(id: 's1', order: 1, status: 'DONE', lat: -7.21, lng: -35.91),
-          _stop(
-            id: 's2',
-            order: 2,
-            status: 'RELEASED',
-            lat: -7.22,
-            lng: -35.92,
-            batch: 2,
-          ),
-          _stop(
-            id: 's3',
-            order: 3,
-            status: 'PENDING',
-            lat: -7.23,
-            lng: -35.93,
-            batch: 2,
-          ),
-        ],
-      ),
+  group('the whole day is drawn', () {
+    final twoBatches = RouteSummary(
+      id: 'r1',
+      fieldWorkerName: 'João',
+      routeDate: DateTime(2026, 8, 25),
+      status: 'IN_PROGRESS',
+      startedAt: null,
+      currentBatch: 2,
+      stops: [
+        _stop(id: 's1', order: 1, status: 'DONE', lat: -7.21, lng: -35.91),
+        _stop(
+          id: 's2',
+          order: 2,
+          status: 'RELEASED',
+          lat: -7.22,
+          lng: -35.92,
+          batch: 2,
+        ),
+        _stop(
+          id: 's3',
+          order: 3,
+          status: 'PENDING',
+          lat: -7.23,
+          lng: -35.93,
+          batch: 2,
+        ),
+        _stop(
+          id: 's4',
+          order: 4,
+          status: 'PENDING',
+          lat: -7.24,
+          lng: -35.94,
+          batch: 3,
+        ),
+      ],
     );
 
-    expect(data.stops.map((s) => s.order), [3]);
-    expect(data.legs, isEmpty);
+    test('every batch is on the line, released stops left out', () {
+      final data = buildRouteMapData(twoBatches);
+
+      expect(data.stops.map((s) => s.order), [1, 3, 4]);
+      expect(data.legs, hasLength(2));
+      expect(data.legs.first.points.last, const LatLng(-7.23, -35.93));
+    });
+
+    test('a stop released for an impediment stays, walked', () {
+      final buildings = buildDayBuildings(twoBatches, const {}, {
+        's2',
+      }, const {});
+      final data = buildRouteMapData(twoBatches, buildings: buildings);
+
+      expect(data.stops.map((s) => s.order), [1, 2, 3, 4]);
+      expect(data.legs.first.kind, LegKind.walked);
+    });
   });
 
   test('an empty leg geometry is treated as missing', () {
@@ -201,15 +223,20 @@ void main() {
     expect(data.legs.map((leg) => leg.kind), [LegKind.next, LegKind.rest]);
   });
 
-  test("a local check-out walks the leg before the card's next stop", () {
-    final card = buildBatchCard(route, {
-      's2': LocalStopState(
-        status: StopLocalStatus.done,
-        updatedAt: DateTime(2026),
-      ),
-    }, const {});
+  test('a local check-out walks the leg before the next stop', () {
+    final buildings = buildDayBuildings(
+      route,
+      {
+        's2': LocalStopState(
+          status: StopLocalStatus.done,
+          updatedAt: DateTime(2026),
+        ),
+      },
+      const {},
+      const {},
+    );
 
-    final data = buildRouteMapData(route, card: card);
+    final data = buildRouteMapData(route, buildings: buildings);
 
     expect(data.legs.map((leg) => leg.kind), [LegKind.walked, LegKind.next]);
   });
@@ -219,14 +246,16 @@ void main() {
       RouteSummary route, {
       String? selected,
       LatLng? worker,
-      ValueChanged<BuildingGroup>? onPinTap,
+      ValueChanged<DayBuilding>? onPinTap,
+      MapController? controller,
     }) {
-      final card = buildBatchCard(route, const {}, const {});
+      final buildings = buildDayBuildings(route, const {}, const {}, const {});
       return MaterialApp(
         theme: buildAppTheme(),
         home: CampusMap(
-          data: buildRouteMapData(route, card: card),
-          groups: card.groups,
+          data: buildRouteMapData(route, buildings: buildings),
+          buildings: buildings,
+          controller: controller,
           selectedBuildingId: selected,
           workerPosition: worker,
           onPinTap: onPinTap,
@@ -264,8 +293,66 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.byType(BuildingPin), findsNWidgets(2));
-      expect(find.text('1/1'), findsOneWidget);
-      expect(find.text('0/2'), findsOneWidget);
+      expect(find.byIcon(Icons.check), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+    });
+
+    testWidgets('a dropped building draws no marker', (tester) async {
+      final dropped = _routeWith([
+        _stop(id: 's1', order: 1, status: 'PENDING', lat: -7.21, lng: -35.91),
+        _stop(
+          id: 's2',
+          order: 2,
+          status: 'RELEASED',
+          lat: -7.213,
+          lng: -35.913,
+          building: 'b2',
+        ),
+      ]);
+      await tester.pumpWidget(harness(dropped));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.byKey(const ValueKey('marker-b1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('marker-b2')), findsNothing);
+      expect(find.byType(BuildingPin), findsOneWidget);
+    });
+
+    testWidgets('only the building holding the next task is the next pin', (
+      tester,
+    ) async {
+      await tester.pumpWidget(harness(twoBuildings));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final pins = tester.widgetList<BuildingPin>(find.byType(BuildingPin));
+      expect(
+        pins.where((pin) => pin.isNext).map((pin) => pin.building.buildingId),
+        ['b2'],
+      );
+    });
+
+    testWidgets("a pin's stem tip stands on its building", (tester) async {
+      final controller = MapController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(harness(twoBuildings, controller: controller));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final b2 = buildDayBuildings(
+        twoBuildings,
+        const {},
+        const {},
+        const {},
+      ).last;
+      final tip = tester
+          .getRect(
+            find.descendant(
+              of: find.byKey(const ValueKey('pin-b2')),
+              matching: find.byKey(const ValueKey('pin-teardrop')),
+            ),
+          )
+          .bottomCenter;
+      final spot = controller.camera.latLngToScreenPoint(b2.position);
+      expect(tip.dx, closeTo(spot.x, 0.5));
+      expect(tip.dy, closeTo(spot.y, 0.5));
     });
 
     testWidgets('a selected building grows and the others dim', (
@@ -277,21 +364,21 @@ void main() {
       final pins = tester
           .widgetList<BuildingPin>(find.byType(BuildingPin))
           .toList();
-      final b1 = pins.singleWhere((pin) => pin.group.buildingId == 'b1');
-      final b2 = pins.singleWhere((pin) => pin.group.buildingId == 'b2');
+      final b1 = pins.singleWhere((pin) => pin.building.buildingId == 'b1');
+      final b2 = pins.singleWhere((pin) => pin.building.buildingId == 'b2');
       expect(b1.dimmed, isTrue);
       expect(b2.selected, isTrue);
       expect(b2.dimmed, isFalse);
     });
 
     testWidgets('a pin tap reports its building', (tester) async {
-      BuildingGroup? tapped;
+      DayBuilding? tapped;
       await tester.pumpWidget(
-        harness(twoBuildings, onPinTap: (group) => tapped = group),
+        harness(twoBuildings, onPinTap: (building) => tapped = building),
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      await tester.tap(find.text('0/2'));
+      await tester.tap(find.text('2'));
       // The map's own double-tap recogniser holds the arena until it times
       // out.
       await tester.pumpAndSettle();

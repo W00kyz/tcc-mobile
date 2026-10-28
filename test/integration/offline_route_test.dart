@@ -928,11 +928,15 @@ class _Fixture {
   }
 
   Future<void> dispose() async {
+    // The container goes first: a live read of the impeded stops is a drift
+    // stream, and closing the db under its listener never completes in this
+    // fake-async zone.
     // `appDatabaseProvider` is overridden with a value, so its `onDispose`
     // close hook never runs — close the in-memory db here instead, or drift
     // warns about a second AppDatabase on the next test.
-    await _db.close();
+    final db = _db;
     container.dispose();
+    await db.close();
     await connectivity.dispose();
   }
 }

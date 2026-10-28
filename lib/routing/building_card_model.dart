@@ -59,6 +59,12 @@ class DayBuilding {
       .where((s) => s.state == SlotState.done || s.state == SlotState.impeded)
       .length;
 
+  /// Tasks that count: every one but the released.
+  int get totalTasks => _counted;
+
+  /// Tasks done or impeded.
+  int get closedTasks => _closed;
+
   /// Every task is done or impeded.
   bool get complete => _counted > 0 && _closed == _counted;
 

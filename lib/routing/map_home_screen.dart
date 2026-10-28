@@ -15,6 +15,7 @@ import 'package:route_monitor/monitoring/silence_banner.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/batch_sheet.dart';
+import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/day_state_panels.dart';
 import 'package:route_monitor/routing/home_notices.dart';
@@ -24,6 +25,7 @@ import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/stop_actions.dart';
+import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_snackbars.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/map_sheet.dart';
@@ -120,9 +122,14 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         ? buildBatchCard(route!, local, pendingSync)
         : null;
     _card = card;
-    final selected = _selectedGroup(card, ref.watch(selectedBuildingProvider));
+    final buildings = _dayBuildings(route, local, pendingSync);
+    final selectedId = ref.watch(selectedBuildingProvider);
+    final selected = _selectedGroup(card, selectedId);
+    final pinned = buildings.any((b) => b.buildingId == selectedId)
+        ? selectedId
+        : null;
     return PopScope(
-      canPop: selected == null,
+      canPop: pinned == null,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _clearSelection();
       },
@@ -143,7 +150,13 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
                 builder: (context, constraints) => Stack(
                   children: [
                     Positioned.fill(
-                      child: _campusMap(route, card, selected, constraints),
+                      child: _campusMap(
+                        route,
+                        card,
+                        buildings,
+                        pinned,
+                        constraints,
+                      ),
                     ),
                     _topOverlay(route, local),
                     _myPositionButton(constraints.maxHeight),
@@ -214,6 +227,20 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   bool _isWorked(RouteSummary? route) =>
       route != null && route.status != 'PAUSED' && route.status != 'DONE';
 
+  /// The day's pins: every batch's buildings, numbered in route order, while
+  /// a batch is on the map. The impeded stops come from the local outbox, so
+  /// an impediment greys its pin at once, offline too.
+  List<DayBuilding> _dayBuildings(
+    RouteSummary? route,
+    Map<String, LocalStopState> local,
+    Set<String> pendingSync,
+  ) {
+    if (!_isWorked(route)) return const [];
+    final impeded =
+        ref.watch(impededStopIdsProvider(route!.id)).value ?? const <String>{};
+    return buildDayBuildings(route, local, impeded, pendingSync);
+  }
+
   BuildingGroup? _selectedGroup(BatchCard? card, String? buildingId) {
     if (buildingId == null) return null;
     return card?.groups.where((g) => g.buildingId == buildingId).firstOrNull;
@@ -222,7 +249,8 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   Widget _campusMap(
     RouteSummary? route,
     BatchCard? card,
-    BuildingGroup? selected,
+    List<DayBuilding> buildings,
+    String? selectedBuildingId,
     BoxConstraints constraints,
   ) {
     final top = MediaQuery.paddingOf(context).top + _topOverlayHeight;
@@ -231,11 +259,11 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
           ? RouteMapData(stops: const [], legs: const [])
           : buildRouteMapData(
               route!,
-              card: card,
+              buildings: buildings,
               approach: watchLiveApproach(ref, route, card),
             ),
-      groups: card?.groups ?? const [],
-      selectedBuildingId: selected?.buildingId,
+      buildings: buildings,
+      selectedBuildingId: selectedBuildingId,
       workerPosition: ref.watch(workerPositionProvider),
       controller: _map,
       onPinTap: _selectBuilding,
@@ -431,10 +459,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   /// Pin tap: select the building, centre the map on it and bring the sheet
   /// to half height, the current card showing with that building
   /// highlighted.
-  void _selectBuilding(BuildingGroup group) {
-    ref.read(selectedBuildingProvider.notifier).select(group.buildingId);
+  void _selectBuilding(DayBuilding building) {
+    ref.read(selectedBuildingProvider.notifier).select(building.buildingId);
     _forgetStamp();
-    _map.move(group.position, _map.camera.zoom);
+    _map.move(building.position, _map.camera.zoom);
     if (!_sheet.isAttached) return;
     unawaited(
       _sheet.animateTo(

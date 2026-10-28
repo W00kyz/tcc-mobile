@@ -205,12 +205,8 @@ double? carouselPage(WidgetTester tester) => tester
     .controller
     ?.page;
 
-/// The pin's `done/total` count, inside its circle (the label may hang
-/// off-screen to the right).
-Finder pinCircle(String buildingId) => find.descendant(
-  of: find.byKey(ValueKey('pin-$buildingId')),
-  matching: find.textContaining('/'),
-);
+/// The pin of [buildingId], teardrop and name: a tap anywhere on it selects.
+Finder pinCircle(String buildingId) => find.byKey(ValueKey('pin-$buildingId'));
 
 /// The carousel's card nearest the centre of the screen: the one shown.
 BatchCardView shownCard(WidgetTester tester) {

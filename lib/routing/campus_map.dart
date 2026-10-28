@@ -9,6 +9,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:pmtiles/pmtiles.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/campus_map_layers.dart';
 import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/route_repository.dart';
@@ -94,78 +95,74 @@ class RouteMapLeg {
   final bool destinationDone;
 }
 
-/// Pure transform from the API summary to what the map draws: the current
-/// batch only — the stops the worker still acts on (spec §6.4).
+/// Pure transform from the API summary to what the map draws: the stops of
+/// the whole day, every batch, in route order — the line shows where the day
+/// goes, not just the current batch.
 ///
 /// The OSRM leg geometry arrives as `[lng, lat]` pairs; every pair is flipped
 /// to `LatLng(lat, lng)`. A stop with no `legGeometry` gets a straight,
 /// [RouteMapLeg.approximate] leg between it and its predecessor. Each leg
-/// takes its [LegKind] from the stop it leads to, as [card] draws that stop
-/// (the server status alone when no card is given): a done stop's leg was
-/// walked, the next stop's leg is the next one. A live [approach] becomes
-/// [RouteMapData.approach], drawn as the next leg.
+/// takes its [LegKind] from the stop it leads to, as [buildings] draw that
+/// stop (the server status alone when none are given): a done stop's leg was
+/// walked, the next stop's leg is the next one. Released stops are left out,
+/// impeded ones stay. A live [approach] becomes [RouteMapData.approach],
+/// drawn as the next leg.
 ///
 /// ```dart
-/// final data = buildRouteMapData(route, card: card, approach: approach);
-/// CampusMap(data: data);
+/// final data = buildRouteMapData(route, buildings: buildings);
+/// CampusMap(data: data, buildings: buildings);
 /// ```
 RouteMapData buildRouteMapData(
   RouteSummary route, {
-  BatchCard? card,
+  List<DayBuilding>? buildings,
   LiveApproach? approach,
 }) {
-  final batchStops = route.currentBatchStops;
-  final states = {
-    for (final slot
-        in (card ?? buildBatchCard(route, const {}, const {})).groups.expand(
-          (group) => group.slots,
-        ))
-      slot.stopId: slot.state,
-  };
-  final stops = [
-    for (final stop in batchStops)
-      RouteMapStop(
-        position: LatLng(stop.latitude, stop.longitude),
-        order: stop.orderIndex,
-        pending: stop.status == 'PENDING',
-      ),
-  ];
-
-  final legs = <RouteMapLeg>[];
-  for (var i = 1; i < batchStops.length; i++) {
-    final previous = batchStops[i - 1];
-    final current = batchStops[i];
-    final geometry = current.legGeometry;
-    if (geometry != null && geometry.isNotEmpty) {
-      legs.add(
-        RouteMapLeg(
-          points: [
-            for (final point in geometry) LatLng(point[1], point[0]),
-          ],
-          approximate: false,
-          kind: _legKind(states[current.id]),
-          destinationDone: states[current.id] == SlotState.done,
-        ),
-      );
-    } else {
-      legs.add(
-        RouteMapLeg(
-          points: [
-            LatLng(previous.latitude, previous.longitude),
-            LatLng(current.latitude, current.longitude),
-          ],
-          approximate: true,
-          kind: _legKind(states[current.id]),
-          destinationDone: states[current.id] == SlotState.done,
-        ),
-      );
-    }
-  }
-
+  final states = _slotStates(
+    buildings ?? buildDayBuildings(route, const {}, const {}, const {}),
+  );
+  final drawn = (route.stops.where((s) => states[s.id] != null).toList()
+    ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex)));
   return RouteMapData(
-    stops: stops,
-    legs: legs,
+    stops: [
+      for (final stop in drawn)
+        RouteMapStop(
+          position: LatLng(stop.latitude, stop.longitude),
+          order: stop.orderIndex,
+          pending: stop.status == 'PENDING',
+        ),
+    ],
+    legs: [
+      for (var i = 1; i < drawn.length; i++)
+        _legTo(drawn[i], drawn[i - 1], states[drawn[i].id]),
+    ],
     approach: approach == null ? null : _approachLeg(approach),
+  );
+}
+
+/// The state each visible stop is drawn in; a released stop has none (it
+/// went back to the pool and is not on the map).
+Map<String, SlotState> _slotStates(List<DayBuilding> buildings) => {
+  for (final slot in buildings.expand((b) => b.floors).expand((f) => f.slots))
+    if (slot.state != SlotState.released) slot.stopId: slot.state,
+};
+
+RouteMapLeg _legTo(
+  RouteStopSummary stop,
+  RouteStopSummary previous,
+  SlotState? state,
+) {
+  final geometry = stop.legGeometry;
+  final real = geometry != null && geometry.isNotEmpty;
+  return RouteMapLeg(
+    points: real
+        ? [for (final point in geometry) LatLng(point[1], point[0])]
+        : [
+            LatLng(previous.latitude, previous.longitude),
+            LatLng(stop.latitude, stop.longitude),
+          ],
+    approximate: !real,
+    kind: _legKind(state),
+    destinationDone: state == SlotState.done,
   );
 }
 
@@ -189,8 +186,8 @@ const double kPinLabelMinZoom = 15.5;
 /// UFCG Campina Grande campus.
 const LatLng kCampusCenter = LatLng(-7.2167, -35.9097);
 
-/// The bundled offline base map plus one batch's building pins and
-/// trajectory (redesign §6.3).
+/// The bundled offline base map plus the day's building pins and trajectory
+/// (redesign §6.3).
 ///
 /// The base layer is the `assets/campus.pmtiles` vector archive rendered with
 /// `assets/campus-style.json`. Tests pass [tileProviderOverride] — a no-op
@@ -202,11 +199,11 @@ const LatLng kCampusCenter = LatLng(-7.2167, -35.9097);
 /// approximation (spec §6.2), so the field worker does not read the dashed
 /// line as a surveyed path.
 ///
-///     CampusMap(data: data, groups: card.groups, onPinTap: select)
+///     CampusMap(data: data, buildings: buildings, onPinTap: select)
 class CampusMap extends StatelessWidget {
   const CampusMap({
     required this.data,
-    this.groups = const [],
+    this.buildings = const [],
     this.selectedBuildingId,
     this.workerPosition,
     this.controller,
@@ -220,8 +217,8 @@ class CampusMap extends StatelessWidget {
   /// The route to draw.
   final RouteMapData data;
 
-  /// One pin per building of the batch.
-  final List<BuildingGroup> groups;
+  /// One pin per building of the day, numbered in route order.
+  final List<DayBuilding> buildings;
 
   /// The building whose pin grows; every other pin dims.
   final String? selectedBuildingId;
@@ -230,7 +227,7 @@ class CampusMap extends StatelessWidget {
   final LatLng? workerPosition;
 
   final MapController? controller;
-  final ValueChanged<BuildingGroup>? onPinTap;
+  final ValueChanged<DayBuilding>? onPinTap;
 
   /// A tap on the map itself (not a pin) — clears the selection.
   final VoidCallback? onMapTap;
@@ -304,16 +301,19 @@ class CampusMap extends StatelessWidget {
   List<Marker> _markers(FieldPalette p, double zoom) {
     final selected = selectedBuildingId;
     final position = workerPosition;
+    final nextId = nextBuilding(buildings)?.buildingId;
     return [
       if (position != null) workerMarker(position, p),
-      for (final group in groups)
+      for (final building in buildings)
         buildingMarker(
-          group,
-          selected: group.buildingId == selected,
-          dimmed: selected != null && group.buildingId != selected,
+          building,
+          selected: building.buildingId == selected,
+          dimmed: selected != null && building.buildingId != selected,
+          isNext: building.buildingId == nextId,
           // A selected pin keeps its name at any zoom.
-          showLabel: zoom >= kPinLabelMinZoom || group.buildingId == selected,
-          onTap: onPinTap == null ? null : () => onPinTap!(group),
+          showLabel:
+              zoom >= kPinLabelMinZoom || building.buildingId == selected,
+          onTap: onPinTap == null ? null : () => onPinTap!(building),
         ),
     ];
   }

@@ -256,6 +256,12 @@ abstract final class AppStrings {
 
   // --- map ---
   static const String mapApproximateLegLabel = 'trajeto aproximado';
+  static String buildingPinSemantics(
+    int number,
+    String name,
+    int done,
+    int total,
+  ) => '$number. $name, $done de $total tarefas';
 
   // --- scan screen ---
   static const String scanInvalidQr =

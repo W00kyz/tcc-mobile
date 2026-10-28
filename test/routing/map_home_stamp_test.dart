@@ -1,4 +1,3 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
@@ -38,12 +37,7 @@ void main() {
         stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
       ),
     );
-    await tester.tap(
-      find.descendant(
-        of: find.byKey(const ValueKey('pin-b1')),
-        matching: find.textContaining('/'),
-      ),
-    );
+    await tester.tap(pinCircle('b1'));
     await tester.pumpAndSettle();
     final container = ProviderScope.containerOf(
       tester.element(find.byType(MapHomeScreen)),

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/campus_map_layers.dart';
 import 'package:route_monitor/routing/live_approach.dart';
@@ -79,11 +79,11 @@ const LiveApproach _approach = LiveApproach(
 );
 
 void main() {
-  final card = buildBatchCard(_route, const {}, const {});
+  final buildings = buildDayBuildings(_route, const {}, const {}, const {});
 
   group('the live first leg', () {
     test('without a position the data is exactly as before', () {
-      final data = buildRouteMapData(_route, card: card);
+      final data = buildRouteMapData(_route, buildings: buildings);
 
       expect(data.approach, isNull);
       expect(data.drawnLegs, data.legs);
@@ -91,7 +91,11 @@ void main() {
 
     test('replaces the server leg into the next stop instead of doubling '
         'it', () {
-      final data = buildRouteMapData(_route, card: card, approach: _approach);
+      final data = buildRouteMapData(
+        _route,
+        buildings: buildings,
+        approach: _approach,
+      );
 
       expect(data.legs, hasLength(2));
       expect(data.drawnLegs, hasLength(2));
@@ -108,7 +112,11 @@ void main() {
         points: [LatLng(-7.2115, -35.9115), LatLng(-7.213, -35.913)],
         approximate: true,
       );
-      final data = buildRouteMapData(_route, card: card, approach: straight);
+      final data = buildRouteMapData(
+        _route,
+        buildings: buildings,
+        approach: straight,
+      );
 
       expect(data.approach!.approximate, isTrue);
     });
@@ -118,7 +126,7 @@ void main() {
     const p = FieldPalette.light;
 
     test('sit at each leg endpoint: next with a thicker ring', () {
-      final data = buildRouteMapData(_route, card: card);
+      final data = buildRouteMapData(_route, buildings: buildings);
       final circles = routeLineCircles(data, p);
 
       expect(circles.map((c) => c.point), [
@@ -151,7 +159,7 @@ void main() {
       );
       final data = buildRouteMapData(
         walked,
-        card: buildBatchCard(walked, const {}, const {}),
+        buildings: buildDayBuildings(walked, const {}, const {}, const {}),
       );
 
       final circle = routeLineCircles(data, p).single;
@@ -159,7 +167,11 @@ void main() {
     });
 
     test('with a live approach: one at the worker end, one at its stop', () {
-      final data = buildRouteMapData(_route, card: card, approach: _approach);
+      final data = buildRouteMapData(
+        _route,
+        buildings: buildings,
+        approach: _approach,
+      );
       final circles = routeLineCircles(data, p);
 
       expect(circles.map((c) => c.point), [
@@ -182,8 +194,8 @@ void main() {
         MaterialApp(
           theme: buildAppTheme(),
           home: CampusMap(
-            data: buildRouteMapData(_route, card: card),
-            groups: card.groups,
+            data: buildRouteMapData(_route, buildings: buildings),
+            buildings: buildings,
             selectedBuildingId: selected,
             controller: controller,
             tileProviderOverride: NoTilesTileProvider(),
@@ -203,7 +215,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
 
-    testWidgets('hidden below 15.5, the n/m badge always shown', (
+    testWidgets('hidden below 15.5, the number always shown', (
       tester,
     ) async {
       final controller = await pumpMap(tester);
@@ -211,8 +223,9 @@ void main() {
       await zoomTo(tester, controller, 15.4);
 
       expect(find.text('Bloco b2'), findsNothing);
-      expect(find.text('0/1'), findsNWidgets(2));
-      expect(find.text('1/1'), findsOneWidget);
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+      expect(find.byIcon(Icons.check), findsOneWidget);
     });
 
     testWidgets('shown at 15.5 and above', (tester) async {
@@ -220,7 +233,8 @@ void main() {
 
       await zoomTo(tester, controller, kPinLabelMinZoom);
       expect(find.text('Bloco b2'), findsOneWidget);
-      expect(find.text('0/1'), findsNWidgets(2));
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
 
       // Centred on b2; the other pins fall off-screen this close.
       await zoomTo(tester, controller, 18);
@@ -244,8 +258,12 @@ void main() {
       MaterialApp(
         theme: buildAppTheme(),
         home: CampusMap(
-          data: buildRouteMapData(_route, card: card, approach: _approach),
-          groups: card.groups,
+          data: buildRouteMapData(
+            _route,
+            buildings: buildings,
+            approach: _approach,
+          ),
+          buildings: buildings,
           workerPosition: _approach.points.first,
           tileProviderOverride: NoTilesTileProvider(),
         ),
