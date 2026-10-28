@@ -23,8 +23,16 @@ class _GatedStore extends InMemoryLocalWriteStore {
   Completer<void>? gate;
   Error? failure;
 
+  /// When true, `deletePendingPhoto` refuses like the real store does for a
+  /// row that a sync worker claimed after the screen listed it.
+  bool refuseDelete = false;
+
   @override
-  Future<void> enqueue({
+  Future<bool> deletePendingPhoto(String operationId) async =>
+      !refuseDelete && await super.deletePendingPhoto(operationId);
+
+  @override
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
@@ -311,13 +319,11 @@ void main() {
   testWidgets('Apagar on a row the store refuses shows a message', (
     tester,
   ) async {
-    final store = InMemoryLocalWriteStore();
+    final store = _GatedStore();
     await _pump(tester, store: store);
     await _shoot(tester);
-    await store.markBlocked(
-      (await store.unsyncedForRoute('r1')).single.id,
-      'gave up',
-    );
+    // Listed as deletable, then claimed for sending before the tap lands.
+    store.refuseDelete = true;
 
     await tester.tap(find.byKey(const Key('photo-thumb-0')));
     await tester.pumpAndSettle();

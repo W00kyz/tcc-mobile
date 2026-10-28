@@ -56,7 +56,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       throw UnimplementedError();
 
   @override
-  Future<void> enqueue({
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,

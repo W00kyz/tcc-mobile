@@ -9,6 +9,7 @@ import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../support/fake_day_log_store.dart';
+import '../support/in_memory_database.dart';
 
 /// Thursday 2026-10-22; the week runs Mon 19 .. Sun 25.
 final DateTime _today = DateTime(2026, 10, 22, 15);
@@ -98,6 +99,56 @@ void main() {
     expect(find.text('12/20'), findsOneWidget);
     expect(find.text('24/100'), findsOneWidget);
     expect(find.text('0/1'), findsOneWidget);
+    // Locked never reads as done: no check on a locked stamp.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('achievement-locked-cleanCard')),
+        matching: find.byIcon(Icons.check),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('reopened after a check-out, the profile shows the new '
+      'point', (tester) async {
+    final db = inMemoryDatabase();
+    addTearDown(db.close);
+    final store = DriftDayLogStore(db);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          dayLogStoreProvider.overrideWithValue(store),
+          gamificationClockProvider.overrideWithValue(() => _today),
+        ],
+        child: MaterialApp(
+          theme: buildAppTheme(),
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const ProfileScreen()),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    Future<void> openProfile() async {
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    await openProfile();
+    expect(find.text('0 dias seguidos'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    // A check-out while the profile is closed.
+    await store.recordStopDone(_today);
+    await openProfile();
+
+    expect(find.text('1 dia seguido'), findsOneWidget);
+    expect(find.text('1/100'), findsOneWidget);
   });
 
   testWidgets('shortcuts to Meus dados, Recursos and Sair, each 48dp+', (

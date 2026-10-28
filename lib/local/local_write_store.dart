@@ -76,7 +76,9 @@ class PendingOperationRow {
 /// The write seam: execution actions enqueue here first, then a drain marks
 /// each row synced or failed (Ruling 1, Etapa 5 design §4.1 / §6.1).
 abstract class LocalWriteStore {
-  Future<void> enqueue({
+  /// True when the row was written; false when a row with [id] already
+  /// existed (the same idempotency key enqueued twice), which changes nothing.
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
@@ -165,18 +167,19 @@ class DriftLocalWriteStore implements LocalWriteStore {
   final AppDatabase _db;
 
   @override
-  Future<void> enqueue({
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
-  }) {
+  }) async {
     // insertOrIgnore: `id` is the idempotency key, so re-enqueuing the same
     // operation (e.g. the drain retries after a flaky failure) must not throw
-    // and must not clobber a row that already reached `synced`.
-    return _db
+    // and must not clobber a row that already reached `synced`. The
+    // RETURNING row is null exactly when the insert was ignored.
+    final inserted = await _db
         .into(_db.pendingOperations)
-        .insert(
+        .insertReturningOrNull(
           PendingOperationsCompanion.insert(
             id: id,
             kind: kind.name,
@@ -186,6 +189,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
           ),
           mode: InsertMode.insertOrIgnore,
         );
+    return inserted != null;
   }
 
   @override

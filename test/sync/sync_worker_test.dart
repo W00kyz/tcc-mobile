@@ -302,18 +302,21 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   );
 
   @override
-  Future<void> enqueue({
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
-  }) async => seed(
-    id,
-    kind: kind,
-    createdAt: rows.length,
-    payload: payload,
-    routeId: routeId,
-  );
+  }) async {
+    seed(
+      id,
+      kind: kind,
+      createdAt: rows.length,
+      payload: payload,
+      routeId: routeId,
+    );
+    return true;
+  }
 
   @override
   Future<void> markSynced(String id) async => rows[id] = _copy(

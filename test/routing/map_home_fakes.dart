@@ -188,12 +188,14 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
   }
 
   @override
-  Future<void> enqueue({
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
   }) async {
+    // insertOrIgnore, like the real store.
+    if (_rows.containsKey(id)) return false;
     _rows[id] = PendingOperationRow(
       id: id,
       kind: kind,
@@ -205,6 +207,7 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
       attempts: 0,
       nextAttemptAt: null,
     );
+    return true;
   }
 
   @override
@@ -233,8 +236,13 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
   @override
   Future<List<PendingOperationRow>> unsyncedForRoute(String routeId) async =>
       _rows.values
+          // Like the real store's `_unsentStates`: a blocked row is not
+          // "owed to the network", it waits for the worker.
           .where(
-            (r) => r.routeId == routeId && r.state != PendingOpState.synced,
+            (r) =>
+                r.routeId == routeId &&
+                r.state != PendingOpState.synced &&
+                r.state != PendingOpState.blocked,
           )
           .toList()
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));

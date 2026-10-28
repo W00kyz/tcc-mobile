@@ -8,10 +8,12 @@ import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpKind;
 
 /// Every logged day, oldest first — the profile's streak and achievements.
-/// Invalidate it after a write to the day log.
-final dayLogEntriesProvider = FutureProvider<List<DayLogEntry>>(
-  (ref) => ref.watch(dayLogStoreProvider).all(),
-);
+/// Auto-disposed: the profile re-reads the log each time it opens, so the
+/// check-outs and days logged meanwhile show (nothing else invalidates it).
+final FutureProvider<List<DayLogEntry>> dayLogEntriesProvider =
+    FutureProvider.autoDispose<List<DayLogEntry>>(
+      (ref) => ref.watch(dayLogStoreProvider).all(),
+    );
 
 /// The clock the gamification reads "today" from; tests pin it.
 final gamificationClockProvider = Provider<DateTime Function()>(

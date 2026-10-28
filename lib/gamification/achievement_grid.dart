@@ -90,7 +90,7 @@ class _AchievementTile extends StatelessWidget {
       painter: RingPainter(kind: RingKind.locked, palette: p),
       child: SizedBox.square(
         dimension: _stampSize,
-        child: Center(child: _mark(p.muted) ?? _check(p.muted)),
+        child: Center(child: _mark(p.muted) ?? _lockedDot(p.muted)),
       ),
     );
   }
@@ -114,7 +114,14 @@ class _AchievementTile extends StatelessWidget {
     );
   }
 
-  Widget _check(Color color) => Icon(Icons.check, size: 28, color: color);
+  /// A not-yet-earned card achievement: a neutral dot, never a check — a
+  /// check would read as done.
+  Widget _lockedDot(Color color) => Container(
+    key: const ValueKey('achievement-locked-dot'),
+    width: 8,
+    height: 8,
+    decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+  );
 }
 
 /// A fixed tilt per achievement, like a slot's: never changes on redraw.

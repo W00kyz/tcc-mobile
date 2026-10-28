@@ -5,6 +5,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/gamification/full_card_sheet.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/day_log_store.dart';
+import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/route_repository.dart';
@@ -143,11 +144,15 @@ void main() {
       stopIn(id: 's2', batchNumber: 2, status: 'IN_PROGRESS', orderIndex: 2),
     ];
 
+    /// Concludes s2, the batch's last stop. The sync worker never delivers
+    /// anything, so the check-out just written is still unsent when the
+    /// card is counted (ruling R14). [prepare] seeds the outbox first.
     Future<RecordingDayLogStore> concludeLast(
       WidgetTester tester, {
-      required bool delivered,
+      Future<void> Function(InMemoryLocalWriteStore store)? prepare,
     }) async {
       final store = InMemoryLocalWriteStore();
+      await prepare?.call(store);
       final today = DateTime.now();
       final dayLog = RecordingDayLogStore(
         entries: [
@@ -166,8 +171,7 @@ void main() {
           repositoryWith(routeWith(stops: stops(), currentBatch: 2)),
           stopProgressStore: FakeStopProgressStore({'s2': 'exec-2'}),
           localWriteStore: store,
-          // Delivered: the drain the check-out kicks takes every row.
-          syncWorker: RecordingSyncWorker(drains: delivered ? store : null),
+          syncWorker: RecordingSyncWorker(),
           dayLogStore: dayLog,
         ),
       );
@@ -176,8 +180,8 @@ void main() {
     }
 
     testWidgets('the last stamp opens the full card and records one clean '
-        'card', (tester) async {
-      final dayLog = await concludeLast(tester, delivered: true);
+        'card right away, its own unsent check-out aside', (tester) async {
+      final dayLog = await concludeLast(tester);
 
       expect(find.text(AppStrings.fullCardTitle), findsOneWidget);
       expect(find.text('1 dia seguido'), findsOneWidget);
@@ -188,11 +192,42 @@ void main() {
       expect(dayLog.calls, contains(startsWith('stopDone:')));
     });
 
-    testWidgets('a check-out still unsent after the drain makes the card '
-        'not clean', (tester) async {
-      final dayLog = await concludeLast(tester, delivered: false);
+    testWidgets("an earlier stop's unsent row makes the card not clean", (
+      tester,
+    ) async {
+      final dayLog = await concludeLast(
+        tester,
+        prepare: (store) async {
+          await store.enqueue(
+            id: 's1-out',
+            kind: PendingOpKind.checkOut,
+            routeId: 'r1',
+            payload: const {'route_stop_id': 's1'},
+          );
+        },
+      );
 
       expect(find.text(AppStrings.fullCardTitle), findsOneWidget);
+      expect(
+        dayLog.calls.where((c) => c.startsWith('cardCompleted')),
+        [endsWith(':false')],
+      );
+    });
+
+    testWidgets('a blocked row makes the card not clean', (tester) async {
+      final dayLog = await concludeLast(
+        tester,
+        prepare: (store) async {
+          await store.enqueue(
+            id: 'old-photo',
+            kind: PendingOpKind.evidencePhoto,
+            routeId: 'r1',
+            payload: const {'execution_id': 'exec-1'},
+          );
+          await store.markBlocked('old-photo', 'HTTP 422');
+        },
+      );
+
       expect(
         dayLog.calls.where((c) => c.startsWith('cardCompleted')),
         [endsWith(':false')],
@@ -242,6 +277,44 @@ void main() {
 
       expect(dayLog.calls, [startsWith('opened:')]);
       expect(dayLog.calls.single, endsWith(':false'));
+    });
+
+    testWidgets('a cached day from another date is not logged as today', (
+      tester,
+    ) async {
+      final dayLog = RecordingDayLogStore();
+      // routeWith's route is dated 2026-10-20: the offline cache of a past
+      // day, not today.
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(routeWith(stops: stops(), currentBatch: 2)),
+          dayLogStore: dayLog,
+        ),
+      );
+
+      expect(dayLog.calls.where((c) => c.startsWith('opened:')), isEmpty);
+    });
+
+    testWidgets('a day whose route is dated today is logged', (tester) async {
+      final dayLog = RecordingDayLogStore();
+      final past = routeWith(stops: stops(), currentBatch: 2);
+      final now = DateTime.now();
+      final todays = RouteSummary(
+        id: past.id,
+        fieldWorkerName: past.fieldWorkerName,
+        routeDate: DateTime(now.year, now.month, now.day),
+        status: past.status,
+        startedAt: past.startedAt,
+        currentBatch: past.currentBatch,
+        stops: past.stops,
+      );
+      await pumpHome(
+        tester,
+        homeWith(repositoryWith(todays), dayLogStore: dayLog),
+      );
+
+      expect(dayLog.calls, contains(endsWith(':true')));
     });
   });
 }

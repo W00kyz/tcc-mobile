@@ -10,15 +10,12 @@ import 'package:route_monitor/execution/execution_providers.dart'
 import 'package:route_monitor/gamification/full_card_sheet.dart';
 import 'package:route_monitor/gamification/gamification_providers.dart';
 import 'package:route_monitor/gamification/streak.dart';
+import 'package:route_monitor/local/day_log_store.dart' show dayKey;
+import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/stop_actions.dart';
-import 'package:route_monitor/sync/sync_providers.dart';
-
-/// How long the completion waits for the last check-out's drain before it
-/// decides whether the card was clean.
-const Duration fullCardCleanWindow = Duration(seconds: 10);
 
 /// The map home's gamification hooks (redesign §6.8): logs each day the
 /// worker's day is read, and opens the full card once the stamp that
@@ -77,15 +74,26 @@ class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
     _stamped = null;
     if (slot == null || !card.complete) return;
     WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _logged('full_card_failed', _celebrate(card, routeId)),
+      (_) => _logged('full_card_failed', _celebrate(card, routeId, stopId)),
     );
   }
 
-  Future<void> _celebrate(BatchCard card, String routeId) async {
+  Future<void> _celebrate(
+    BatchCard card,
+    String routeId,
+    String stampedStopId,
+  ) async {
+    // Every provider is read before the first await: the screen may be gone
+    // by the time one completes.
     final now = ref.read(gamificationClockProvider)();
-    _logged('card_completion_failed', _recordCompletion(routeId, now));
-    final log = await ref.read(dayLogStoreProvider).all();
-    final startedAt = await ref.read(firstCheckInLookupProvider)(
+    final dayLog = ref.read(dayLogStoreProvider);
+    final lookup = ref.read(firstCheckInLookupProvider);
+    _logged(
+      'card_completion_failed',
+      _recordCompletion(routeId, stampedStopId, now),
+    );
+    final log = await dayLog.all();
+    final startedAt = await lookup(
       card.groups.expand((g) => g.slots).map((s) => s.stopId),
     );
     if (!mounted) return;
@@ -97,30 +105,39 @@ class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
     );
   }
 
-  /// Counts the card once. "Clean" is decided after the drain the last
-  /// check-out kicked (bounded by [fullCardCleanWindow]): read at the stamp
-  /// itself, the outbox always still holds that check-out, and the "sem
-  /// pendências" achievement could never be earned.
-  Future<void> _recordCompletion(String routeId, DateTime now) async {
-    final worker = ref.read(syncWorkerProvider);
+  /// Counts the card once, right away (ruling R14): waiting for the sync
+  /// would lose the card if the app were killed meanwhile. "Clean" means
+  /// nothing blocked and nothing unsent but the check-out just written for
+  /// [stampedStopId] — that one is always still in the outbox at this point.
+  Future<void> _recordCompletion(
+    String routeId,
+    String stampedStopId,
+    DateTime now,
+  ) async {
     final store = ref.read(localWriteStoreProvider);
     final dayLog = ref.read(dayLogStoreProvider);
-    try {
-      await worker.syncRoute(routeId).timeout(fullCardCleanWindow);
-    } on TimeoutException {
-      // Still sending: whatever is left counts as pending below.
-    }
     final pending = await store.unsyncedForRoute(routeId);
     final blocked = await store.blockedForRoute(routeId);
+    final otherPending = pending.where(
+      (row) => !_isCheckOutOf(row, stampedStopId),
+    );
     await dayLog.recordCardCompleted(
       now,
-      clean: pending.isEmpty && blocked.isEmpty,
+      clean: blocked.isEmpty && otherPending.isEmpty,
     );
-    if (mounted) ref.invalidate(dayLogEntriesProvider);
   }
 
+  static bool _isCheckOutOf(PendingOperationRow row, String stopId) =>
+      row.kind == PendingOpKind.checkOut &&
+      row.payload['route_stop_id'] == stopId;
+
+  /// Skipped for a day that is not today: offline, `myDayProvider` serves
+  /// the last cached day, and its `service_day` belongs to that date. A day
+  /// with no route carries no date and is taken as today's.
   void _recordDayOpened(MyDay day) {
     final now = ref.read(gamificationClockProvider)();
+    final routeDate = day.route?.routeDate;
+    if (routeDate != null && dayKey(routeDate) != dayKey(now)) return;
     _logged(
       'day_log_open_failed',
       ref

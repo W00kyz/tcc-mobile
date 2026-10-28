@@ -35,7 +35,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   final Map<String, PendingOperationRow> _rows = {};
 
   @override
-  Future<void> enqueue({
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
@@ -43,7 +43,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   }) async {
     // insertOrIgnore: a re-enqueue with an id already present is a no-op
     // (Etapa 5 behavior — the same-tap room-picker retry reuses the key).
-    if (_rows.containsKey(id)) return;
+    if (_rows.containsKey(id)) return false;
     _rows[id] = PendingOperationRow(
       id: id,
       kind: kind,
@@ -55,6 +55,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       attempts: 0,
       nextAttemptAt: null,
     );
+    return true;
   }
 
   @override
@@ -154,6 +155,31 @@ class _FakeStopProgressStore implements StopProgressStore {
   ) async => [
     for (final id in routeStopIds) ?_rows[id],
   ];
+}
+
+/// Delegates `recordStopDone` to the real store, then fails — the write
+/// lands inside the transaction and must be rolled back with it.
+class _WritesThenThrowsDayLog implements DayLogStore {
+  _WritesThenThrowsDayLog(this._real);
+
+  final DayLogStore _real;
+
+  @override
+  Future<void> recordStopDone(DateTime day) async {
+    await _real.recordStopDone(day);
+    throw Exception('fails after the day-log write');
+  }
+
+  @override
+  Future<void> recordDayOpened(DateTime day, {required bool serviceDay}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> recordCardCompleted(DateTime day, {required bool clean}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<DayLogEntry>> all() => throw UnimplementedError();
 }
 
 /// Records every `syncRoute` kick and, for each, hands back a future that
@@ -371,6 +397,47 @@ void main() {
       expect(syncWorker.syncedRoutes, isEmpty);
     });
 
+    test('checkOut rolls the day-log row back with the rest when a later '
+        'step fails', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final log = DriftDayLogStore(db);
+
+      await expectLater(
+        repositoryWith(_WritesThenThrowsDayLog(log)).checkOut(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          qrPayload: 'q',
+        ),
+        throwsException,
+      );
+
+      // The real point was written inside the transaction, then undone.
+      expect(await log.all(), isEmpty);
+      expect(await realStore.unsyncedForRoute('route-A'), isEmpty);
+      expect(
+        (await realProgress.progressFor('stop-1'))!.status,
+        StopLocalStatus.inProgress,
+      );
+    });
+
+    test('a same-key checkOut retry adds no second point', () async {
+      await realProgress.upsertInProgress('stop-1', 'exec-1');
+      final log = DriftDayLogStore(db);
+      final repository = repositoryWith(log);
+
+      for (var i = 0; i < 2; i++) {
+        await repository.checkOut(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          qrPayload: 'q',
+          checkoutIdempotencyKey: 'CK',
+        );
+      }
+
+      expect((await log.all()).single.pointsDone, 1);
+      expect(await realStore.unsyncedForRoute('route-A'), hasLength(1));
+    });
+
     test('checkOut counts the stop in the real day log', () async {
       await realProgress.upsertInProgress('stop-1', 'exec-1');
       final log = DriftDayLogStore(db);
@@ -429,6 +496,8 @@ void main() {
     final rows = await store.unsyncedForRoute('route-A');
     expect(rows, hasLength(1));
     expect(rows.single.id, 'CK');
+    // The retry queued nothing, so it counts no second point.
+    expect(dayLog.calls.where((c) => c.startsWith('stopDone')), hasLength(1));
   });
 
   test('addPhoto enqueues one pending evidencePhoto row and kicks the sync '

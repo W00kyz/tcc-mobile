@@ -128,7 +128,7 @@ class ExecutionRepository {
     // queued check-out with no DONE mark would re-open the stop. Kept short:
     // the payload is built above, and the sync kick waits for the commit.
     await _database.transaction(() async {
-      await _store.enqueue(
+      final queued = await _store.enqueue(
         id: key,
         kind: PendingOpKind.checkOut,
         routeId: routeId,
@@ -137,7 +137,8 @@ class ExecutionRepository {
       // Ruling 5 counterpart to checkIn's upsert above; Ruling 3: the row is
       // marked DONE, not deleted.
       await _stopProgress.markDone(routeStopId);
-      await _dayLog.recordStopDone(scannedAt);
+      // A retry with the same key queued nothing new: no second point.
+      if (queued) await _dayLog.recordStopDone(scannedAt);
     });
     unawaited(_syncWorker.syncRoute(routeId));
   }

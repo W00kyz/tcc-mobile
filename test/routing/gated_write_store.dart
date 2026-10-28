@@ -13,14 +13,20 @@ class GatedLocalWriteStore extends InMemoryLocalWriteStore {
   bool checkOutWritten = false;
 
   @override
-  Future<void> enqueue({
+  Future<bool> enqueue({
     required String id,
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
   }) async {
     if (kind == PendingOpKind.checkOut) await gate.future;
-    await super.enqueue(id: id, kind: kind, payload: payload, routeId: routeId);
+    final inserted = await super.enqueue(
+      id: id,
+      kind: kind,
+      payload: payload,
+      routeId: routeId,
+    );
     if (kind == PendingOpKind.checkOut) checkOutWritten = true;
+    return inserted;
   }
 }
