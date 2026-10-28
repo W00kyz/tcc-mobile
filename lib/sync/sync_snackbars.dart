@@ -107,13 +107,10 @@ class _SyncSnackbarsState extends ConsumerState<SyncSnackbars> {
     final (text, label, onPressed) = _content(notice);
     widget.lane.show(
       SnackKind.sync,
-      (margin) => SnackBar(
-        content: Text(text),
-        margin: margin,
-        action: label == null
-            ? null
-            : SnackBarAction(label: label, onPressed: onPressed!),
-      ),
+      text,
+      action: label == null
+          ? null
+          : SnackBarAction(label: label, onPressed: onPressed!),
     );
   }
 

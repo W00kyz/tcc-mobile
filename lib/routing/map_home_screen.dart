@@ -17,6 +17,7 @@ import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/batch_sheet.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/routing/day_state_panels.dart';
+import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/home_top_bar.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -80,8 +81,18 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   /// The card last drawn, so the stamp listener finds the stop's building.
   BatchCard? _card;
 
+  /// Where the lane is lent to the stop flows; kept to give it back.
+  late final HomeSnackbarLaneSlot _laneSlot;
+
+  @override
+  void initState() {
+    super.initState();
+    _laneSlot = ref.read(homeSnackbarLaneProvider)..attach(_lane);
+  }
+
   @override
   void dispose() {
+    _laneSlot.detach(_lane);
     _map.dispose();
     _sheet.dispose();
     super.dispose();
@@ -420,7 +431,6 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   /// One GPS read, drawn as the worker's dot and centred on.
   Future<void> _locateMe() async {
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final here = await ref
           .read(locationServiceProvider)
@@ -433,9 +443,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       // "no position now", never a crash.
       // ignore: avoid_catches_without_on_clauses
     } catch (_) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text(AppStrings.routeLocationUnavailable)),
-      );
+      _lane.show(SnackKind.action, AppStrings.routeLocationUnavailable);
     }
   }
 }

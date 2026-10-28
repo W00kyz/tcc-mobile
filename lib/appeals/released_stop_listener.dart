@@ -59,13 +59,10 @@ class ReleasedStopListener extends ConsumerWidget {
     // queue of identical ones: the lane keeps only the newest.
     lane.show(
       SnackKind.appeal,
-      (margin) => SnackBar(
-        content: const Text(AppStrings.releasedStopsSnackbar),
-        margin: margin,
-        action: SnackBarAction(
-          label: AppStrings.releasedStopsSnackbarAction,
-          onPressed: () => unawaited(_openAppeal(context, ref)),
-        ),
+      AppStrings.releasedStopsSnackbar,
+      action: SnackBarAction(
+        label: AppStrings.releasedStopsSnackbarAction,
+        onPressed: () => unawaited(_openAppeal(context, ref)),
       ),
     );
   }

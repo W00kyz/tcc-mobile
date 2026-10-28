@@ -7,6 +7,7 @@ import 'package:route_monitor/monitoring/location_mode.dart';
 import 'package:route_monitor/monitoring/location_mode_device.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
+import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
@@ -179,7 +180,7 @@ class _StartDayButtonState extends ConsumerState<StartDayButton> {
   Future<void> _start() async {
     // Taken before the await: a successful start reloads the day and this
     // panel may be gone by the time the answer arrives.
-    final messenger = ScaffoldMessenger.of(context);
+    final notify = homeNotifier(ref, context);
     setState(() => _starting = true);
     final AllocationOutcome outcome;
     try {
@@ -190,7 +191,7 @@ class _StartDayButtonState extends ConsumerState<StartDayButton> {
     }
     final message = _startOutcomeMessage(outcome);
     if (message == null) return;
-    messenger.showSnackBar(SnackBar(content: Text(message)));
+    notify(message);
   }
 
   /// Before the first batch: "while in use", then — once per device — the

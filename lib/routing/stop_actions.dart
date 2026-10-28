@@ -10,6 +10,7 @@ import 'package:route_monitor/execution/room_resolution.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/stop_progress_store.dart'
     show StopLocalStatus;
+import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
@@ -51,6 +52,7 @@ Future<void> startCheckIn(
   WidgetRef ref,
   RouteSummary route,
 ) async {
+  final notify = homeNotifier(ref, context);
   final scan = await _scanAndLocate(context, ref, _entryContext(route));
   if (scan == null || !context.mounted) return;
 
@@ -74,11 +76,8 @@ Future<void> startCheckIn(
     // the in-progress block mounts after an offline check-in too.
     ..invalidate(stopProgressForProvider(routeStopId))
     ..invalidate(myDayProvider);
-  if (context.mounted) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text(AppStrings.routeCheckInDone)));
-  }
+  // Through the home's lane, over the sheet: never on "Escanear QR".
+  if (context.mounted) notify(AppStrings.routeCheckInDone);
 }
 
 /// The QR resolves the stop only after the scan, so the entry line names the
@@ -156,15 +155,14 @@ Future<void> concludeStop(
   RouteSummary route,
   RouteStopSummary stop,
 ) async {
+  final notify = homeNotifier(ref, context);
   final scan = await _concludeAndScan(context, ref, route, stop);
   if (scan == null || !context.mounted) return;
 
   await _recordCheckOut(ref, route, stop, scan);
-  if (context.mounted) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text(AppStrings.routeCheckOutDone)));
-  }
+  // Not gated on [context]: the in-progress block that asked is gone once
+  // its stop is done, the home's lane is not.
+  notify(AppStrings.routeCheckOutDone);
 }
 
 /// The sheet, then the exit scan, until a QR is read or the worker leaves
@@ -265,6 +263,7 @@ Future<void> signalImpossibility(
   RouteSummary route,
   RouteStopSummary stop,
 ) async {
+  final notify = homeNotifier(ref, context);
   final choice = await showImpedimentSheet(context);
   if (choice == null || !context.mounted) return;
 
@@ -279,9 +278,7 @@ Future<void> signalImpossibility(
       );
   _forgetObservations(ref, route, stop, choice.scope);
   if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text(AppStrings.routeImpedimentReported)),
-  );
+  notify(AppStrings.routeImpedimentReported);
   // Once the impediment reached the server its stop comes back RELEASED;
   // reloading the day then is what lets an impediment on the last open
   // stop of the batch pull the next one. Offline, the pass is a no-op and
@@ -333,6 +330,7 @@ Future<Coordinates?> _tryGetPosition(
   BuildContext context,
   WidgetRef ref,
 ) async {
+  final notify = homeNotifier(ref, context);
   try {
     return await ref
         .read(locationServiceProvider)
@@ -342,13 +340,7 @@ Future<Coordinates?> _tryGetPosition(
     // — all of them mean "proceed without GPS" here, never "block".
     // ignore: avoid_catches_without_on_clauses
   } catch (_) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(AppStrings.routeLocationUnavailableCheckIn),
-        ),
-      );
-    }
+    if (context.mounted) notify(AppStrings.routeLocationUnavailableCheckIn);
     return null;
   }
 }
