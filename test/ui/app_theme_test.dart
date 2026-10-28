@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -63,5 +64,30 @@ void main() {
   test('muted on paper meets AA', () {
     const p = FieldPalette.light;
     expect(contrastRatio(p.muted, p.paper), greaterThanOrEqualTo(4.5));
+  });
+
+  test('Hanken Grotesk ships one static file per weight', () {
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    final family = RegExp(
+      r'family: HankenGrotesk\n((?:\s+.*\n)+?)\s+- family:',
+    ).firstMatch(pubspec)!.group(1)!;
+    final entries = RegExp(
+      r'asset: (\S+)\s+weight: (\d+)',
+    ).allMatches(family).map((m) => (m.group(1)!, m.group(2)!)).toList();
+    expect(entries.map((e) => e.$2), ['400', '500', '600', '700']);
+    expect(entries.map((e) => e.$1).toSet(), hasLength(4));
+    for (final e in entries) {
+      expect(File(e.$1).existsSync(), isTrue, reason: e.$1);
+    }
+    final contents = entries.map((e) => File(e.$1).readAsBytesSync().length);
+    expect(contents.every((n) => n > 10000), isTrue);
+    final distinct = entries
+        .map(
+          (e) => File(
+            e.$1,
+          ).readAsBytesSync().fold<int>(0, (h, b) => (h * 31 + b) & 0x7fffffff),
+        )
+        .toSet();
+    expect(distinct, hasLength(4), reason: 'static instances must differ');
   });
 }

@@ -68,13 +68,13 @@ flutter:
   fonts:
     - family: HankenGrotesk
       fonts:
-        - asset: assets/fonts/HankenGrotesk-Variable.ttf
+        - asset: assets/fonts/HankenGrotesk-Regular.ttf
           weight: 400
-        - asset: assets/fonts/HankenGrotesk-Variable.ttf
+        - asset: assets/fonts/HankenGrotesk-Medium.ttf
           weight: 500
-        - asset: assets/fonts/HankenGrotesk-Variable.ttf
+        - asset: assets/fonts/HankenGrotesk-SemiBold.ttf
           weight: 600
-        - asset: assets/fonts/HankenGrotesk-Variable.ttf
+        - asset: assets/fonts/HankenGrotesk-Bold.ttf
           weight: 700
     - family: BowlbyOneSC
       fonts:
