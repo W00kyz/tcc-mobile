@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 import 'package:route_monitor/appeals/appeals_screen.dart';
 
 import 'package:route_monitor/auth/auth_providers.dart';
+import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/impossibility_reason_dialog.dart';
 import 'package:route_monitor/gamification/achievement_grid.dart';
 import 'package:route_monitor/gamification/achievements.dart';
 import 'package:route_monitor/gamification/gamification_providers.dart';
@@ -13,6 +15,10 @@ import 'package:route_monitor/gamification/ink_stamp.dart';
 import 'package:route_monitor/gamification/streak.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/day_log_store.dart';
+import 'package:route_monitor/routing/home_notices.dart';
+import 'package:route_monitor/routing/route_providers.dart';
+import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 /// "Seu perfil" (`/perfil`, redesign §6.8/§6.12), from the avatar menu: the
@@ -203,13 +209,15 @@ class _WeekDay extends StatelessWidget {
   }
 }
 
-/// Meus dados, Recursos and Sair, as plain 56dp list rows.
+/// Meus dados, Recursos, Encerrar por hoje (only while a route is in
+/// progress) and Sair, as plain 56dp list rows.
 class _ProfileShortcuts extends ConsumerWidget {
   const _ProfileShortcuts();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    final route = ref.watch(myDayProvider).value?.route;
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(top: BorderSide(color: p.rule)),
@@ -224,6 +232,13 @@ class _ProfileShortcuts extends ConsumerWidget {
             AppStrings.appealsTooltip,
             () => unawaited(context.push('/recursos')),
           ),
+          if (route != null && route.status == 'IN_PROGRESS')
+            _row(
+              const Icon(Icons.event_busy_outlined),
+              AppStrings.profileEndDay,
+              () => unawaited(_endDay(context, ref, route)),
+              subtitle: AppStrings.profileEndDaySubtitle,
+            ),
           _row(const Icon(Icons.logout), AppStrings.profileSignOut, () {
             unawaited(ref.read(sessionProvider.notifier).logout());
           }),
@@ -236,10 +251,41 @@ class _ProfileShortcuts extends ConsumerWidget {
   Widget _badged(IconData icon, int count) =>
       count == 0 ? Icon(icon) : Badge(label: Text('$count'), child: Icon(icon));
 
-  Widget _row(Widget leading, String label, VoidCallback onTap) => ListTile(
+  Widget _row(
+    Widget leading,
+    String label,
+    VoidCallback onTap, {
+    String? subtitle,
+  }) => ListTile(
     minTileHeight: 56,
     leading: leading,
     title: Text(label),
+    subtitle: subtitle == null ? null : Text(subtitle),
     onTap: onTap,
   );
+
+  /// "Encerrar por hoje": asks why, hands the rest of the route back
+  /// (`ROUTE_REMAINDER`), syncs, reloads the day and returns to the map.
+  /// Cancelling the reason reports nothing.
+  Future<void> _endDay(
+    BuildContext context,
+    WidgetRef ref,
+    RouteSummary route,
+  ) async {
+    final reason = await showImpossibilityReasonDialog(context);
+    if (reason == null || !context.mounted) return;
+    final notify = homeNotifier(ref, context);
+    await ref
+        .read(executionRepositoryProvider)
+        .reportImpediment(
+          routeId: route.id,
+          routeStopId: null,
+          scope: 'ROUTE_REMAINDER',
+          reason: reason,
+        );
+    await ref.read(syncWorkerProvider).syncRoute(route.id);
+    ref.invalidate(myDayProvider);
+    notify(AppStrings.routeImpedimentReported);
+    if (context.mounted) Navigator.of(context).pop();
+  }
 }

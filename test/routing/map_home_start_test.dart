@@ -242,7 +242,7 @@ void main() {
   group('route states', () {
     testWidgets(
       'opens on the current batch under the done count of the whole day, a '
-      'released stop as released and with no action',
+      'stop released for an impediment as impossible and with no action',
       (tester) async {
         final route = routeWith(
           currentBatch: 2,
@@ -270,12 +270,9 @@ void main() {
         // The stops are read from the floor card, not a list on the home.
         expect(find.text('Sala Velha'), findsNothing);
         expect(_slotState(tester, 'a'), SlotState.done);
+        expect(_slotState(tester, 'b'), SlotState.impeded);
         expect(
-          find.bySemanticsLabel(
-            AppStrings.slotReleased(
-              AppStrings.releaseReasonLabel('IMPEDIMENT'),
-            ),
-          ),
+          find.bySemanticsLabel(AppStrings.slotImpeded),
           findsOneWidget,
         );
         expect(_slotState(tester, 'c'), SlotState.next);

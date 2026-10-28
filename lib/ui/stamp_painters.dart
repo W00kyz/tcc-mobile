@@ -14,13 +14,15 @@ double _jitter(int seed, int i) {
 
 int seedOf(String stopId) => stopId.codeUnits.fold(7, (a, b) => a * 31 + b);
 
-/// The inked stamp: irregular ring, 13% moss fill and a check.
+/// The inked stamp: irregular ring, 13% fill and a mark. Moss with a check
+/// for a done task; brick with a cross when [impossible].
 class StampPainter extends CustomPainter {
   StampPainter({
     required this.seed,
     required this.palette,
     this.ink = 1,
     this.showCheck = true,
+    this.impossible = false,
   });
 
   final int seed;
@@ -29,6 +31,12 @@ class StampPainter extends CustomPainter {
   /// False for a stamp that carries its own mark in the middle (an
   /// achievement's number).
   final bool showCheck;
+
+  /// A task the worker could not do: brick ink and a cross, never moss.
+  final bool impossible;
+
+  /// The ink this stamp is printed in.
+  Color get color => impossible ? palette.brick : palette.moss;
 
   /// 0..1, how far the ink has spread.
   final double ink;
@@ -64,38 +72,76 @@ class StampPainter extends CustomPainter {
     canvas
       ..drawPath(
         ring,
-        Paint()..color = palette.moss.withValues(alpha: 0.13 * ink),
+        Paint()..color = color.withValues(alpha: 0.13 * ink),
       )
       ..drawPath(
         ring,
         Paint()
           ..style = PaintingStyle.stroke
           ..strokeWidth = 2.5 + 1.5 * (1 - ink)
-          ..color = palette.moss.withValues(alpha: 0.4 + 0.6 * ink),
+          ..color = color.withValues(alpha: 0.4 + 0.6 * ink),
       );
-    if (showCheck) _paintCheck(canvas, size);
+    if (showCheck) _paintMark(canvas, size);
   }
 
-  void _paintCheck(Canvas canvas, Size size) {
+  void _paintMark(Canvas canvas, Size size) {
     final w = size.width;
-    final check = Path()
-      ..moveTo(w * 0.34, w * 0.34)
-      ..lineTo(w * 0.43, w * 0.43)
-      ..lineTo(w * 0.62, w * 0.24);
+    final mark = Path();
+    if (impossible) {
+      mark
+        ..moveTo(w * 0.34, w * 0.34)
+        ..lineTo(w * 0.66, w * 0.66)
+        ..moveTo(w * 0.66, w * 0.34)
+        ..lineTo(w * 0.34, w * 0.66);
+    } else {
+      mark
+        ..moveTo(w * 0.34, w * 0.34)
+        ..lineTo(w * 0.43, w * 0.43)
+        ..lineTo(w * 0.62, w * 0.24);
+    }
     canvas.drawPath(
-      check,
+      mark,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
-        ..color = palette.moss,
+        ..color = color,
     );
   }
 
   @override
   bool shouldRepaint(StampPainter old) =>
-      old.seed != seed || old.ink != ink || old.showCheck != showCheck;
+      old.seed != seed ||
+      old.ink != ink ||
+      old.showCheck != showCheck ||
+      old.impossible != impossible;
+}
+
+/// The ring of ink that spreads out of a stamp as it lands: 1.0 to 1.35 of
+/// the stamp's radius, 35% to 0 opacity, as [progress] runs 0..1.
+class InkRingPainter extends CustomPainter {
+  InkRingPainter({required this.color, required this.progress});
+
+  final Color color;
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = (size.shortestSide / 2 - 2) * (1 + 0.35 * progress);
+    canvas.drawCircle(
+      size.center(Offset.zero),
+      r,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..color = color.withValues(alpha: 0.35 * (1 - progress)),
+    );
+  }
+
+  @override
+  bool shouldRepaint(InkRingPainter old) =>
+      old.progress != progress || old.color != color;
 }
 
 /// `locked`: an achievement not earned yet — dashed like `next`, but in the

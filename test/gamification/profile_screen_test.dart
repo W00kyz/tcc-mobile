@@ -5,13 +5,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/appeals/appeal_api.dart';
 import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/execution_repository.dart';
 import 'package:route_monitor/gamification/gamification_providers.dart';
 import 'package:route_monitor/gamification/profile_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/day_log_store.dart';
+import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/routing/route_providers.dart';
+import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
+import '../routing/map_home_fakes.dart';
 import '../support/fake_day_log_store.dart';
+import '../support/fake_route_repository.dart';
 import '../support/in_memory_database.dart';
 
 /// Thursday 2026-10-22; the week runs Mon 19 .. Sun 25.
@@ -60,6 +67,7 @@ Future<void> _pump(
         ),
         gamificationClockProvider.overrideWithValue(() => _today),
         ..._noAppealsBut(contestable),
+        myDayProvider.overrideWith((_) async => myDayWith(null)),
       ],
       child: MaterialApp(theme: buildAppTheme(), home: const ProfileScreen()),
     ),
@@ -134,6 +142,7 @@ void main() {
           dayLogStoreProvider.overrideWithValue(store),
           gamificationClockProvider.overrideWithValue(() => _today),
           ..._noAppealsBut(const []),
+          myDayProvider.overrideWith((_) async => myDayWith(null)),
         ],
         child: MaterialApp(
           theme: buildAppTheme(),
@@ -215,5 +224,123 @@ void main() {
         .map((t) => (t.data ?? t.textSpan?.toPlainText() ?? '').toLowerCase());
     expect(texts.where((t) => t.contains('ranking')), isEmpty);
     expect(texts.where((t) => t.contains('média')), isEmpty);
+  });
+
+  group('Encerrar por hoje', () {
+    late AppDatabase db;
+    late InMemoryLocalWriteStore store;
+    late RecordingSyncWorker worker;
+
+    setUp(() {
+      db = inMemoryDatabase();
+      addTearDown(db.close);
+      store = InMemoryLocalWriteStore();
+      worker = RecordingSyncWorker();
+    });
+
+    /// The profile opened over a "map" button, with a day whose route has
+    /// [routeStatus] (no route at all when null).
+    Future<void> openProfile(WidgetTester tester, {String? routeStatus}) async {
+      tester.view
+        ..physicalSize = const Size(420, 1400)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final route = routeStatus == null
+          ? null
+          : routeWith(
+              stops: [stopWith(id: 's1')],
+              status: routeStatus,
+            );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            dayLogStoreProvider.overrideWithValue(
+              RecordingDayLogStore(entries: _log()),
+            ),
+            gamificationClockProvider.overrideWithValue(() => _today),
+            ..._noAppealsBut(const []),
+            myDayProvider.overrideWith((_) async => myDayWith(route)),
+            syncWorkerProvider.overrideWithValue(worker),
+            executionRepositoryProvider.overrideWithValue(
+              ExecutionRepository(
+                store,
+                DriftStopProgressStore(db),
+                worker,
+                database: db,
+                dayLog: RecordingDayLogStore(),
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildAppTheme(),
+            home: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ProfileScreen(),
+                  ),
+                ),
+                child: const Text('map'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('map'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('is offered only while the route is in progress', (
+      tester,
+    ) async {
+      await openProfile(tester, routeStatus: 'PAUSED');
+      expect(find.text(AppStrings.profileEndDay), findsNothing);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await openProfile(tester);
+      expect(find.text(AppStrings.profileEndDay), findsNothing);
+    });
+
+    testWidgets('reads as a 56dp row with its subtitle', (tester) async {
+      await openProfile(tester, routeStatus: 'IN_PROGRESS');
+      final tile = find.ancestor(
+        of: find.text(AppStrings.profileEndDay),
+        matching: find.byType(ListTile),
+      );
+      expect(tester.getSize(tile).height, greaterThanOrEqualTo(56));
+      expect(find.text(AppStrings.profileEndDaySubtitle), findsOneWidget);
+    });
+
+    testWidgets('the reason is reported as ROUTE_REMAINDER, then back to the '
+        'map', (tester) async {
+      await openProfile(tester, routeStatus: 'IN_PROGRESS');
+      await tester.tap(find.text(AppStrings.profileEndDay));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(AppStrings.impedimentReasonHealthIssue));
+      await tester.pump();
+      await tester.tap(find.text(AppStrings.commonConfirm));
+      await tester.pumpAndSettle();
+
+      final row = (await store.unsyncedForRoute('r1')).single;
+      expect(row.payload['scope'], 'ROUTE_REMAINDER');
+      expect(row.payload['reason'], 'HEALTH_ISSUE');
+      expect(row.payload['route_stop_id'], isNull);
+      expect(worker.syncedRoutes, contains('r1'));
+      expect(find.byType(ProfileScreen), findsNothing);
+      expect(find.text('map'), findsOneWidget);
+    });
+
+    testWidgets('cancelling the reason reports nothing and stays', (
+      tester,
+    ) async {
+      await openProfile(tester, routeStatus: 'IN_PROGRESS');
+      await tester.tap(find.text(AppStrings.profileEndDay));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(AppStrings.commonCancel));
+      await tester.pumpAndSettle();
+
+      expect(await store.unsyncedForRoute('r1'), isEmpty);
+      expect(find.byType(ProfileScreen), findsOneWidget);
+    });
   });
 }

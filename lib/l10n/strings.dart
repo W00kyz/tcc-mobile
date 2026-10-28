@@ -335,9 +335,6 @@ abstract final class AppStrings {
       'Não aceita recurso — você pode descartar os dados.';
 
   // --- impediment dialog (alocação automática §7.1) ---
-  static const String impedimentDialogTitle = 'Não consigo fazer este ponto';
-  static const String impedimentNoteHint = 'Observação (opcional)';
-  static const String impedimentRemainderSwitch = 'Não consigo continuar hoje';
   static const String impedimentReasonAccessBlocked = 'Acesso bloqueado';
   static const String impedimentReasonSiteRefusal = 'Recusa do local';
   static const String impedimentReasonHealthIssue = 'Problema de saúde';
@@ -544,6 +541,8 @@ abstract final class AppStrings {
   static const String slotPending = 'Pendente';
   static const String slotNext = 'Próximo';
   static const String slotInProgress = 'Em andamento';
+  static const String slotStamped = 'Carimbado, aguardando a saída do andar';
+  static const String slotImpeded = 'Impossibilitado';
   static const String slotPendingSync = 'aguardando envio';
   static String batchCardTitle(int n) => 'CARTÃO DO LOTE $n';
   static String batchCardSubtitle(int total) => 'Junte os $total carimbos';
@@ -584,6 +583,9 @@ abstract final class AppStrings {
   static const String profileStreakNote =
       'Dia sem serviço não quebra a sequência.';
   static const String profileSignOut = 'Sair';
+  static const String profileEndDay = 'Encerrar por hoje';
+  static const String profileEndDaySubtitle =
+      'Libera as tarefas que faltam e pausa a rota';
   static const String profileNoServiceDay = 'Sem serviço';
 
   /// `Lote <n> · <total> pontos em <h> h <min> min` under the full card.

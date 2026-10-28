@@ -90,12 +90,11 @@ class FloorCard extends StatelessWidget {
   );
 
   Widget _slot(CardSlot slot, FloorRow floor) {
-    final animate =
-        slot.stopId == animateStopId || slot.stopId == animateImpededStopId;
     return StampSlot(
       key: ValueKey('floor-slot-${slot.stopId}'),
       slot: slot,
-      animateStamp: animate,
+      animateStamp: slot.stopId == animateStopId,
+      animateImpeded: slot.stopId == animateImpededStopId,
       onTap: () => onSlotTap(slot, floor),
     );
   }
