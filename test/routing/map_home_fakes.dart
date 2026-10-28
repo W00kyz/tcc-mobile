@@ -158,13 +158,20 @@ class FakeMonitoringApi implements MonitoringApi {
 /// `ExecutionRepository` in one test must be visible to it through the same
 /// store instance.
 class InMemoryLocalWriteStore implements LocalWriteStore {
+  /// Takes the row for a send, as a sync worker would (no lease kept).
   @override
-  Future<bool> claim(String id, {required int now, required int leaseUntil}) =>
-      throw UnimplementedError();
+  Future<bool> claim(
+    String id, {
+    required int now,
+    required int leaseUntil,
+  }) async {
+    _setState(id, PendingOpState.sending);
+    return true;
+  }
 
   @override
-  Future<void> releaseClaim(PendingOperationRow row) =>
-      throw UnimplementedError();
+  Future<void> releaseClaim(PendingOperationRow row) async =>
+      _setState(row.id, PendingOpState.pending);
 
   final Map<String, PendingOperationRow> _rows = {};
 

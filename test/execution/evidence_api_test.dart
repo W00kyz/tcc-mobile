@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:route_monitor/api/api_client.dart' show photoUploadSendTimeout;
 import 'package:route_monitor/execution/evidence_api.dart';
 
 void main() {
@@ -41,6 +42,8 @@ void main() {
     expect(fields['idempotency_key'], 'idem-photo-1');
     expect(body.files.single.key, 'file');
     expect(body.files.single.value.filename, 'evidence.jpg');
+    // A photo on a weak field link needs longer than the app-wide budget.
+    expect(captured.sendTimeout, photoUploadSendTimeout);
   });
 
   test('uploadNote posts text_body and captured_at as JSON', () async {

@@ -184,6 +184,22 @@ void main() {
     expect(find.text(AppStrings.photoSequenceSynced), findsOneWidget);
   });
 
+  testWidgets('Apagar is not offered while the photo is uploading', (
+    tester,
+  ) async {
+    final store = InMemoryLocalWriteStore();
+    await _pump(tester, store: store);
+    await _shoot(tester);
+    final id = (await store.unsyncedForRoute('r1')).single.id;
+    await store.claim(id, now: 0, leaseUntil: 1);
+
+    await tester.tap(find.byKey(const Key('photo-thumb-0')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('photo-delete')), findsNothing);
+    expect(find.byIcon(Icons.cloud_done), findsWidgets);
+  });
+
   testWidgets('no gallery entry point', (tester) async {
     await _pump(tester, store: InMemoryLocalWriteStore(), minimum: 2);
 

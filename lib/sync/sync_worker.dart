@@ -11,6 +11,7 @@ import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/outbox_row_sender.dart';
 import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_error_class.dart';
 import 'package:route_monitor/sync/sync_progress.dart';
@@ -55,9 +56,15 @@ class SyncWorker {
        _onStopReleased = onStopReleased;
 
   final LocalWriteStore _store;
-  final StopProgressStore _stopProgress;
   final SyncMetaStore _syncMeta;
   final Connectivity _connectivity;
+  late final OutboxRowSender _sender = OutboxRowSender(
+    executionApi: _executionApi,
+    evidenceApi: _evidenceApi,
+    stopProgress: _stopProgress,
+    syncMeta: _syncMeta,
+  );
+  final StopProgressStore _stopProgress;
   final ExecutionApi _executionApi;
   final EvidenceApi _evidenceApi;
   final ReleasedStopStore _releasedStops;
@@ -141,16 +148,19 @@ class SyncWorker {
       // this pass and every later one — a check-out never reaches the server
       // without its check-in — but never another stop of the route. "Tentar
       // de novo" (`unblock`) resets it and its dependents move again.
-      final scope = BlockedScope(await _store.blockedForRoute(routeId));
       final rows = await _store.dueForRoute(
         routeId,
         now: _now().millisecondsSinceEpoch,
       );
+      final scope = await _scopeFor(routeId, rows);
       for (final row in rows) {
         if (scope.holds(row)) continue;
-        // Not claimed: the other isolate is sending this queue right now —
-        // stop rather than send what comes after the row out of order.
-        if (!await _claim(row)) break;
+        // Not claimed: the other isolate took it a moment ago — it is in
+        // flight, so hold what depends on it, like a not-due row.
+        if (!await _claim(row)) {
+          scope.add(row);
+          continue;
+        }
         final outcome = await _dispatch(row);
         if (outcome == _Dispatched.blocked) {
           scope.add(row);
@@ -165,12 +175,30 @@ class SyncWorker {
     }
   }
 
+  /// What this pass must hold back: dependents of `blocked` rows, and of
+  /// every unsent row that is not [due] — a `sending` row another worker
+  /// holds under a live lease, or a `failed` one still in its backoff. Their
+  /// check-out or evidence must not reach the server ahead of them.
+  Future<BlockedScope> _scopeFor(
+    String routeId,
+    List<PendingOperationRow> due,
+  ) async {
+    final scope = BlockedScope(await _store.blockedForRoute(routeId));
+    final dueIds = {for (final row in due) row.id};
+    for (final row in await _store.unsyncedForRoute(routeId)) {
+      if (!dueIds.contains(row.id)) scope.add(row);
+    }
+    return scope;
+  }
+
   /// How long a claimed row stays the claimant's (`PendingOpState.sending`).
   /// A send is at most three requests (the call, a token refresh, the retry)
-  /// of at most connect + send + receive timeouts each (`api_client.dart`,
-  /// 140 s) — about 7 min — so the other isolate never re-sends a row that is
-  /// still in flight; a worker killed mid-send frees it after the lease.
-  static const Duration sendLease = Duration(minutes: 10);
+  /// bounded by `api_client.dart`'s timeouts: a photo upload is 20 s connect
+  /// + 180 s send + 60 s receive = 260 s, any other request 140 s, so the
+  /// worst case (photo, refresh, photo) is 660 s = 11 min. 15 min keeps the
+  /// other isolate from re-sending a row still in flight; a worker killed
+  /// mid-send frees its row after the lease.
+  static const Duration sendLease = Duration(minutes: 15);
 
   Future<bool> _claim(PendingOperationRow row) {
     final now = _now().millisecondsSinceEpoch;
@@ -236,7 +264,16 @@ class SyncWorker {
   /// Dispatches one row and says where it ended. A synced scan is reported
   /// only once the row's state is final, so the report can never change it.
   Future<_Dispatched> _dispatch(PendingOperationRow row) async {
-    final outcome = await _attempt(row);
+    final _Dispatched outcome;
+    try {
+      outcome = await _attempt(row);
+      // A store write failed while settling the row: give the claim back so
+      // the row is not stranded in `sending` for the whole lease. Rethrown,
+      // so catching everything here hides nothing.
+    } catch (_) {
+      await _releaseClaimQuietly(row);
+      rethrow;
+    }
     if (outcome != _Dispatched.synced) return outcome;
     _reportScanDelivered(row);
     _run?.advance();
@@ -245,7 +282,7 @@ class SyncWorker {
 
   Future<_Dispatched> _attempt(PendingOperationRow row) async {
     try {
-      final serverDate = await _perform(row);
+      final serverDate = await _sender.send(row);
       await _store.markSynced(row.id);
       await _recordOffset(serverDate);
       return _Dispatched.synced;
@@ -299,6 +336,23 @@ class SyncWorker {
     );
     if (firstTime) _reportStopReleased(release);
     return _Dispatched.blocked;
+  }
+
+  Future<void> _releaseClaimQuietly(PendingOperationRow row) async {
+    try {
+      await _store.releaseClaim(row);
+      // Deliberately broad: the original failure is what must surface.
+      // ignore: avoid_catches_without_on_clauses
+    } catch (error) {
+      developer.log(
+        jsonEncode({
+          'event': 'claim_release_failed',
+          'operation_id': row.id,
+          'error': '$error',
+        }),
+        name: 'sync_worker',
+      );
+    }
   }
 
   /// Best-effort, like [_reportScanDelivered]: the row is parked already.
@@ -362,81 +416,6 @@ class SyncWorker {
       nextAttemptAt:
           _now().millisecondsSinceEpoch + backoffSeconds * 1000 + jitterMs,
     );
-  }
-
-  Future<DateTime?> _perform(PendingOperationRow row) {
-    final payload = row.payload;
-    return switch (row.kind) {
-      PendingOpKind.checkIn => _performCheckIn(payload),
-      PendingOpKind.checkOut => _performCheckOut(payload),
-      PendingOpKind.impediment => _performImpediment(payload),
-      PendingOpKind.evidencePhoto => _evidenceApi.uploadPhoto(
-        executionId: payload['execution_id'] as String,
-        bytes: base64Decode(payload['bytes_b64'] as String),
-        sha256: payload['sha256'] as String,
-        capturedAt: DateTime.parse(payload['captured_at'] as String),
-        idempotencyKey: payload['idempotency_key'] as String,
-      ),
-      PendingOpKind.evidenceNote => _evidenceApi.uploadNote(
-        executionId: payload['execution_id'] as String,
-        textBody: payload['text_body'] as String,
-        capturedAt: DateTime.parse(payload['captured_at'] as String),
-        idempotencyKey: payload['idempotency_key'] as String,
-      ),
-    };
-  }
-
-  Future<DateTime?> _performCheckIn(Map<String, dynamic> payload) async {
-    final response = await _executionApi.checkIn(
-      executionId: payload['execution_id'] as String,
-      qrPayload: payload['qr_payload'] as String,
-      scannedAt: DateTime.parse(payload['scanned_at'] as String),
-      idempotencyKey: payload['idempotency_key'] as String,
-      latitude: (payload['latitude'] as num?)?.toDouble(),
-      longitude: (payload['longitude'] as num?)?.toDouble(),
-      routeStopId: payload['route_stop_id'] as String?,
-      clientClockOffsetSeconds: await _syncMeta.getClockOffsetSeconds(),
-    );
-    await _stopProgress.upsertInProgress(
-      response.result.routeStopId,
-      response.result.executionId,
-    );
-    return response.serverDate;
-  }
-
-  Future<DateTime?> _performCheckOut(Map<String, dynamic> payload) async {
-    final response = await _executionApi.checkOut(
-      executionId: payload['execution_id'] as String,
-      qrPayload: payload['qr_payload'] as String,
-      scannedAt: DateTime.parse(payload['scanned_at'] as String),
-      checkoutIdempotencyKey: payload['checkout_idempotency_key'] as String,
-      latitude: (payload['latitude'] as num?)?.toDouble(),
-      longitude: (payload['longitude'] as num?)?.toDouble(),
-      routeStopId: payload['route_stop_id'] as String?,
-      clientClockOffsetSeconds: await _syncMeta.getClockOffsetSeconds(),
-      complaintsSuggestions: payload['complaints_suggestions'] as String?,
-      // LEGACY: a row queued by an old build may still carry form fields in
-      // its payload; they are deliberately not read, so the server never
-      // receives them (forms were removed).
-    );
-    await _stopProgress.markDone(response.result.routeStopId);
-    return response.serverDate;
-  }
-
-  Future<DateTime?> _performImpediment(Map<String, dynamic> payload) async {
-    await _executionApi.reportImpediment(
-      routeId: payload['route_id'] as String,
-      routeStopId: payload['route_stop_id'] as String?,
-      scope: payload['scope'] as String,
-      reason: payload['reason'] as String,
-      note: payload['note'] as String?,
-      reportedAt: DateTime.parse(payload['reported_at'] as String),
-    );
-    // No serverDate to return: the impediment response is just the created
-    // row, and check-in/out already measure the clock offset (Ruling 7). A
-    // 409 (`RouteNotInProgress`/`StopNotReassignable`) falls through `_classify`
-    // to `SyncErrorClass.hard`, blocking this route's queue.
-    return null;
   }
 
   Future<void> _recordOffset(DateTime? serverDate) async {

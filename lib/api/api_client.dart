@@ -28,6 +28,11 @@ const Duration apiConnectTimeout = Duration(seconds: 20);
 const Duration apiSendTimeout = Duration(seconds: 60);
 const Duration apiReceiveTimeout = Duration(seconds: 60);
 
+/// The send budget of an evidence photo upload: ~500 KB on a weak field link
+/// (about 25 kbps sustained) still fits, where [apiSendTimeout] would fail
+/// every try and end the photo blocked.
+const Duration photoUploadSendTimeout = Duration(seconds: 180);
+
 /// One seam for base URL and bearer token — every screen builds its Dio
 /// through here instead of constructing one inline (docs/CLAUDE.base.md —
 /// Dependencies).

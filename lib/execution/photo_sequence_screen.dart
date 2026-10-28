@@ -10,6 +10,7 @@ import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/photo_sequence_viewer.dart';
 import 'package:route_monitor/execution/photo_sequence_widgets.dart';
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/ui/app_theme.dart';
 
 /// Opens the full-screen photo camera for one stop and returns how many
@@ -93,7 +94,12 @@ class _State extends ConsumerState<PhotoSequenceScreen> {
     final rows = await ref
         .read(localWriteStoreProvider)
         .unsyncedForRoute(widget.routeId);
-    _unsynced = rows.map((row) => row.id).toSet();
+    // A photo a sync worker is uploading right now (`sending`) cannot be
+    // deleted (`deletePendingPhoto` refuses it): show the cloud state.
+    _unsynced = {
+      for (final row in rows)
+        if (row.state != PendingOpState.sending) row.id,
+    };
   }
 
   /// Compress, write to SQLite, and only then show the thumbnail (RNF06).

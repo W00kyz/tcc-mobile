@@ -322,12 +322,19 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     clearNextAttemptAt: true,
   );
 
+  /// When set, the next `markFailed` throws it (a store write failing
+  /// inside the dispatch's error path).
+  Error? markFailedError;
+
   @override
-  Future<void> markFailed(String id, String error) async => rows[id] = _copy(
-    rows[id]!,
-    state: PendingOpState.failed,
-    lastError: error,
-  );
+  Future<void> markFailed(String id, String error) async {
+    final failure = markFailedError;
+    if (failure != null) {
+      markFailedError = null;
+      throw failure;
+    }
+    rows[id] = _copy(rows[id]!, state: PendingOpState.failed, lastError: error);
+  }
 
   @override
   Future<void> markBlocked(String id, String error) async => rows[id] = _copy(
@@ -983,6 +990,91 @@ void main() {
 
       expect(h.deliveredScans, [DateTime.utc(2026)]);
     });
+  });
+
+  group('claims and ordering across two workers', () {
+    const farFuture = 1 << 50;
+
+    test("a row another worker has claimed is not sent, nor its stop's "
+        'later rows; another stop still goes', () async {
+      final h = _Harness();
+      h.store
+        ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+        ..seed('b', kind: PendingOpKind.checkOut, createdAt: 2)
+        ..seed(
+          'c',
+          kind: PendingOpKind.checkIn,
+          createdAt: 3,
+          payload: _stopPayload('c', 'stop-2'),
+        );
+      await h.store.claim('a', now: 0, leaseUntil: farFuture);
+
+      await h.worker.syncRoute('route-R');
+
+      expect(h.log, ['checkIn:c']);
+    });
+
+    test(
+      'a failed check-in still in backoff holds back its check-out',
+      () async {
+        final h = _Harness();
+        h.store
+          ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+          ..seed('b', kind: PendingOpKind.checkOut, createdAt: 2)
+          ..seed(
+            'c',
+            kind: PendingOpKind.checkIn,
+            createdAt: 3,
+            payload: _stopPayload('c', 'stop-2'),
+          );
+        await h.store.markFailed('a', 'timeout');
+        await h.store.markRetryScheduled(
+          'a',
+          attempts: 1,
+          nextAttemptAt: farFuture,
+        );
+
+        await h.worker.syncRoute('route-R');
+
+        expect(h.log, ['checkIn:c']);
+      },
+    );
+
+    test('the sent row is claimed for the send lease, then settled', () async {
+      final h = _Harness();
+      h.store.seed('a', kind: PendingOpKind.checkIn, createdAt: 1);
+      h.executionApi.checkInGate = Completer<void>();
+
+      final pass = h.worker.syncRoute('route-R');
+      await pumpEventQueue();
+      final duringSend = h.store.rows['a']!;
+      h.executionApi.checkInGate!.complete();
+      await pass;
+
+      expect(duringSend.state, PendingOpState.sending);
+      expect(
+        duringSend.nextAttemptAt,
+        h.now.millisecondsSinceEpoch + SyncWorker.sendLease.inMilliseconds,
+      );
+      expect(h.store.rows['a']!.state, PendingOpState.synced);
+    });
+
+    test(
+      'a store write that throws mid-dispatch gives the claim back',
+      () async {
+        final h = _Harness();
+        h.store
+          ..seed('a', kind: PendingOpKind.checkIn, createdAt: 1)
+          ..markFailedError = StateError('database is locked');
+        h.executionApi.checkInError = _dio(status: 503);
+
+        await expectLater(h.worker.syncRoute('route-R'), throwsStateError);
+
+        final row = h.store.rows['a']!;
+        expect(row.state, PendingOpState.pending);
+        expect(row.nextAttemptAt, isNull);
+      },
+    );
   });
 
   test(
