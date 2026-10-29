@@ -446,6 +446,20 @@ void main() {
       expect(await store.releaseHeldPhotos('e1'), 0);
     });
 
+    test('releaseHeldPhotos never flips a row that left held meanwhile '
+        'back to pending', () async {
+      await enqueueHeld('p1', 'e1');
+
+      // The release reads its held ids first; the photo is sent before its
+      // update runs (Drift runs the statements in call order).
+      final release = store.releaseHeldPhotos('e1');
+      final sent = store.markSynced('p1');
+      await Future.wait([release, sent]);
+
+      expect(await release, 0);
+      expect(await store.unsyncedForRoute('route-A'), isEmpty);
+    });
+
     test(
       'releaseHeldPhotos leaves non-held and non-photo rows alone',
       () async {

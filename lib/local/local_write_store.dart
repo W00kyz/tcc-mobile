@@ -243,8 +243,12 @@ class DriftLocalWriteStore implements LocalWriteStore {
   Future<int> releaseHeldPhotos(String executionId) async {
     final ids = await _heldPhotoIds(executionId);
     if (ids.isEmpty) return 0;
+    // Re-checked here: a row that left `held` since the read above (sent,
+    // deleted, blocked) must not be flipped back to `pending`.
     final update = _db.update(_db.pendingOperations)
-      ..where((row) => row.id.isIn(ids));
+      ..where(
+        (row) => row.id.isIn(ids) & row.state.equals(PendingOpState.held.name),
+      );
     return update.write(
       PendingOperationsCompanion(state: Value(PendingOpState.pending.name)),
     );
