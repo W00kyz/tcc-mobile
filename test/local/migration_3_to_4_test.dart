@@ -132,7 +132,7 @@ void main() {
       expect(formDraftItems, isEmpty);
 
       // The current constant: every later step runs right after this one.
-      expect(db.schemaVersion, 8);
+      expect(db.schemaVersion, 9);
     },
   );
 }

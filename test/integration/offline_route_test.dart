@@ -30,6 +30,7 @@ import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -43,7 +44,8 @@ import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
-import '../routing/map_home_harness.dart' show closeStopSheet, openStopSheet;
+import '../routing/fake_approach_api.dart';
+import '../routing/map_home_harness.dart' show slotOf, tapPin;
 import '../routing/no_tiles_tile_provider.dart';
 import '../support/fake_sync_notification_taps.dart';
 import '../support/in_memory_database.dart';
@@ -194,10 +196,10 @@ void main() {
       expect(find.text(AppStrings.dayProgress(2, 2, 3)), findsOneWidget);
       expect(_nextBatchOfflinePanel(), findsNothing);
       expect(find.byTooltip(AppStrings.routeAllSynced), findsOneWidget);
-      // Its stop reads on the sheet its card slot opens.
-      await openStopSheet(tester, 's3');
-      expect(find.text('Sala 201'), findsOneWidget);
-      await closeStopSheet(tester);
+      // Its stop reads on the floor card, once its building is tapped (a
+      // new batch starts with no building selected).
+      await tapPin(tester, 'b1');
+      expect(slotOf('s3'), findsOneWidget);
 
       // ---- Idempotent re-drain -----------------------------------------
       await fixture.worker.syncAll();
@@ -288,6 +290,12 @@ void main() {
         routeId: _routeId,
         executionId: execution1,
         photo: _photo,
+      );
+      // Photos leave the device once their task is stamped.
+      await fixture.repo.stampTask(
+        routeId: _routeId,
+        routeStopId: _stop1,
+        executionId: execution1,
       );
       await fixture.repo.checkOut(
         routeId: _routeId,
@@ -418,6 +426,12 @@ void main() {
           executionId: execution,
           photo: _photo,
         );
+        // Photos leave the device once their task is stamped.
+        await fixture.repo.stampTask(
+          routeId: _routeId,
+          routeStopId: _stop1,
+          executionId: execution,
+        );
       }
       await fixture.repo.checkOut(
         routeId: _routeId,
@@ -494,9 +508,9 @@ void main() {
         expect(parked.single.releasedStopId, _stop1);
         final held = await fixture.store.unsyncedForRoute(_routeId);
         expect(held.single.kind, PendingOpKind.checkOut);
-        // A paused day draws no sync slot: the blocked-sync screen is out
-        // of reach, so /recursos is the way out.
-        expect(find.text(AppStrings.routePausedTitle), findsOneWidget);
+        // A paused day draws no sync slot (only "Retomar" and why): the
+        // blocked-sync screen is out of reach, so /recursos is the way out.
+        expect(find.text(AppStrings.dayResumeButton), findsOneWidget);
         expect(find.byTooltip(AppStrings.routeSyncBlockedBanner), findsNothing);
         // The snackbar offered the appeal too; this test takes the other
         // road, so it is put away (it would sit over the form's button).
@@ -711,6 +725,9 @@ class _Fixture {
         evidenceApiProvider.overrideWithValue(evidenceApi),
         routeRepositoryProvider.overrideWithValue(routeApi),
         locationServiceProvider.overrideWithValue(_FakeLocationService()),
+        // The map reads the GPS as it opens, so the live first leg asks the
+        // server for its path: a fake, never the real Dio client.
+        approachApiProvider.overrideWithValue(FakeApproachApi()),
         apiBaseUrlProvider.overrideWithValue('http://test-base'),
         appealApiProvider.overrideWithValue(appealApi),
         syncNotificationTapsProvider.overrideWithValue(
@@ -785,6 +802,12 @@ class _Fixture {
       routeId: _routeId,
       executionId: execution1,
       photo: _photo,
+    );
+    // Photos leave the device once their task is stamped.
+    await repo.stampTask(
+      routeId: _routeId,
+      routeStopId: _stop1,
+      executionId: execution1,
     );
 
     times.add(_nowUtc());
@@ -910,11 +933,15 @@ class _Fixture {
   }
 
   Future<void> dispose() async {
+    // The container goes first: a live read of the impeded stops is a drift
+    // stream, and closing the db under its listener never completes in this
+    // fake-async zone.
     // `appDatabaseProvider` is overridden with a value, so its `onDispose`
     // close hook never runs — close the in-memory db here instead, or drift
     // warns about a second AppDatabase on the next test.
-    await _db.close();
+    final db = _db;
     container.dispose();
+    await db.close();
     await connectivity.dispose();
   }
 }

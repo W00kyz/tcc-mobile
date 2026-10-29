@@ -2,8 +2,10 @@ import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
-/// How one stop of the batch card is drawn.
-enum SlotState { done, next, inProgress, pending, released }
+/// How one stop of the batch card is drawn. `stamped` is a task finished on
+/// its floor whose check-out has not been made; `impeded` is a task the
+/// worker could not do (an impediment report), closed without being done.
+enum SlotState { done, stamped, impeded, next, inProgress, pending, released }
 
 /// What this device knows about a stop, from its local progress row.
 class LocalStopState {
@@ -25,11 +27,16 @@ class CardSlot {
     required this.pendingSync,
     required this.releaseReason,
     required this.stampRotationDeg,
+    this.servicePointName,
   });
 
   final String stopId;
   final SlotState state;
   final String floorLabel;
+
+  /// The task's service point, read first by assistive technology; null
+  /// where the slot stands for no particular task.
+  final String? servicePointName;
 
   /// When the stop was done (local check-out beats the server's `done_at`).
   final DateTime? stampedAt;
@@ -89,53 +96,21 @@ BatchCard buildBatchCard(
   RouteSummary route,
   Map<String, LocalStopState> local,
   Set<String> pendingSyncStopIds,
-) => _buildCardFor(
-  route,
-  route.currentBatch,
-  local,
-  pendingSyncStopIds,
-  marksNext: true,
-);
-
-/// One card per batch present in [route]'s stops, in ascending batch order
-/// — the map sheet's carousel. Only the current batch's card has a `next`
-/// slot: an earlier batch is finished work, and a later one is not the
-/// worker's to start yet.
-///
-///     final cards = buildBatchCards(route, local, pendingSyncStopIds);
-List<BatchCard> buildBatchCards(
-  RouteSummary route,
-  Map<String, LocalStopState> local,
-  Set<String> pendingSyncStopIds,
-) {
-  final batches = {for (final stop in route.stops) stop.batchNumber}.toList()
-    ..sort();
-  return [
-    for (final batch in batches)
-      _buildCardFor(
-        route,
-        batch,
-        local,
-        pendingSyncStopIds,
-        marksNext: batch == route.currentBatch,
-      ),
-  ];
-}
+) => _buildCardFor(route, route.currentBatch, local, pendingSyncStopIds);
 
 /// The card of [batchNumber]: its stops in route order, grouped by building
-/// in the order each building first appears. With [marksNext], the first
-/// open stop is the `next` slot.
+/// in the order each building first appears. The first open stop is the
+/// `next` slot.
 BatchCard _buildCardFor(
   RouteSummary route,
   int batchNumber,
   Map<String, LocalStopState> local,
-  Set<String> pendingSyncStopIds, {
-  required bool marksNext,
-}) {
+  Set<String> pendingSyncStopIds,
+) {
   final stops = route.stops.where((s) => s.batchNumber == batchNumber).toList()
     ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
 
-  var nextAssigned = !marksNext;
+  var nextAssigned = false;
   final slotsByBuilding = <String, List<CardSlot>>{};
   final stopsByBuilding = <String, List<RouteStopSummary>>{};
   for (final stop in stops) {
@@ -167,6 +142,7 @@ CardSlot _slotOf(
     stopId: stop.id,
     state: state,
     floorLabel: stop.floorLabel,
+    servicePointName: stop.servicePointName,
     // When the stop was done: the local check-out beats the server's.
     stampedAt: state != SlotState.done
         ? null
@@ -178,8 +154,8 @@ CardSlot _slotOf(
 }
 
 /// The stop's effective state: released, then a local or server done, then
-/// a local or server in-progress; otherwise the first open stop is `next`
-/// when [mayBeNext], and the rest are pending.
+/// a local stamp, then a local or server in-progress; otherwise the first
+/// open stop is `next` when [mayBeNext], and the rest are pending.
 SlotState _slotStateOf(
   RouteStopSummary stop,
   LocalStopState? localState, {
@@ -189,6 +165,7 @@ SlotState _slotStateOf(
   if (localState?.status == StopLocalStatus.done || stop.status == 'DONE') {
     return SlotState.done;
   }
+  if (localState?.status == StopLocalStatus.stamped) return SlotState.stamped;
   if (localState?.status == StopLocalStatus.inProgress ||
       stop.status == 'IN_PROGRESS') {
     return SlotState.inProgress;

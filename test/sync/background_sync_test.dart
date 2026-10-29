@@ -228,6 +228,18 @@ void main() {
       expect(await hasPendingWork(store), isFalse);
     });
 
+    test('a held photo is not pending work — it waits for its stamp', () async {
+      await store.enqueue(
+        id: 'photo',
+        kind: PendingOpKind.evidencePhoto,
+        payload: {'execution_id': 'exec-1'},
+        routeId: 'route-R',
+        initialState: PendingOpState.held,
+      );
+
+      expect(await hasPendingWork(store), isFalse);
+    });
+
     test('a deliverable row of another stop is', () async {
       await enqueue('in', PendingOpKind.checkIn, 'stop-1');
       await store.markBlocked('in', 'hard');

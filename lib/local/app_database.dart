@@ -50,8 +50,11 @@ class StopProgress extends Table {
   TextColumn get routeStopId => text()();
   TextColumn get executionId => text()();
 
-  /// `'IN_PROGRESS'` | `'DONE'`.
+  /// `'IN_PROGRESS'` | `'STAMPED'` | `'DONE'`.
   TextColumn get localStatus => text()();
+
+  /// The note the worker left when stamping the task; null when none.
+  TextColumn get observation => text().nullable()();
 
   /// Epoch milliseconds of the last local transition for this stop.
   IntColumn get updatedAt => integer()();
@@ -158,7 +161,7 @@ class AppDatabase extends _$AppDatabase {
       );
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -221,6 +224,12 @@ class AppDatabase extends _$AppDatabase {
         // Personal gamification (redesign §6.8): a new, empty day log. The
         // streak starts counting from the first day this build runs.
         await m.createTable(dayLog);
+      }
+      if (from >= 3 && from < 9) {
+        // Per-floor tasks (redesign por prédio): a stamped stop keeps the
+        // worker's note until the check-out. Existing rows have none. Below
+        // 3 the `from < 3` step already created the table with the column.
+        await m.addColumn(stopProgress, stopProgress.observation);
       }
     },
   );

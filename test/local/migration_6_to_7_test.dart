@@ -134,7 +134,7 @@ void main() {
         .get();
 
     expect(tables, isEmpty);
-    expect(db.schemaVersion, 8);
+    expect(db.schemaVersion, 9);
   });
 
   test('6 to 7 keeps every outbox row unchanged', () async {

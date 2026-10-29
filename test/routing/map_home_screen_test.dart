@@ -1,23 +1,21 @@
-import 'dart:convert';
-
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/l10n/strings.dart';
-import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/routing/campus_map.dart';
+import 'package:route_monitor/routing/floor_actions.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
-import 'package:route_monitor/routing/stop_actions.dart';
-import 'package:route_monitor/ui/batch_card.dart';
+import 'package:route_monitor/routing/selected_building.dart';
 import 'package:route_monitor/ui/building_pin.dart';
+import 'package:route_monitor/ui/floor_card.dart';
+import 'package:route_monitor/ui/map_sheet.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_route_repository.dart';
-import 'gated_write_store.dart';
 import 'map_home_harness.dart';
 
 /// Two buildings: "Central de Aulas" (Térreo, 1º andar) and "Bloco B"
@@ -51,6 +49,9 @@ BuildingPin _pinOf(WidgetTester tester, String buildingId) =>
       ),
     );
 
+CampusMap _map(WidgetTester tester) =>
+    tester.widget<CampusMap>(find.byType(CampusMap));
+
 /// The top bar's progress dots, filled (`on`) or empty (`off`).
 Finder _dots(String state) => find.byWidgetPredicate(
   (widget) =>
@@ -69,12 +70,12 @@ void main() {
       );
 
       expect(find.text(AppStrings.dayNoService), findsOneWidget);
-      expect(find.byType(BatchCardView), findsNothing);
+      expect(find.byType(FloorCard), findsNothing);
       expect(find.text(AppStrings.routeStartButton), findsNothing);
       expect(find.byType(CampusMap), findsOneWidget);
     });
 
-    testWidgets('no route yet shows the start panel', (tester) async {
+    testWidgets('no route yet shows the start bar', (tester) async {
       await pumpHome(tester, homeWith(repositoryWith(null)));
 
       expect(
@@ -83,7 +84,9 @@ void main() {
       );
     });
 
-    testWidgets('a paused route shows why and "Retomar"', (tester) async {
+    testWidgets('a paused route shows why and "Retomar", with no sheet', (
+      tester,
+    ) async {
       final paused = routeWith(
         status: 'PAUSED',
         stops: [
@@ -92,8 +95,6 @@ void main() {
       );
       await pumpHome(tester, homeWith(repositoryWith(paused)));
 
-      expect(find.text(AppStrings.routePausedTitle), findsOneWidget);
-      expect(find.text('Rota pausada'), findsOneWidget);
       expect(
         find.text(
           AppStrings.routePausedReason(
@@ -106,6 +107,7 @@ void main() {
         find.widgetWithText(FilledButton, AppStrings.dayResumeButton),
         findsOneWidget,
       );
+      expect(find.byType(DraggableScrollableSheet), findsNothing);
     });
 
     testWidgets('a done route shows "Dia concluído" and "Verificar de novo"', (
@@ -147,18 +149,24 @@ void main() {
     });
   });
 
-  testWidgets('in-progress batch shows the card and Escanear QR', (
+  testWidgets('in-progress route shows the floor card and Escanear QR', (
     tester,
   ) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoBuildings())),
+    );
 
-    expect(find.byType(BatchCardView), findsOneWidget);
+    expect(find.byType(FloorCard), findsOneWidget);
     expect(scanQrButton(), findsOneWidget);
-    expect(find.text(AppStrings.nextStopLabel), findsOneWidget);
+    expect(find.text(AppStrings.buildingSheetNext), findsOneWidget);
   });
 
   testWidgets('Escanear QR visible at all three snaps', (tester) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoBuildings())),
+    );
 
     for (final size in [0.22, 0.5, 0.9]) {
       await snapSheetTo(tester, size);
@@ -166,7 +174,7 @@ void main() {
     }
   });
 
-  testWidgets('no Escanear QR when the batch has no PENDING stop', (
+  testWidgets('a checked-in floor offers the exit scan, not "Escanear QR"', (
     tester,
   ) async {
     final route = routeWith(
@@ -175,9 +183,10 @@ void main() {
         stopIn(id: 's2', orderIndex: 2, status: 'DONE'),
       ],
     );
-    await pumpHome(tester, homeWith(repositoryWith(route)));
+    await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
     expect(scanQrButton(), findsNothing);
+    expect(find.text(AppStrings.scanExitQrButton), findsOneWidget);
   });
 
   testWidgets('tapping a pin selects the building', (tester) async {
@@ -190,55 +199,21 @@ void main() {
       tester.element(find.byType(MapHomeScreen)),
     );
     expect(container.read(selectedBuildingProvider), 'b2');
-    // The card stays, with the building highlighted (product owner,
-    // 2026-10-28: no building-only list).
-    expect(shownCard(tester).highlightBuildingId, 'b2');
-    expect(_pinOf(tester, 'b1').dimmed, isTrue);
+    // The sheet swaps to the tapped building's floor card.
+    expect(shownFloorCard(tester).building.buildingId, 'b2');
+    // The map centres on b2, which can push b1 out of view: read the
+    // selection the map dims the other pins by (campus_map_test covers the
+    // dimming itself).
+    expect(_map(tester).selectedBuildingId, 'b2');
     expect(_pinOf(tester, 'b2').selected, isTrue);
 
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
 
     expect(container.read(selectedBuildingProvider), isNull);
-    expect(_pinOf(tester, 'b1').dimmed, isFalse);
-    expect(shownCard(tester).highlightBuildingId, isNull);
+    expect(_map(tester).selectedBuildingId, isNull);
+    expect(find.byType(MapSheet), findsNothing);
   });
-
-  testWidgets(
-    'with a building selected, its stops offer Sinalizar impossibilidade on '
-    'PENDING and IN_PROGRESS stops only',
-    (tester) async {
-      final route = routeWith(
-        stops: [
-          stopIn(id: 's1', status: 'DONE'),
-          stopIn(id: 's2', orderIndex: 2, status: 'IN_PROGRESS'),
-          stopIn(id: 's3', orderIndex: 3),
-          stopIn(
-            id: 's4',
-            orderIndex: 4,
-            status: 'RELEASED',
-            releaseReason: 'IMPEDIMENT',
-          ),
-        ],
-      );
-      await pumpHome(tester, homeWith(repositoryWith(route)));
-
-      await tester.tap(pinCircle('b1'));
-      await tester.pumpAndSettle();
-
-      final signal = find.text(AppStrings.routeSignalImpossibilityButton);
-      for (final (stopId, offered) in [
-        ('s1', false),
-        ('s2', true),
-        ('s3', true),
-        ('s4', false),
-      ]) {
-        await openStopSheet(tester, stopId);
-        expect(signal, offered ? findsOneWidget : findsNothing, reason: stopId);
-        await closeStopSheet(tester);
-      }
-    },
-  );
 
   testWidgets(
     'top bar shows "Lote 2 · 3 de 8 pontos hoje" with 8 progress dots, '
@@ -300,12 +275,10 @@ void main() {
     expect(find.text(AppStrings.silenceWarning(12, 33)), findsOneWidget);
   });
 
-  testWidgets('"Minha posição" draws the worker on the map', (tester) async {
+  testWidgets('the map opens with the worker drawn, no tap needed', (
+    tester,
+  ) async {
     await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
-    expect(find.byKey(const ValueKey('worker-position')), findsNothing);
-
-    await tester.tap(find.byTooltip(AppStrings.myPositionTooltip));
-    await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('worker-position')), findsOneWidget);
   });
@@ -344,7 +317,7 @@ void main() {
       expect(size.height, greaterThanOrEqualTo(48));
     });
 
-    testWidgets('the row and the stamp read the same hour for a server-done '
+    testWidgets('the stamp and its label read the same hour for a server-done '
         'stop (wall-clock-tagged UTC, no toLocal)', (tester) async {
       final route = routeWith(
         stops: [
@@ -356,14 +329,15 @@ void main() {
           stopIn(id: 's2', orderIndex: 2),
         ],
       );
-      await pumpHome(tester, homeWith(repositoryWith(route)));
-      // The stamp's hour, on the card.
-      expect(find.text('10:05'), findsOneWidget);
+      await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
-      await openStopSheet(tester, 's1');
-
-      expect(find.text(AppStrings.slotDone('10:05')), findsOneWidget);
+      // The stamp's hour, on the card, and the slot's spoken label (its
+      // service point first).
       expect(find.text('10:05'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel('Sala s1, ${AppStrings.slotDone('10:05')}'),
+        findsOneWidget,
+      );
     });
 
     testWidgets('a new batch clears the building selection, even in the '
@@ -374,8 +348,7 @@ void main() {
         ),
       );
       await pumpHome(tester, homeWith(repository));
-      await tester.tap(pinCircle('b1'));
-      await tester.pumpAndSettle();
+      await tapPin(tester, 'b1');
       final container = ProviderScope.containerOf(
         tester.element(find.byType(MapHomeScreen)),
       );
@@ -394,12 +367,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(container.read(selectedBuildingProvider), isNull);
-      expect(shownCard(tester).card.batchNumber, 2);
-      expect(shownCard(tester).highlightBuildingId, isNull);
+      expect(find.byType(MapSheet), findsNothing);
+      expect(_map(tester).selectedBuildingId, isNull);
     });
 
-    testWidgets('on a small phone the closed sheet still shows the next stop '
-        'and Escanear QR', (tester) async {
+    testWidgets('on a small phone the closed sheet still shows the next '
+        'building and Escanear QR', (tester) async {
       tester.view
         ..physicalSize = const Size(360, 640)
         ..devicePixelRatio = 1
@@ -407,92 +380,46 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(homeWith(repositoryWith(_twoBuildings())));
       await tester.pumpAndSettle();
+      await selectBuilding(tester, 'b1');
 
       await snapSheetTo(tester, 0.22);
 
-      expect(find.text(AppStrings.nextStopLabel).hitTestable(), findsOneWidget);
+      expect(
+        find.text(AppStrings.buildingSheetNext).hitTestable(),
+        findsOneWidget,
+      );
       expect(scanQrButton().hitTestable(), findsOneWidget);
     });
   });
 
-  group('in-progress block and stamp (Task 9)', () {
-    testWidgets('in-progress block shows "Em andamento · desde 09:47", photo '
-        'count and Concluir disabled with "Falta 1 foto"', (tester) async {
-      final store = InMemoryLocalWriteStore();
-      await store.enqueue(
-        id: 'p1',
-        kind: PendingOpKind.evidencePhoto,
-        routeId: 'r1',
-        payload: {
-          'execution_id': 'exec-1',
-          'bytes_b64': base64Encode(onePixelPng),
-          'sha256': 'abc',
-          'captured_at': '2026-10-28T09:50:00.000Z',
-          'idempotency_key': 'p1',
-        },
-      );
-      final route = routeWith(
-        stops: [
-          stopIn(id: 's1', status: 'IN_PROGRESS', requiresEvidence: true),
-        ],
-      );
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(route),
-          localWriteStore: store,
-          stopProgressStore: FakeStopProgressStore(
-            {'s1': 'exec-1'},
-            DateTime(2026, 10, 28, 9, 47),
-          ),
-        ),
-      );
-
-      expect(find.text('Em andamento · desde 09:47'), findsOneWidget);
-      expect(find.text('1 de 2 fotos obrigatórias'), findsOneWidget);
-      expect(find.text('Falta 1 foto'), findsOneWidget);
-      final conclude = tester.widget<ButtonStyleButton>(blockConcludeButton());
-      expect(conclude.onPressed, isNull);
-      expect(find.text(AppStrings.nextStopLabel), findsNothing);
-    });
-
-    testWidgets('stamp animates only after the check-out row is written', (
+  testWidgets('a stamp animates only its own slot on the floor card', (
+    tester,
+  ) async {
+    final route = routeWith(
+      stops: [
+        stopIn(id: 's1', status: 'IN_PROGRESS'),
+        stopIn(id: 's2', orderIndex: 2, status: 'IN_PROGRESS'),
+      ],
+    );
+    await pumpHome(
       tester,
-    ) async {
-      final store = GatedLocalWriteStore();
-      await pumpHome(
-        tester,
-        homeWith(
-          repositoryWith(
-            routeWith(
-              stops: [stopIn(id: 's1', status: 'IN_PROGRESS')],
-            ),
-          ),
-          localWriteStore: store,
-          stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
-        ),
-      );
-      final container = ProviderScope.containerOf(
-        tester.element(find.byType(MapHomeScreen)),
-      );
-      bool? writtenAtStamp;
-      container.listen<String?>(
-        lastStampedStopProvider,
-        (_, next) => writtenAtStamp ??= store.checkOutWritten,
-      );
+      homeWith(
+        repositoryWith(route),
+        stopProgressStore: FakeStopProgressStore({
+          's1': 'exec-1',
+          's2': 'exec-2',
+        }),
+      ),
+    );
+    final ref = tester.element(find.byType(MapHomeScreen)) as WidgetRef;
 
-      await concludeWith(tester, 'v1.floor.1.sig');
-      expect(container.read(lastStampedStopProvider), isNull);
+    await concludeTask(ref, route, route.stops.first);
+    await tester.pumpAndSettle();
 
-      store.gate.complete();
-      await tester.pumpAndSettle();
-
-      expect(container.read(lastStampedStopProvider), 's1');
-      expect(writtenAtStamp, isTrue);
-      final animating = tester
-          .widgetList<StampSlot>(find.byType(StampSlot))
-          .where((slot) => slot.animateStamp);
-      expect(animating.map((slot) => slot.slot.stopId), ['s1']);
-    });
+    expect(shownFloorCard(tester).animateStopId, 's1');
+    final animating = tester
+        .widgetList<StampSlot>(find.byType(StampSlot))
+        .where((slot) => slot.animateStamp);
+    expect(animating.map((slot) => slot.slot.stopId), ['s1']);
   });
 }

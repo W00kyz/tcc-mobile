@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:route_monitor/ui/app_theme.dart';
@@ -46,17 +47,35 @@ List<double> mapSheetSnaps(
   return [closed, kMapSheetSnaps[1], kMapSheetSnaps.last];
 }
 
+/// One line of caption over the start bar (12sp text in an 8dp-padded
+/// chip) plus its 8dp gap to the pill.
+const double kStartBarCaptionHeight = 16 + 2 * 8 + 8;
+
+/// How high the start bar (the bottom-only pill shown instead of a sheet
+/// before the route starts or while paused) reaches from the screen's bottom
+/// edge: the 56dp pill above the system bar, at least 16dp up, and the
+/// caption over it when [withCaption]. What the map camera, "Minha posição"
+/// and the snackbars clear when no sheet is shown.
+///
+///     bottom: startBarHeight(context) + 16
+double startBarHeight(BuildContext context, {bool withCaption = false}) {
+  final inset = MediaQuery.paddingOf(context).bottom;
+  final caption = withCaption ? kStartBarCaptionHeight : 0.0;
+  return math.max<double>(inset, 16) + 56 + caption;
+}
+
 /// The bottom sheet over the map: a drag handle, a scrolling [header] +
 /// [body], and an optional [stickyFooter] that never scrolls away — "Escanear
 /// QR" must stay on screen at every height (spec §5 anti-goal).
 ///
-///     MapSheet(header: NextStopRow(...), body: card, stickyFooter: scanButton)
+///     MapSheet(header: header, body: card, stickyFooter: scanFooter)
 class MapSheet extends StatefulWidget {
   const MapSheet({
     required this.header,
     required this.body,
     this.stickyFooter,
     this.controller,
+    this.onDismissed,
     super.key,
   });
 
@@ -68,12 +87,20 @@ class MapSheet extends StatefulWidget {
   /// one is made internally when null.
   final DraggableScrollableController? controller;
 
+  /// Makes the sheet dismissible: a drag or fling below the closed snap
+  /// takes it to zero height and calls this once, so its owner removes it.
+  /// Null keeps the closed snap as the lowest height.
+  final VoidCallback? onDismissed;
+
   @override
   State<MapSheet> createState() => _MapSheetState();
 }
 
 class _MapSheetState extends State<MapSheet> {
   DraggableScrollableController? _ownController;
+
+  /// [MapSheet.onDismissed] was already called for this sheet.
+  bool _dismissed = false;
 
   DraggableScrollableController get _controller =>
       widget.controller ?? (_ownController ??= DraggableScrollableController());
@@ -94,30 +121,56 @@ class _MapSheetState extends State<MapSheet> {
           bottomInset: bottomInset,
           hasFooter: widget.stickyFooter != null,
         );
-        return DraggableScrollableSheet(
-          controller: _controller,
-          // Spelled out although it is the default: the half height is a
-          // design decision (spec §6.2), not an accident of the framework.
-          // ignore: avoid_redundant_argument_values
-          initialChildSize: kMapSheetInitial,
-          minChildSize: snaps.first,
-          maxChildSize: snaps.last,
-          snap: true,
-          snapSizes: snaps,
-          builder: (context, scrollController) =>
-              _surface(scrollController, constraints.maxHeight, snaps),
+        return NotificationListener<DraggableScrollableNotification>(
+          onNotification: _onExtent,
+          child: _sheet(snaps, constraints.maxHeight),
         );
       },
     );
   }
 
+  /// The snaps, plus zero (the dismissed height) when the sheet can go.
+  Widget _sheet(List<double> snaps, double parentHeight) {
+    final stops = widget.onDismissed == null ? snaps : [0.0, ...snaps];
+    return DraggableScrollableSheet(
+      controller: _controller,
+      // Spelled out although it is the default: the half height is a
+      // design decision (spec §6.2), not an accident of the framework.
+      // ignore: avoid_redundant_argument_values
+      initialChildSize: kMapSheetInitial,
+      minChildSize: stops.first,
+      maxChildSize: snaps.last,
+      snap: true,
+      snapSizes: stops,
+      builder: (context, scrollController) => _surface(
+        scrollController,
+        parentHeight,
+        stops,
+        closedHeight: snaps.first * parentHeight,
+      ),
+    );
+  }
+
+  /// Calls [MapSheet.onDismissed] once the sheet reaches zero height.
+  bool _onExtent(DraggableScrollableNotification note) {
+    final onDismissed = widget.onDismissed;
+    if (onDismissed == null) return false;
+    if (note.extent > 0) {
+      _dismissed = false;
+    } else if (!_dismissed) {
+      _dismissed = true;
+      onDismissed();
+    }
+    return false;
+  }
+
   Widget _surface(
     ScrollController scrollController,
     double parentHeight,
-    List<double> snaps,
-  ) {
+    List<double> stops, {
+    required double closedHeight,
+  }) {
     final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
-    final footer = widget.stickyFooter;
     return Material(
       color: p.paper,
       elevation: 8,
@@ -126,18 +179,48 @@ class _MapSheetState extends State<MapSheet> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          _SheetHandle(
-            controller: _controller,
-            palette: p,
-            parentHeight: parentHeight,
-            snaps: snaps,
-          ),
-          Expanded(child: _scrollArea(scrollController)),
-          if (footer != null) _footer(footer),
-        ],
+      child: _atLeast(
+        closedHeight,
+        _content(scrollController, parentHeight, stops, p),
       ),
+    );
+  }
+
+  /// [child] laid out at [minHeight] at least, so a sheet sliding below the
+  /// closed height is clipped away rather than squeezed (and never
+  /// overflows).
+  Widget _atLeast(double minHeight, Widget child) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        final height = math.max(box.maxHeight, minHeight);
+        return OverflowBox(
+          alignment: Alignment.topCenter,
+          minHeight: height,
+          maxHeight: height,
+          child: child,
+        );
+      },
+    );
+  }
+
+  Widget _content(
+    ScrollController scrollController,
+    double parentHeight,
+    List<double> stops,
+    FieldPalette p,
+  ) {
+    final footer = widget.stickyFooter;
+    return Column(
+      children: [
+        _SheetHandle(
+          controller: _controller,
+          palette: p,
+          parentHeight: parentHeight,
+          snaps: stops,
+        ),
+        Expanded(child: _scrollArea(scrollController)),
+        if (footer != null) _footer(footer),
+      ],
     );
   }
 

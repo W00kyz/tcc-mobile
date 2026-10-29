@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/l10n/strings.dart';
-import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/campus_map.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/building_pin.dart';
@@ -10,21 +10,17 @@ import 'package:route_monitor/ui/building_pin.dart';
 // What [CampusMap] draws over the base map: legs, building pins, the
 // worker's dot and the "trajeto aproximado" caption.
 
-/// Wide enough for a 16-character label centred over the circle; tall enough
-/// for that label, a 4dp gap and the 48dp padded circle.
+/// Wide enough for a 16-character label centred over the pin; tall enough
+/// for that label, a 4dp gap and the 50dp pin (40dp head, 10dp stem).
 const double _pinMarkerWidth = 200;
-const double _pinMarkerHeight = 80;
-
-/// The circle's centre inside the marker box: the point it stands on (the
-/// bottom-centre circle, 4dp padding plus half its 40dp).
-const double _pinCircleCenterY = _pinMarkerHeight - 24;
+const double _pinMarkerHeight = 96;
 
 /// A leg's stroke (redesign §6.3): walked in `rule`, the next one thicker
 /// in moss, the rest in ink. A straight approximation stays dashed.
 Polyline legPolyline(RouteMapLeg leg, FieldPalette p) {
   final (color, width) = switch (leg.kind) {
     LegKind.walked => (p.rule, 4.0),
-    LegKind.next => (p.moss, 6.0),
+    LegKind.next => (p.moss, leg.walk ? 4.0 : 6.0),
     LegKind.rest => (p.ink, 3.0),
   };
   return Polyline(
@@ -37,41 +33,44 @@ Polyline legPolyline(RouteMapLeg leg, FieldPalette p) {
   );
 }
 
-/// A building's pin, standing on the mean of its stops; the label sits above
-/// the circle, so the circle itself marks the spot on the route.
+/// A building's pin, its stem tip on the mean of the building's stops; the
+/// label sits above the head, so the tip itself marks the spot on the route.
 Marker buildingMarker(
-  BuildingGroup group, {
+  DayBuilding building, {
   required bool selected,
   required bool dimmed,
   required VoidCallback? onTap,
+  bool isNext = false,
   bool showLabel = true,
 }) {
   return Marker(
-    key: ValueKey('marker-${group.buildingId}'),
-    point: group.position,
+    key: ValueKey('marker-${building.buildingId}'),
+    point: building.position,
     width: _pinMarkerWidth,
     height: _pinMarkerHeight,
+    // The box's bottom-centre — the stem tip — stands on the point.
     alignment: Marker.computePixelAlignment(
       width: _pinMarkerWidth,
       height: _pinMarkerHeight,
       left: _pinMarkerWidth / 2,
-      top: _pinCircleCenterY,
+      top: _pinMarkerHeight,
     ),
     child: Align(
       alignment: Alignment.bottomCenter,
       child: GestureDetector(
-        key: ValueKey('pin-${group.buildingId}'),
+        key: ValueKey('pin-${building.buildingId}'),
         behavior: HitTestBehavior.opaque,
         onTap: onTap,
         child: Padding(
-          // Pads the 40dp circle up to a 48dp touch target.
-          padding: const EdgeInsets.all(4),
+          // Pads the 40dp head up to a 48dp touch target; no bottom padding,
+          // or the tip would float above the building.
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: BuildingPin(
-            group: group,
+            building: building,
             selected: selected,
             dimmed: dimmed,
+            isNext: isNext,
             showLabel: showLabel,
-            inProgress: group.slots.any((s) => s.state == SlotState.inProgress),
           ),
         ),
       ),
@@ -91,16 +90,27 @@ const double _lineCircleDiameter = 12;
 ///     CircleLayer(circles: routeLineCircles(data, palette));
 List<CircleMarker> routeLineCircles(RouteMapData data, FieldPalette p) {
   final approach = data.approach;
+  final ends = _legsWithEndCircle(data);
   return [
-    if (approach != null && approach.points.isNotEmpty)
+    // With a walk in, the line starts under the worker's own dot.
+    if (approach != null && approach.points.isNotEmpty && data.walkIn == null)
       _lineCircle(approach.points.first, p.white, p.ink, 2),
     // The next destination last, so it sits on top of any it overlaps.
-    for (final leg in data.drawnLegs.where((l) => l.kind != LegKind.next))
+    for (final leg in ends.where((l) => l.kind != LegKind.next))
       ?_destinationCircle(leg, p),
-    for (final leg in data.drawnLegs.where((l) => l.kind == LegKind.next))
+    for (final leg in ends.where((l) => l.kind == LegKind.next))
       ?_destinationCircle(leg, p),
   ];
 }
+
+/// Every drawn leg but the walk in (it ends where the street begins) and,
+/// when a walk out reaches the stop, the street path whose end it bridges.
+Iterable<RouteMapLeg> _legsWithEndCircle(RouteMapData data) =>
+    data.drawnLegs.where(
+      (leg) =>
+          !identical(leg, data.walkIn) &&
+          !(identical(leg, data.approach) && data.walkOut != null),
+    );
 
 CircleMarker? _destinationCircle(RouteMapLeg leg, FieldPalette p) {
   if (leg.points.isEmpty) return null;

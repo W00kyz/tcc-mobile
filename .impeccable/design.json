@@ -220,9 +220,9 @@
     ],
     "motion": [
       {
-        "name": "stamp-press",
-        "value": "220ms, scale 1.15 to 1, light haptic",
-        "purpose": "Slot receives the moss stamp; instant under reduced motion."
+        "name": "stamp-drop",
+        "value": "260ms easeOutBack drop from scale 1.6, then a 320ms ink ring (1.0 to 1.35, 35% to 0); medium haptic at impact",
+        "purpose": "A stamp lands: moss for a concluded task, brick for an impossible one; instant, no haptic, under reduced motion."
       },
       {
         "name": "sheet-snap",
@@ -302,10 +302,10 @@
   ],
   "narrative": {
     "northStar": "The Bakery Loyalty Card",
-    "overview": "Each batch of service points is a stamp card: one circle per point, stamped moss with the hour on conclusion, a full card when the batch closes. The ground is stone-grey paper, the ink is graphite, and a single moss stamp ink marks what is done. Material 3 supplies navigation and controls; the world lends only type, palette, density and the stamp gesture.",
+    "overview": "Each building of the day's route is a stamp card: one circle per task, one row per floor. A task is stamped moss when the worker concludes it and the stamp falls onto the card; a task that cannot be done is stamped brick with a cross. The hour is added when the floor is checked out, and a full card is celebrated when a batch closes. The ground is stone-grey paper, the ink is graphite, a single moss stamp ink marks what is done and brick marks what is impossible. Material 3 supplies navigation and controls; the world lends only type, palette, density and the stamp gesture.",
     "keyCharacteristics": [
-      "Monochrome stone and graphite, one moss accent, brick only for alerts.",
-      "The circle is the only form for pins, slots, progress dots and avatar.",
+      "Monochrome stone and graphite, one moss accent, brick only for what is impossible or wrong.",
+      "The circle is the form for slots, progress dots and avatar; the building pin is a circle on a stem (a teardrop).",
       "State is read by mark (stamp, dashed ring, empty, struck), never by colour alone.",
       "Stamps sit a few degrees off-axis (-9 to +9 deg) with an irregular ink edge drawn in a CustomPainter.",
       "Light theme only."
@@ -313,12 +313,12 @@
     "rules": [
       {
         "name": "The Scarce Moss Rule",
-        "body": "Moss means a point or building is done. It is not an accent for buttons or links.",
+        "body": "Moss means a task is done. It is not an accent for buttons or links, and a finished building is grey, not moss.",
         "section": "colors"
       },
       {
         "name": "The Brick Is Alarm Rule",
-        "body": "Brick appears only when something is wrong or blocked.",
+        "body": "Brick appears only when something is wrong, blocked or impossible: the error colour, the impossible stamp and the action that reports it. Done is moss and impossible is brick; there is no blue.",
         "section": "colors"
       },
       {
@@ -328,7 +328,7 @@
       },
       {
         "name": "The One Display Rule",
-        "body": "Bowlby One SC is for the card title and full-card headline. Everything else is Hanken Grotesk.",
+        "body": "Bowlby One SC is for the floor card title and full-card headline. Everything else is Hanken Grotesk.",
         "section": "typography"
       },
       {
@@ -338,7 +338,7 @@
       },
       {
         "name": "The Mark-Not-Colour Rule",
-        "body": "Slot and pin states are distinguished by mark: stamped is done; dashed ink ring is next; dashed ring with pulsing dot is in progress; empty rule ring is pending; struck circle is released; cloud icon marks pending sync.",
+        "body": "Slot and pin states are distinguished by mark: moss stamp with check and hour is done; the same with no hour and a cloud badge is stamped, waiting for the exit scan; brick stamp with a cross is impossible; dashed ink ring is next; dashed ring with pulsing dot is in progress; empty rule ring is pending; struck circle is released; a building pin carries its number, or a check on grey when finished.",
         "section": "shapes"
       }
     ],
@@ -346,13 +346,13 @@
       "Do take every colour from FieldPalette or ColorScheme; add a named constant in app_theme.dart for anything new.",
       "Do keep touch targets at 48dp or more, and the primary action a 56dp pill.",
       "Do express state by mark and semantic label, with colour as reinforcement only.",
-      "Do keep the \"Escanear QR\" action reachable at all three sheet heights.",
+      "Do keep the scan footer reachable at all three sheet heights, disabled with the reason in words rather than hidden.",
       "Do honour reduced motion by swapping instantly."
     ],
     "donts": [
       "Don't use Colors.* or hex literals in screens.",
-      "Don't use moss as a decorative accent or brick for anything but alerts.",
-      "Don't set Bowlby One SC outside the card title and full-card headline.",
+      "Don't use moss as a decorative accent, brick for anything but what is wrong or impossible, or blue for anything.",
+      "Don't set Bowlby One SC outside the floor card title and full-card headline.",
       "Don't convey state with colour alone.",
       "Don't download fonts at runtime."
     ]

@@ -18,6 +18,7 @@ import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/monitoring/silence_watchdog.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 
+import '../routing/map_home_fakes.dart' show FakeStopProgressStore;
 import '../support/fake_connectivity.dart';
 import '../support/in_memory_database.dart';
 
@@ -103,6 +104,33 @@ void main() {
     },
   );
 
+  test('impededStopIdsProvider emits the stop of a pending impediment row, '
+      'live', () async {
+    final store = DriftLocalWriteStore(db);
+    final container = ProviderContainer(
+      overrides: [localWriteStoreProvider.overrideWithValue(store)],
+    );
+    addTearDown(container.dispose);
+    final seen = <Set<String>>[];
+    container.listen(
+      impededStopIdsProvider('route-A'),
+      (_, next) {
+        if (next.hasValue) seen.add(next.requireValue);
+      },
+    );
+    await pumpEventQueue();
+
+    await store.enqueue(
+      id: 'imp-1',
+      kind: PendingOpKind.impediment,
+      payload: const {'scope': 'STOP', 'route_stop_id': 'stop-1'},
+      routeId: 'route-A',
+    );
+    await pumpEventQueue();
+
+    expect(seen.last, {'stop-1'});
+  });
+
   test('a token refresh does not rebuild the sync worker', () {
     final container = ProviderContainer(
       overrides: [
@@ -173,6 +201,37 @@ void main() {
       expect(await allSynced(), isTrue);
     },
   );
+
+  group('stopSyncChipProvider', () {
+    Future<StopSyncChip> chipWithPhoto(PendingOpState state) async {
+      final store = DriftLocalWriteStore(db);
+      final container = ProviderContainer(
+        overrides: [
+          localWriteStoreProvider.overrideWithValue(store),
+          stopProgressStoreProvider.overrideWithValue(
+            FakeStopProgressStore({'s1': 'e1'}),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await store.enqueue(
+        id: 'p1',
+        kind: PendingOpKind.evidencePhoto,
+        routeId: 'r1',
+        payload: const {'execution_id': 'e1', 'idempotency_key': 'p1'},
+        initialState: state,
+      );
+      return container.read(stopSyncChipProvider(('r1', 's1')).future);
+    }
+
+    test('a held photo waits on the stamp, not the network: no chip', () async {
+      expect(await chipWithPhoto(PendingOpState.held), StopSyncChip.none);
+    });
+
+    test('a pending photo still shows the pending chip', () async {
+      expect(await chipWithPhoto(PendingOpState.pending), StopSyncChip.pending);
+    });
+  });
 }
 
 /// A session whose access token is a readable JWT for the same user, issued

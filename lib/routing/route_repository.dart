@@ -19,6 +19,7 @@ class RouteStopSummary {
     required this.floorLabel,
     required this.latitude,
     required this.longitude,
+    this.floorId,
     this.releaseReason,
     this.doneAt,
     this.distanceFromPrevM,
@@ -40,6 +41,7 @@ class RouteStopSummary {
         buildingId: json['building_id'] as String,
         buildingName: json['building_name'] as String,
         floorLabel: json['floor_label'] as String,
+        floorId: json['floor_id'] as String?,
         doneAt: _parseOptionalTimestamp(json['done_at']),
         latitude: (json['latitude'] as num).toDouble(),
         longitude: (json['longitude'] as num).toDouble(),
@@ -78,6 +80,10 @@ class RouteStopSummary {
   final String buildingId;
   final String buildingName;
   final String floorLabel;
+
+  /// The floor's id, to group a building's stops per floor; null for a
+  /// snapshot cached before the backend sent it.
+  final String? floorId;
 
   /// When the server recorded the stop done; null until then.
   final DateTime? doneAt;

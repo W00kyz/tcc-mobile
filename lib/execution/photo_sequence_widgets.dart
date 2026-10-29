@@ -27,7 +27,8 @@ ShotStatus shotStatusFor(PendingOpState? state) => switch (state) {
   PendingOpState.blocked => ShotStatus.blocked,
   PendingOpState.pending ||
   PendingOpState.failed ||
-  PendingOpState.sending => ShotStatus.notSent,
+  PendingOpState.sending ||
+  PendingOpState.held => ShotStatus.notSent,
 };
 
 /// Only a row no sync worker holds and the server never took can go:
@@ -35,6 +36,7 @@ ShotStatus shotStatusFor(PendingOpState? state) => switch (state) {
 bool shotDeletable(PendingOpState? state) =>
     state == PendingOpState.pending ||
     state == PendingOpState.failed ||
+    state == PendingOpState.held ||
     state == PendingOpState.blocked;
 
 FieldPalette _palette(BuildContext context) =>

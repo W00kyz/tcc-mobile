@@ -8,6 +8,9 @@ import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/floor_actions.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
+import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -85,6 +88,18 @@ Future<_RecordingAllocation> _open(WidgetTester tester) async {
   return allocation;
 }
 
+/// "Concluir tarefa" on [stopId] (the task dialog's own call), then the
+/// floor's exit scan.
+Future<void> _stampAndLeave(WidgetTester tester, String stopId) async {
+  final element = tester.element(find.byType(MapHomeScreen));
+  final ref = element as WidgetRef;
+  final route = ref.read(myDayProvider).requireValue.route!;
+  final stop = route.stops.firstWhere((s) => s.id == stopId);
+  await concludeTask(ref, route, stop);
+  await tester.pumpAndSettle();
+  await scanWith(tester, qrOf(stop.floorLabel));
+}
+
 void main() {
   testWidgets('shows the title, the batch time from the first check-in to '
       'the last stamp, and the streak', (tester) async {
@@ -144,9 +159,10 @@ void main() {
       stopIn(id: 's2', batchNumber: 2, status: 'IN_PROGRESS', orderIndex: 2),
     ];
 
-    /// Concludes s2, the batch's last stop. The sync worker never delivers
-    /// anything, so the check-out just written is still unsent when the
-    /// card is counted (ruling R14). [prepare] seeds the outbox first.
+    /// Stamps s2, the batch's last stop, then scans its floor's exit QR. The
+    /// sync worker never delivers anything, so the check-out just written is
+    /// still unsent when the card is counted (ruling R14). [prepare] seeds
+    /// the outbox first.
     Future<RecordingDayLogStore> concludeLast(
       WidgetTester tester, {
       Future<void> Function(InMemoryLocalWriteStore store)? prepare,
@@ -175,7 +191,7 @@ void main() {
           dayLogStore: dayLog,
         ),
       );
-      await concludeWith(tester, 'v1.floor.1.sig');
+      await _stampAndLeave(tester, 's2');
       return dayLog;
     }
 
@@ -190,6 +206,31 @@ void main() {
         [endsWith(':true')],
       );
       expect(dayLog.calls, contains(startsWith('stopDone:')));
+    });
+
+    testWidgets('an app restarted after the last stamp still records the '
+        'card on the exit scan alone', (tester) async {
+      final dayLog = RecordingDayLogStore();
+      // Stamped before the restart: no stamp lands in this run.
+      final progress = FakeStopProgressStore({'s2': 'exec-2'});
+      await progress.markStamped('s2');
+      await pumpHomeWithSheet(
+        tester,
+        homeWith(
+          repositoryWith(routeWith(stops: stops(), currentBatch: 2)),
+          stopProgressStore: progress,
+          syncWorker: RecordingSyncWorker(),
+          dayLogStore: dayLog,
+        ),
+      );
+
+      await scanWith(tester, qrOf('Térreo'));
+
+      expect(find.text(AppStrings.fullCardTitle), findsOneWidget);
+      expect(
+        dayLog.calls.where((c) => c.startsWith('cardCompleted')),
+        [endsWith(':true')],
+      );
     });
 
     testWidgets("an earlier stop's unsent row makes the card not clean", (
@@ -211,6 +252,48 @@ void main() {
       expect(
         dayLog.calls.where((c) => c.startsWith('cardCompleted')),
         [endsWith(':false')],
+      );
+    });
+
+    testWidgets('a two-task floor exit still records a clean card, '
+        'whatever order the tasks were stamped in', (tester) async {
+      final dayLog = RecordingDayLogStore();
+      final route = routeWith(
+        currentBatch: 2,
+        stops: [
+          stopIn(id: 's1', batchNumber: 2, status: 'IN_PROGRESS'),
+          stopIn(
+            id: 's2',
+            batchNumber: 2,
+            status: 'IN_PROGRESS',
+            orderIndex: 2,
+          ),
+        ],
+      );
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(route),
+          stopProgressStore: FakeStopProgressStore({
+            's1': 'exec-1',
+            's2': 'exec-2',
+          }),
+          syncWorker: RecordingSyncWorker(),
+          dayLogStore: dayLog,
+        ),
+      );
+      final ref = tester.element(find.byType(MapHomeScreen)) as WidgetRef;
+
+      // s1 stamped last, yet checked out first by the exit.
+      await concludeTask(ref, route, route.stops[1]);
+      await concludeTask(ref, route, route.stops[0]);
+      await tester.pumpAndSettle();
+      await scanWith(tester, qrOf('Térreo'));
+
+      expect(find.text(AppStrings.fullCardTitle), findsOneWidget);
+      expect(
+        dayLog.calls.where((c) => c.startsWith('cardCompleted')),
+        [endsWith(':true')],
       );
     });
 
@@ -257,7 +340,7 @@ void main() {
           dayLogStore: dayLog,
         ),
       );
-      await concludeWith(tester, 'v1.floor.1.sig');
+      await _stampAndLeave(tester, 's2');
 
       expect(find.text(AppStrings.fullCardTitle), findsNothing);
       expect(dayLog.calls.where((c) => c.startsWith('cardCompleted')), isEmpty);

@@ -111,7 +111,7 @@ void main() {
       // the 6→7 migration), not "whatever `to` was for this run" — opening
       // this schema-2 seed runs every later onUpgrade block in sequence,
       // landing on the current version.
-      expect(db.schemaVersion, 8);
+      expect(db.schemaVersion, 9);
     },
   );
 }

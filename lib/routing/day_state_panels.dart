@@ -9,12 +9,13 @@ import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_providers.dart';
+import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
-// What the home sheet shows outside a batch in progress (redesign §6.10):
-// no service, no route yet, paused, done, load error, and a finished batch
-// waiting for the network.
+// What the home shows outside a route being worked (redesign §6.10): no
+// service, the start bar (no route yet, paused), done, load error, the
+// loading skeleton, and a finished batch waiting for the network.
 
 /// "Hoje não tem serviço para você": no card, no start.
 class NoServicePanel extends StatelessWidget {
@@ -25,37 +26,109 @@ class NoServicePanel extends StatelessWidget {
       const _Panel(title: AppStrings.dayNoService);
 }
 
-/// No route yet: "Iniciar rota" asks for the first batch.
-class StartDayPanel extends StatelessWidget {
-  const StartDayPanel({super.key});
+/// What the start bar says: its button and, on a paused route, why.
+typedef StartBarContent = ({String label, String? caption});
 
-  @override
-  Widget build(BuildContext context) => const _Panel(
-    action: StartDayButton(label: AppStrings.routeStartButton),
+/// The start bar a day shows instead of a sheet — no route yet on a service
+/// day ("Iniciar rota"), or a paused route ("Retomar" under its reason) —
+/// else null (a sheet shows).
+///
+///     final bar = startBarOf(day); // (label: 'Retomar', caption: 'Motivo: …')
+StartBarContent? startBarOf(MyDay? day) {
+  if (day == null) return null;
+  final route = day.route;
+  if (route == null) {
+    return day.serviceDay
+        ? (label: AppStrings.routeStartButton, caption: null)
+        : null;
+  }
+  if (route.status != 'PAUSED') return null;
+  return (
+    label: AppStrings.dayResumeButton,
+    caption: pausedCaption(route.latestReleaseReason),
   );
 }
 
-/// "Rota pausada" + why + "Retomar", which resumes the route with a new
-/// batch.
-class PausedPanel extends StatelessWidget {
-  const PausedPanel({this.releaseReason, super.key});
+/// Before the route starts and while it is paused: no sheet over the map,
+/// only the start button anchored at the bottom — a 56dp pill with a 16dp
+/// gutter, above the system bar. "Iniciar rota" asks for the first batch,
+/// "Retomar" resumes a paused route with a new one; [caption] (why it was
+/// paused) reads in a muted chip just above the pill.
+///
+///     StartDayBar(label: AppStrings.dayResumeButton, caption: 'Motivo: …')
+class StartDayBar extends StatelessWidget {
+  const StartDayBar({required this.label, this.caption, super.key});
 
-  /// The `release_reason` code behind the pause, when known.
-  final String? releaseReason;
+  final String label;
+  final String? caption;
 
   @override
   Widget build(BuildContext context) {
-    final reason = releaseReason;
-    return _Panel(
-      title: AppStrings.routePausedTitle,
-      lines: [
-        if (reason != null)
-          AppStrings.routePausedReason(AppStrings.releaseReasonLabel(reason)),
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.only(bottom: 16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _captionAndButton(),
+        ),
+      ),
+    );
+  }
+
+  Widget _captionAndButton() {
+    final text = caption;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (text != null) _StartBarCaption(text: text),
+        StartDayButton(label: label),
       ],
-      action: const StartDayButton(label: AppStrings.dayResumeButton),
     );
   }
 }
+
+/// The start bar's caption: over the map, so on a paper chip with a rule
+/// hairline rather than bare text on the tiles.
+class _StartBarCaption extends StatelessWidget {
+  const _StartBarCaption({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    final chip = BoxDecoration(
+      color: p.paper,
+      border: Border.all(color: p.rule),
+      borderRadius: BorderRadius.circular(16),
+    );
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(8),
+      decoration: chip,
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(fontSize: 12, height: 16 / 12, color: p.muted),
+      ),
+    );
+  }
+}
+
+/// Why a paused route stopped, as the start bar's caption: `Motivo: <…>`,
+/// or null when the server sent no reason.
+///
+///     pausedCaption(route.latestReleaseReason) // 'Motivo: Saiu do campus'
+String? pausedCaption(String? releaseReason) => releaseReason == null
+    ? null
+    : AppStrings.routePausedReason(
+        AppStrings.releaseReasonLabel(releaseReason),
+      );
 
 /// "Dia concluído" + the day's count + "Verificar de novo". Not final before
 /// the workday ends: points released later go back to the pool, and
@@ -223,3 +296,22 @@ String? _startOutcomeMessage(AllocationOutcome outcome) => switch (outcome) {
   AllocationOutcome.locationUnavailable => AppStrings.routeLocationUnavailable,
   AllocationOutcome.failed => AppStrings.routeStartFailed,
 };
+
+/// While the day loads: the card's shape, empty (spec §6.10).
+class CardSkeleton extends StatelessWidget {
+  const CardSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final p = Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
+    return Container(
+      height: 160,
+      margin: const EdgeInsets.only(top: 8),
+      decoration: BoxDecoration(
+        color: p.card,
+        border: Border.all(color: p.rule),
+        borderRadius: BorderRadius.circular(16),
+      ),
+    );
+  }
+}

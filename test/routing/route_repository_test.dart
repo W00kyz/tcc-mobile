@@ -180,6 +180,20 @@ void main() {
       expect(stop.serviceTypeId, 'st1');
       expect(stop.serviceTypeName, 'Limpeza');
     });
+    test('floor_id is read from the stop, null when absent', () async {
+      final route = _routePayload();
+      final stops = (route['stops'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
+      stops[2]['floor_id'] = 'f-1';
+      final repository = DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: route)),
+      );
+
+      final parsed = (await repository.fetchMyDay()).route!.stops;
+
+      expect(parsed[2].floorId, 'f-1');
+      expect(parsed[0].floorId, isNull);
+    });
     test(
       'requires_evidence is read from the stop, false when absent',
       () async {

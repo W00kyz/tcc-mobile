@@ -5,6 +5,7 @@ import 'package:route_monitor/appeals/appeal_api.dart';
 import 'package:route_monitor/appeals/appeal_form_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/monitoring/notifications_screen.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
@@ -27,7 +28,7 @@ RouteSummary _pendingRoute() => routeWith(stops: [stopIn(id: 's1')]);
 void main() {
   group('the bell', () {
     testWidgets('shows the unread count on its badge', (tester) async {
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(_pendingRoute()),
@@ -44,13 +45,16 @@ void main() {
     testWidgets('shows no badge when there are no unread notifications', (
       tester,
     ) async {
-      await pumpHome(tester, homeWith(repositoryWith(_pendingRoute())));
+      await pumpHomeWithSheet(
+        tester,
+        homeWith(repositoryWith(_pendingRoute())),
+      );
 
       expect(find.byType(Badge), findsNothing);
     });
 
     testWidgets('a tap opens the notifications screen', (tester) async {
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(_pendingRoute()),
@@ -110,7 +114,7 @@ void main() {
       "stop's appeal form",
       (tester) async {
         final db = await dbWithNotice();
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repositoryWith(route),
@@ -137,7 +141,7 @@ void main() {
       tester,
     ) async {
       final db = await dbWithNotice();
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(route),
@@ -169,7 +173,7 @@ void main() {
     testWidgets('a release the worker cannot appeal shows no snackbar', (
       tester,
     ) async {
-      await pumpHome(tester, homeWith(repositoryWith(route)));
+      await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
       announce(tester, appealable: false);
       await tester.pumpAndSettle();
@@ -182,7 +186,7 @@ void main() {
       'released points meanwhile',
       (tester) async {
         final appealApi = RecordingAppealApi();
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(repositoryWith(route), appealApi: appealApi),
         );
@@ -195,10 +199,38 @@ void main() {
       },
     );
 
-    testWidgets('a released stop without a reason reads just "Liberado"', (
+    testWidgets("a released stop's held photos are discarded on the day "
+        'reload; an open one keeps its own', (tester) async {
+      final store = InMemoryLocalWriteStore();
+      for (final (id, exec) in [('p1', 'exec-1'), ('p2', 'exec-2')]) {
+        await store.enqueue(
+          id: id,
+          kind: PendingOpKind.evidencePhoto,
+          payload: {'execution_id': exec},
+          routeId: 'r1',
+          initialState: PendingOpState.held,
+        );
+      }
+      await pumpHomeWithSheet(
+        tester,
+        homeWith(
+          repositoryWith(route),
+          localWriteStore: store,
+          stopProgressStore: FakeStopProgressStore({
+            's1': 'exec-1',
+            's2': 'exec-2',
+          }),
+        ),
+      );
+
+      expect(await store.localPhotoCountFor('exec-1'), 0);
+      expect(await store.localPhotoCountFor('exec-2'), 1);
+    });
+
+    testWidgets('a released stop is no longer drawn on the floor card', (
       tester,
     ) async {
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(
@@ -211,17 +243,18 @@ void main() {
           ),
         ),
       );
-      await openStopSheet(tester, 's1');
 
-      expect(find.text('Liberado'), findsOneWidget);
-      expect(find.textContaining('Liberado · '), findsNothing);
+      // It went back to the pool: not the worker's any more.
+      expect(slotOf('s1'), findsNothing);
+      expect(find.bySemanticsLabel(RegExp('Liberado')), findsNothing);
+      expect(slotOf('s2'), findsOneWidget);
     });
 
     testWidgets(
       'the account avatar counts the points the worker can contest and is a '
       'direct link to Perfil, with no menu',
       (tester) async {
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repositoryWith(route),

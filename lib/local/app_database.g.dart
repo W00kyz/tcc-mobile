@@ -677,6 +677,17 @@ class $StopProgressTable extends StopProgress
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _observationMeta = const VerificationMeta(
+    'observation',
+  );
+  @override
+  late final GeneratedColumn<String> observation = GeneratedColumn<String>(
+    'observation',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _updatedAtMeta = const VerificationMeta(
     'updatedAt',
   );
@@ -693,6 +704,7 @@ class $StopProgressTable extends StopProgress
     routeStopId,
     executionId,
     localStatus,
+    observation,
     updatedAt,
   ];
   @override
@@ -740,6 +752,15 @@ class $StopProgressTable extends StopProgress
     } else if (isInserting) {
       context.missing(_localStatusMeta);
     }
+    if (data.containsKey('observation')) {
+      context.handle(
+        _observationMeta,
+        observation.isAcceptableOrUnknown(
+          data['observation']!,
+          _observationMeta,
+        ),
+      );
+    }
     if (data.containsKey('updated_at')) {
       context.handle(
         _updatedAtMeta,
@@ -769,6 +790,10 @@ class $StopProgressTable extends StopProgress
         DriftSqlType.string,
         data['${effectivePrefix}local_status'],
       )!,
+      observation: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}observation'],
+      ),
       updatedAt: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}updated_at'],
@@ -787,8 +812,11 @@ class StopProgressData extends DataClass
   final String routeStopId;
   final String executionId;
 
-  /// `'IN_PROGRESS'` | `'DONE'`.
+  /// `'IN_PROGRESS'` | `'STAMPED'` | `'DONE'`.
   final String localStatus;
+
+  /// The note the worker left when stamping the task; null when none.
+  final String? observation;
 
   /// Epoch milliseconds of the last local transition for this stop.
   final int updatedAt;
@@ -796,6 +824,7 @@ class StopProgressData extends DataClass
     required this.routeStopId,
     required this.executionId,
     required this.localStatus,
+    this.observation,
     required this.updatedAt,
   });
   @override
@@ -804,6 +833,9 @@ class StopProgressData extends DataClass
     map['route_stop_id'] = Variable<String>(routeStopId);
     map['execution_id'] = Variable<String>(executionId);
     map['local_status'] = Variable<String>(localStatus);
+    if (!nullToAbsent || observation != null) {
+      map['observation'] = Variable<String>(observation);
+    }
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
   }
@@ -813,6 +845,9 @@ class StopProgressData extends DataClass
       routeStopId: Value(routeStopId),
       executionId: Value(executionId),
       localStatus: Value(localStatus),
+      observation: observation == null && nullToAbsent
+          ? const Value.absent()
+          : Value(observation),
       updatedAt: Value(updatedAt),
     );
   }
@@ -826,6 +861,7 @@ class StopProgressData extends DataClass
       routeStopId: serializer.fromJson<String>(json['routeStopId']),
       executionId: serializer.fromJson<String>(json['executionId']),
       localStatus: serializer.fromJson<String>(json['localStatus']),
+      observation: serializer.fromJson<String?>(json['observation']),
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
     );
   }
@@ -836,6 +872,7 @@ class StopProgressData extends DataClass
       'routeStopId': serializer.toJson<String>(routeStopId),
       'executionId': serializer.toJson<String>(executionId),
       'localStatus': serializer.toJson<String>(localStatus),
+      'observation': serializer.toJson<String?>(observation),
       'updatedAt': serializer.toJson<int>(updatedAt),
     };
   }
@@ -844,11 +881,13 @@ class StopProgressData extends DataClass
     String? routeStopId,
     String? executionId,
     String? localStatus,
+    Value<String?> observation = const Value.absent(),
     int? updatedAt,
   }) => StopProgressData(
     routeStopId: routeStopId ?? this.routeStopId,
     executionId: executionId ?? this.executionId,
     localStatus: localStatus ?? this.localStatus,
+    observation: observation.present ? observation.value : this.observation,
     updatedAt: updatedAt ?? this.updatedAt,
   );
   StopProgressData copyWithCompanion(StopProgressCompanion data) {
@@ -862,6 +901,9 @@ class StopProgressData extends DataClass
       localStatus: data.localStatus.present
           ? data.localStatus.value
           : this.localStatus,
+      observation: data.observation.present
+          ? data.observation.value
+          : this.observation,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
   }
@@ -872,14 +914,20 @@ class StopProgressData extends DataClass
           ..write('routeStopId: $routeStopId, ')
           ..write('executionId: $executionId, ')
           ..write('localStatus: $localStatus, ')
+          ..write('observation: $observation, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode =>
-      Object.hash(routeStopId, executionId, localStatus, updatedAt);
+  int get hashCode => Object.hash(
+    routeStopId,
+    executionId,
+    localStatus,
+    observation,
+    updatedAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -887,6 +935,7 @@ class StopProgressData extends DataClass
           other.routeStopId == this.routeStopId &&
           other.executionId == this.executionId &&
           other.localStatus == this.localStatus &&
+          other.observation == this.observation &&
           other.updatedAt == this.updatedAt);
 }
 
@@ -894,12 +943,14 @@ class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
   final Value<String> routeStopId;
   final Value<String> executionId;
   final Value<String> localStatus;
+  final Value<String?> observation;
   final Value<int> updatedAt;
   final Value<int> rowid;
   const StopProgressCompanion({
     this.routeStopId = const Value.absent(),
     this.executionId = const Value.absent(),
     this.localStatus = const Value.absent(),
+    this.observation = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
   });
@@ -907,6 +958,7 @@ class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
     required String routeStopId,
     required String executionId,
     required String localStatus,
+    this.observation = const Value.absent(),
     required int updatedAt,
     this.rowid = const Value.absent(),
   }) : routeStopId = Value(routeStopId),
@@ -917,6 +969,7 @@ class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
     Expression<String>? routeStopId,
     Expression<String>? executionId,
     Expression<String>? localStatus,
+    Expression<String>? observation,
     Expression<int>? updatedAt,
     Expression<int>? rowid,
   }) {
@@ -924,6 +977,7 @@ class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
       if (routeStopId != null) 'route_stop_id': routeStopId,
       if (executionId != null) 'execution_id': executionId,
       if (localStatus != null) 'local_status': localStatus,
+      if (observation != null) 'observation': observation,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
     });
@@ -933,6 +987,7 @@ class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
     Value<String>? routeStopId,
     Value<String>? executionId,
     Value<String>? localStatus,
+    Value<String?>? observation,
     Value<int>? updatedAt,
     Value<int>? rowid,
   }) {
@@ -940,6 +995,7 @@ class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
       routeStopId: routeStopId ?? this.routeStopId,
       executionId: executionId ?? this.executionId,
       localStatus: localStatus ?? this.localStatus,
+      observation: observation ?? this.observation,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
     );
@@ -957,6 +1013,9 @@ class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
     if (localStatus.present) {
       map['local_status'] = Variable<String>(localStatus.value);
     }
+    if (observation.present) {
+      map['observation'] = Variable<String>(observation.value);
+    }
     if (updatedAt.present) {
       map['updated_at'] = Variable<int>(updatedAt.value);
     }
@@ -972,6 +1031,7 @@ class StopProgressCompanion extends UpdateCompanion<StopProgressData> {
           ..write('routeStopId: $routeStopId, ')
           ..write('executionId: $executionId, ')
           ..write('localStatus: $localStatus, ')
+          ..write('observation: $observation, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
           ..write(')'))
@@ -2363,6 +2423,7 @@ typedef $$StopProgressTableCreateCompanionBuilder =
       required String routeStopId,
       required String executionId,
       required String localStatus,
+      Value<String?> observation,
       required int updatedAt,
       Value<int> rowid,
     });
@@ -2371,6 +2432,7 @@ typedef $$StopProgressTableUpdateCompanionBuilder =
       Value<String> routeStopId,
       Value<String> executionId,
       Value<String> localStatus,
+      Value<String?> observation,
       Value<int> updatedAt,
       Value<int> rowid,
     });
@@ -2396,6 +2458,11 @@ class $$StopProgressTableFilterComposer
 
   ColumnFilters<String> get localStatus => $composableBuilder(
     column: $table.localStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get observation => $composableBuilder(
+    column: $table.observation,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2429,6 +2496,11 @@ class $$StopProgressTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get observation => $composableBuilder(
+    column: $table.observation,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get updatedAt => $composableBuilder(
     column: $table.updatedAt,
     builder: (column) => ColumnOrderings(column),
@@ -2456,6 +2528,11 @@ class $$StopProgressTableAnnotationComposer
 
   GeneratedColumn<String> get localStatus => $composableBuilder(
     column: $table.localStatus,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get observation => $composableBuilder(
+    column: $table.observation,
     builder: (column) => column,
   );
 
@@ -2497,12 +2574,14 @@ class $$StopProgressTableTableManager
                 Value<String> routeStopId = const Value.absent(),
                 Value<String> executionId = const Value.absent(),
                 Value<String> localStatus = const Value.absent(),
+                Value<String?> observation = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => StopProgressCompanion(
                 routeStopId: routeStopId,
                 executionId: executionId,
                 localStatus: localStatus,
+                observation: observation,
                 updatedAt: updatedAt,
                 rowid: rowid,
               ),
@@ -2511,12 +2590,14 @@ class $$StopProgressTableTableManager
                 required String routeStopId,
                 required String executionId,
                 required String localStatus,
+                Value<String?> observation = const Value.absent(),
                 required int updatedAt,
                 Value<int> rowid = const Value.absent(),
               }) => StopProgressCompanion.insert(
                 routeStopId: routeStopId,
                 executionId: executionId,
                 localStatus: localStatus,
+                observation: observation,
                 updatedAt: updatedAt,
                 rowid: rowid,
               ),

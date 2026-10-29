@@ -7,6 +7,8 @@ import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_list.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 
+import '../support/in_memory_database.dart';
+
 class _FakeEvidenceApi implements EvidenceApi {
   _FakeEvidenceApi(this.items, {this.error});
   final List<EvidenceItem> items;
@@ -52,6 +54,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       throw UnimplementedError();
 
   @override
+  Stream<Set<String>> watchImpededStopIds(String routeId) =>
+      throw UnimplementedError();
+
+  @override
   Future<bool> deletePendingPhoto(String operationId) =>
       throw UnimplementedError();
 
@@ -61,6 +67,7 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     required PendingOpKind kind,
     required Map<String, dynamic> payload,
     required String routeId,
+    PendingOpState initialState = PendingOpState.pending,
   }) => throw UnimplementedError();
 
   @override
@@ -107,6 +114,14 @@ class _FakeLocalWriteStore implements LocalWriteStore {
 
   @override
   Future<void> resetToPending(String id) => throw UnimplementedError();
+
+  @override
+  Future<int> releaseHeldPhotos(String executionId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<int> discardHeldPhotos(String executionId) =>
+      throw UnimplementedError();
 
   @override
   Future<int> localPhotoCountFor(String executionId) =>
@@ -226,6 +241,39 @@ void main() {
       expect(entries, isEmpty);
     },
   );
+
+  test('a held photo of the execution is listed with its bytes', () async {
+    final db = inMemoryDatabase();
+    addTearDown(db.close);
+    final store = DriftLocalWriteStore(db);
+    Future<void> enqueueHeld(String id, String executionId) => store.enqueue(
+      id: id,
+      kind: PendingOpKind.evidencePhoto,
+      payload: {
+        'execution_id': executionId,
+        'bytes_b64': base64Encode(Uint8List.fromList([7, 8])),
+        'captured_at': '2026-08-25T08:05:00.000Z',
+        'idempotency_key': 'key-$id',
+      },
+      routeId: 'route-A',
+      initialState: PendingOpState.held,
+    );
+    await enqueueHeld('held-1', 'exec-1');
+    await enqueueHeld('held-other', 'exec-2');
+
+    final entries = await loadStopEvidence(
+      store: store,
+      api: _FakeEvidenceApi(const []),
+      routeId: 'route-A',
+      executionId: 'exec-1',
+    );
+
+    expect(entries, hasLength(1));
+    expect(entries.single.kind, 'PHOTO');
+    expect(entries.single.syncState, PendingOpState.held);
+    expect(entries.single.photoBytes, [7, 8]);
+    expect(entries.single.idempotencyKey, 'key-held-1');
+  });
 
   group('when the backend list cannot be fetched', () {
     List<PendingOperationRow> twoPendingPhotos() => [

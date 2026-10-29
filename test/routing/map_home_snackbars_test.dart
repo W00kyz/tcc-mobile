@@ -12,15 +12,21 @@ import 'map_home_harness.dart';
 // lane, so it floats over the sheet (never on "Escanear QR") and a sync
 // notice never closes a snackbar it does not own.
 
+/// s1 checked in on the Térreo, s2 still open upstairs: the exit scan does
+/// not finish the batch, so no next-batch notice joins the lane.
 RouteSummary _inProgressStopRoute() => routeWith(
-  stops: [stopIn(id: 's1', status: 'IN_PROGRESS')],
+  stops: [
+    stopIn(id: 's1', status: 'IN_PROGRESS'),
+    stopIn(id: 's2', orderIndex: 2, floorLabel: '1º andar'),
+  ],
 );
 
-/// Two pending stops: "Escanear QR" stays after the first check-in.
+/// Two pending stops on two floors: the scan button stays (as the exit
+/// scan) after the first floor's check-in.
 RouteSummary _twoPendingRoute() => routeWith(
   stops: [
-    stopIn(id: 's1', latitude: -7.23, longitude: -35.88),
-    stopIn(id: 's2', orderIndex: 2, latitude: -7.25, longitude: -35.90),
+    stopIn(id: 's1'),
+    stopIn(id: 's2', orderIndex: 2, floorLabel: '1º andar'),
   ],
 );
 
@@ -62,31 +68,34 @@ void main() {
     tester,
   ) async {
     final status = statusController();
-    await pumpHome(
+    final progress = FakeStopProgressStore({'s1': 'exec-1'});
+    await progress.markStamped('s1');
+    await pumpHomeWithSheet(
       tester,
       homeWith(
         repositoryWith(_inProgressStopRoute()),
         syncWorker: RecordingSyncWorker(statusStream: status.stream),
+        stopProgressStore: progress,
       ),
     );
 
-    await concludeWith(tester, 'v1.floor.1.sig');
-    expect(find.text(AppStrings.routeCheckOutDone), findsOneWidget);
+    await scanWith(tester, qrOf('Térreo'));
+    expect(find.text(AppStrings.floorCheckOutDone), findsOneWidget);
 
     status.add(_status(RouteSyncState.syncing, 1));
     await tester.pump();
     await tester.pump();
     status.add(_status(RouteSyncState.idle, 0));
     final texts = [
-      AppStrings.routeCheckOutDone,
+      AppStrings.floorCheckOutDone,
       AppStrings.syncSending(1),
       AppStrings.routeAllSynced,
     ];
     final early = await _watch(tester, texts, steps: 20);
 
     expect(tester.takeException(), isNull);
-    expect(early, {AppStrings.routeCheckOutDone});
-    expect(find.text(AppStrings.routeCheckOutDone), findsOneWidget);
+    expect(early, {AppStrings.floorCheckOutDone});
+    expect(find.text(AppStrings.floorCheckOutDone), findsOneWidget);
 
     final later = await _watch(tester, texts, steps: 120);
     expect(later, contains(AppStrings.routeAllSynced));
@@ -99,33 +108,46 @@ void main() {
     testWidgets('at $size the check-in confirmation stays off Escanear QR', (
       tester,
     ) async {
-      await pumpHome(tester, homeWith(repositoryWith(_twoPendingRoute())));
+      await pumpHomeWithSheet(
+        tester,
+        homeWith(repositoryWith(_twoPendingRoute())),
+      );
       await snapSheetTo(tester, size);
 
-      await scanWith(tester, 'v1.floor.1.sig');
-      await tester.pumpAndSettle();
+      await scanWith(tester, qrOf('Térreo'));
 
-      final snack = find.widgetWithText(SnackBar, AppStrings.routeCheckInDone);
+      final snack = find.widgetWithText(
+        SnackBar,
+        AppStrings.floorCheckInDone(1),
+      );
       expect(snack, findsOneWidget);
-      _expectApart(_surfaceOf(tester, snack), tester.getRect(scanQrButton()));
+      _expectApart(
+        _surfaceOf(tester, snack),
+        tester.getRect(scanFooterButton()),
+      );
       await tester.pumpAndSettle(const Duration(seconds: 6));
     });
   }
 
   testWidgets('at the open snap a snackbar stays under the top bar and off '
       'Escanear QR (M-1)', (tester) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoPendingRoute())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoPendingRoute())),
+    );
     await snapSheetTo(tester, 0.9);
 
-    await scanWith(tester, 'v1.floor.1.sig');
-    await tester.pumpAndSettle();
+    await scanWith(tester, qrOf('Térreo'));
 
-    final snack = find.widgetWithText(SnackBar, AppStrings.routeCheckInDone);
+    final snack = find.widgetWithText(
+      SnackBar,
+      AppStrings.floorCheckInDone(1),
+    );
     expect(snack, findsOneWidget);
     final rect = _surfaceOf(tester, snack);
     final topBar = tester.getRect(find.byType(HomeTopBar));
     expect(rect.top, greaterThan(topBar.bottom));
-    _expectApart(rect, tester.getRect(scanQrButton()));
+    _expectApart(rect, tester.getRect(scanFooterButton()));
     await tester.pumpAndSettle(const Duration(seconds: 6));
   });
 }

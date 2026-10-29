@@ -105,13 +105,66 @@ abstract final class AppStrings {
   // --- route screen ---
   static const String routeLoadError = 'Não foi possível carregar sua rota.';
   static const String routeStartButton = 'Iniciar rota';
-  static const String routeConcludeButton = 'Concluir';
   static const String routeSignalImpossibilityButton =
       'Sinalizar impossibilidade';
   static const String routeNotificationsTooltip = 'Notificações';
   static const String routeCheckInDone = 'Check-in registrado.';
-  static const String routeCheckOutDone = 'Check-out registrado.';
   static const String routeImpedimentReported = 'Impossibilidade sinalizada.';
+
+  // --- route by building · floor and task actions ---
+  static const String floorHasNoOpenTasks =
+      'Este andar não tem tarefas abertas na sua rota';
+  static const String floorCheckOutDone =
+      'Andar concluído · enviado quando houver rede';
+  static const String taskImpededDone = 'Impossibilidade registrada';
+  static String exitQrWrongFloor(String floorLabel) =>
+      'Este QR não é do $floorLabel';
+  static const String floorDataOutdated =
+      'Atualize a rota com internet para fazer o check-in do andar';
+
+  /// The entry QR of a floor in another building: `Este QR é de <prédio>`.
+  static String entryQrOtherBuilding(String building) =>
+      'Este QR é de $building';
+
+  /// A floor whose label is a bare number: `Andar <n>`.
+  static String floorNumbered(String n) => 'Andar $n';
+  static String floorCheckInDone(int n) =>
+      'Check-in do andar feito · $n ${n == 1 ? 'tarefa' : 'tarefas'}';
+
+  // --- task dialog and impossibility reason ---
+  static const String taskObservationLabel =
+      'Observação, sugestão ou reclamação';
+  static const String taskAddPhotos = 'Adicionar fotos';
+  static const String taskRemovePhoto = 'Remover foto';
+  static const String taskNeedsFloorCheckIn =
+      'Faça o check-in do andar para registrar esta tarefa';
+  static const String taskConclude = 'Concluir tarefa';
+  static const String taskRequiresPhotos = 'Exige pelo menos 2 fotos';
+  static const String impossibilityReasonTitle = 'Por que não é possível?';
+  static const String impossibilityNoteTrimmed =
+      'A observação será enviada com os primeiros 500 caracteres';
+  static const String taskSaveFailed =
+      'Não foi possível salvar. Tente de novo.';
+
+  // --- building sheet: header, floor card, scan footer ---
+  static const String buildingSheetNext = 'Próximo ponto';
+  static const String buildingSheetSelected = 'Prédio selecionado';
+  static const String scanExitQrButton = 'Escanear QR de saída';
+  static const String scanNeedsProximity =
+      'Aproxime-se do prédio para escanear';
+  static const String scanExitNeedsAllTasks =
+      'Carimbe todas as tarefas do andar para sair';
+  static const String floorCardDone = 'Prédio concluído';
+
+  /// Another floor's check-in is still open:
+  /// `Finalize <prédio> · <andar> antes`.
+  static String scanFinishOpenFloor(String building, String floor) =>
+      'Finalize $building · $floor antes';
+
+  /// The floor card's title: `Complete <n> tarefas`.
+  static String floorCardTitle(int n) =>
+      'Complete $n ${n == 1 ? 'tarefa' : 'tarefas'}';
+
   static const String routeLocationUnavailable =
       'Não foi possível obter sua localização.';
   static const String routeLocationUnavailableCheckIn =
@@ -128,14 +181,8 @@ abstract final class AppStrings {
   static const String routeCheckAgainButton = 'Verificar de novo';
   static const String routeStartFailed =
       'Não foi possível iniciar a rota. Tente novamente.';
-  static const String routePausedTitle = 'Rota pausada';
   static const String routeNextBatchOffline =
       'Conecte-se para receber mais pontos';
-
-  /// A released stop of the current batch: `Liberado · <motivo>`, or just
-  /// `Liberado` when the server sent no reason.
-  static String routeStopReleased(String? reason) =>
-      reason == null ? 'Liberado' : 'Liberado · $reason';
 
   /// Why a paused route's points went back to the pool.
   static String routePausedReason(String reason) => 'Motivo: $reason';
@@ -185,40 +232,15 @@ abstract final class AppStrings {
       ? '1 registro precisa de atenção'
       : '$n registros precisam de atenção';
 
-  static const String routeChipPending = 'Pendente';
-  static const String routeChipBlocked = 'Bloqueado';
-
   /// `<n> ação(ões) aguardando sincronização`.
   static String routePendingSync(int n) =>
       '$n ${n == 1 ? 'ação' : 'ações'} aguardando sincronização';
 
-  /// The travel-from-previous leg line, e.g. `a 120 m · 2 min`.
-  static String routeLeg(String leg) => 'a $leg';
-
   // --- in-progress block (redesign §6.2) ---
-  static const String takePhotosButton = 'Tirar fotos';
-
-  /// `Em andamento · desde <HH:mm>`, the check-in hour of the stop.
-  static String inProgressSince(String hour) => 'Em andamento · desde $hour';
-
-  /// `<n> de 2 fotos obrigatórias` on a stop that requires evidence.
-  static String requiredPhotosProgress(int n) => '$n de 2 fotos obrigatórias';
-
   /// Under a closed "Concluir": `Falta 1 foto` / `Faltam <n> fotos`
   /// (ruling R11).
   static String missingPhotos(int n) =>
       n == 1 ? 'Falta 1 foto' : 'Faltam $n fotos';
-
-  // --- conclusion sheet (redesign §6.6) ---
-  static const String concludeTakeMore = 'Tirar mais';
-  static const String concludeObservationLabel = 'Observação (opcional)';
-  static const String concludeObservationHelper =
-      'Reclamações e sugestões também vão aqui';
-  static const String concludeScanExitButton = 'Escanear QR de saída';
-
-  /// `Concluir <prédio> · <andar>`.
-  static String concludeSheetTitle(String building, String floor) =>
-      'Concluir $building · $floor';
 
   // --- photo-sequence camera ---
   static const String photoSequenceDone = 'Pronto';
@@ -245,6 +267,12 @@ abstract final class AppStrings {
 
   // --- map ---
   static const String mapApproximateLegLabel = 'trajeto aproximado';
+  static String buildingPinSemantics(
+    int number,
+    String name,
+    int done,
+    int total,
+  ) => '$number. $name, $done de $total tarefas';
 
   // --- scan screen ---
   static const String scanInvalidQr =
@@ -305,14 +333,7 @@ abstract final class AppStrings {
   static const String releasedStopNotAppealable =
       'Não aceita recurso — você pode descartar os dados.';
 
-  // --- room picker ---
-  static const String roomPickerPrompt =
-      'Vários pontos correspondem — escolha o certo:';
-
   // --- impediment dialog (alocação automática §7.1) ---
-  static const String impedimentDialogTitle = 'Não consigo fazer este ponto';
-  static const String impedimentNoteHint = 'Observação (opcional)';
-  static const String impedimentRemainderSwitch = 'Não consigo continuar hoje';
   static const String impedimentReasonAccessBlocked = 'Acesso bloqueado';
   static const String impedimentReasonSiteRefusal = 'Recusa do local';
   static const String impedimentReasonHealthIssue = 'Problema de saúde';
@@ -514,14 +535,13 @@ abstract final class AppStrings {
   // --- batch card atoms (not-by-colour labels) ---
   static String slotDone(String hour) => 'Concluído às $hour';
 
-  /// A stop done with no known hour (an old server answer without
-  /// `done_at`).
-  static const String slotDoneNoHour = 'Concluído';
   static String slotReleased(String? reason) =>
       reason == null ? 'Liberado' : 'Liberado: $reason';
   static const String slotPending = 'Pendente';
   static const String slotNext = 'Próximo';
   static const String slotInProgress = 'Em andamento';
+  static const String slotStamped = 'Carimbado, aguardando a saída do andar';
+  static const String slotImpeded = 'Impossibilitado';
   static const String slotPendingSync = 'aguardando envio';
   static String batchCardTitle(int n) => 'CARTÃO DO LOTE $n';
   static String batchCardSubtitle(int total) => 'Junte os $total carimbos';
@@ -530,7 +550,6 @@ abstract final class AppStrings {
 
   // --- map home (redesign §6.2, §6.10) ---
   static const String scanQrButton = 'Escanear QR';
-  static const String nextStopLabel = 'Próxima parada';
   static const String myPositionTooltip = 'Minha posição';
   static const String profileTooltip = 'Abrir perfil';
   static const String collectionChip = 'Coleta de localização ativa';
@@ -563,7 +582,15 @@ abstract final class AppStrings {
   static const String profileStreakNote =
       'Dia sem serviço não quebra a sequência.';
   static const String profileSignOut = 'Sair';
+  static const String profileEndDay = 'Encerrar por hoje';
+  static const String profileEndDaySubtitle =
+      'Libera as tarefas que faltam e pausa a rota';
   static const String profileNoServiceDay = 'Sem serviço';
+
+  /// "Encerrar por hoje" while a floor's check-in is open:
+  /// `Finalize <prédio> · <andar> antes de encerrar`.
+  static String endDayFinishOpenFloor(String building, String floor) =>
+      'Finalize $building · $floor antes de encerrar';
 
   /// `Lote <n> · <total> pontos em <h> h <min> min` under the full card.
   static String fullCardSummary(int batch, int total, Duration elapsed) =>

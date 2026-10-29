@@ -137,6 +137,7 @@ void main() {
 
   testWidgets('the snackbar never overlaps "Escanear QR"', (tester) async {
     final home = await _pump(tester);
+    await selectBuilding(tester, 'b1');
     for (final size in [0.5, 0.22]) {
       await snapSheetTo(tester, size);
       await _emit(tester, home, _status(RouteSyncState.syncing, pending: 1));

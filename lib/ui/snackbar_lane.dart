@@ -17,14 +17,20 @@ enum SnackKind { sync, appeal, action }
 /// under the top bar, so it floats at the half line, still clear of the
 /// sticky footer (final review M-1).
 ///
+/// With no sheet attached only the start bar is on screen: the snackbar sits
+/// just above it ([startBarReach], default [startBarHeight]) instead of at
+/// the half line.
+///
 ///     SnackBar(margin: sheetSnackBarMargin(context, controller), ...)
 EdgeInsets sheetSnackBarMargin(
   BuildContext context,
-  DraggableScrollableController sheet,
-) {
-  final size = sheet.isAttached ? sheet.size : kMapSheetInitial;
-  final fraction = math.min(size, kMapSheetInitial);
-  final height = MediaQuery.sizeOf(context).height * fraction;
+  DraggableScrollableController sheet, {
+  double Function(BuildContext)? startBarReach,
+}) {
+  final height = sheet.isAttached
+      ? MediaQuery.sizeOf(context).height *
+            math.min(sheet.size, kMapSheetInitial)
+      : (startBarReach ?? startBarHeight)(context);
   return EdgeInsets.fromLTRB(16, 0, 16, height + 8);
 }
 
@@ -60,11 +66,19 @@ class _Shown {
 ///
 ///     lane.show(SnackKind.sync, AppStrings.routeAllSynced)
 class SnackbarLane {
-  SnackbarLane({required this.contextOf, required this.sheet});
+  SnackbarLane({
+    required this.contextOf,
+    required this.sheet,
+    this.startBarReach,
+  });
 
   /// The home's context while it is mounted, null after.
   final BuildContext? Function() contextOf;
   final DraggableScrollableController sheet;
+
+  /// How high the start bar reaches while no sheet is shown (it grows with
+  /// a caption); null means [startBarHeight] with no caption.
+  final double Function(BuildContext)? startBarReach;
 
   final List<(SnackKind, String, SnackBarAction?)> _waiting = [];
   _Shown? _current;
@@ -104,7 +118,11 @@ class SnackbarLane {
         ),
         // A margin needs a floating snackbar; the theme says so too.
         behavior: SnackBarBehavior.floating,
-        margin: sheetSnackBarMargin(context, sheet),
+        margin: sheetSnackBarMargin(
+          context,
+          sheet,
+          startBarReach: startBarReach,
+        ),
         action: action,
       ),
     );

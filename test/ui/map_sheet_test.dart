@@ -9,6 +9,7 @@ Widget _harness({
     height: 56,
     child: Center(child: Text('rodape')),
   ),
+  VoidCallback? onDismissed,
 }) => MaterialApp(
   theme: buildAppTheme(),
   home: Scaffold(
@@ -16,6 +17,7 @@ Widget _harness({
       children: [
         MapSheet(
           controller: controller,
+          onDismissed: onDismissed,
           header: const Text('cabecalho'),
           body: Column(
             children: [
@@ -91,6 +93,98 @@ void main() {
 
     expect(find.text('rodape'), findsNothing);
     expect(find.text('cabecalho'), findsOneWidget);
+  });
+
+  group('onDismissed', () {
+    Future<DraggableScrollableController> pumpDismissible(
+      WidgetTester tester,
+      List<String> calls,
+    ) async {
+      tester.view
+        ..physicalSize = const Size(390, 844)
+        ..devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final controller = DraggableScrollableController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(
+        _harness(controller: controller, onDismissed: () => calls.add('gone')),
+      );
+      return controller;
+    }
+
+    testWidgets('a dismissible sheet can go below the closed snap, to zero', (
+      tester,
+    ) async {
+      await pumpDismissible(tester, []);
+
+      final sheet = tester.widget<DraggableScrollableSheet>(
+        find.byType(DraggableScrollableSheet),
+      );
+      expect(sheet.minChildSize, 0);
+      expect(sheet.snapSizes, const [0, 0.22, 0.5, 0.9]);
+    });
+
+    testWidgets('dragging the handle past the closed snap dismisses once', (
+      tester,
+    ) async {
+      final calls = <String>[];
+      final controller = await pumpDismissible(tester, calls);
+      controller.jumpTo(0.22);
+      await tester.pumpAndSettle();
+      expect(calls, isEmpty);
+
+      await tester.drag(
+        find.byKey(const ValueKey('map-sheet-handle')),
+        const Offset(0, 200),
+      );
+      await tester.pumpAndSettle();
+
+      expect(calls, ['gone']);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a short drag from the closed snap springs back', (
+      tester,
+    ) async {
+      final calls = <String>[];
+      final controller = await pumpDismissible(tester, calls);
+      controller.jumpTo(0.22);
+      await tester.pumpAndSettle();
+
+      await tester.drag(
+        find.byKey(const ValueKey('map-sheet-handle')),
+        const Offset(0, 40),
+      );
+      await tester.pumpAndSettle();
+
+      expect(calls, isEmpty);
+      expect(controller.size, closeTo(0.22, 0.001));
+    });
+
+    testWidgets('flinging the body down from the closed snap dismisses', (
+      tester,
+    ) async {
+      final calls = <String>[];
+      final controller = await pumpDismissible(tester, calls);
+      controller.jumpTo(0.22);
+      await tester.pumpAndSettle();
+
+      await tester.fling(find.text('linha 1'), const Offset(0, 300), 2000);
+      await tester.pumpAndSettle();
+
+      expect(calls, ['gone']);
+    });
+
+    testWidgets('without onDismissed the closed snap stays the lowest', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_harness());
+
+      final sheet = tester.widget<DraggableScrollableSheet>(
+        find.byType(DraggableScrollableSheet),
+      );
+      expect(sheet.minChildSize, greaterThan(0));
+    });
   });
 
   group('mapSheetSnaps', () {

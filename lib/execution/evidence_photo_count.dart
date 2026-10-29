@@ -2,7 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart'
     show FutureProviderFamily, ProviderFamily;
 
+import 'package:route_monitor/execution/evidence_requirement.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/routing/route_repository.dart';
 
 /// The device's own photo count for one execution (see
 /// `LocalWriteStore.localPhotoCountFor`), keyed by `executionId`.
@@ -39,3 +41,29 @@ final ProviderFamily<int?, (String, String)> stopPhotoCountProvider =
         merged: merged,
       );
     });
+
+/// Whether [stop] may conclude now: an evidence stop needs its photos, read
+/// from the device outbox first ([stopPhotoCountProvider]); with no open
+/// execution there is no photo to count, so only a stop without the flag
+/// passes. [watch] false reads once (a flow), true rebuilds on change (a
+/// widget).
+///
+///     if (!stopMayConclude(ref, routeId, stop, executionId)) return;
+bool stopMayConclude(
+  WidgetRef ref,
+  String routeId,
+  RouteStopSummary stop,
+  String? executionId, {
+  bool watch = false,
+}) {
+  final provider = executionId == null
+      ? null
+      : stopPhotoCountProvider((routeId, executionId));
+  final photoCount = provider == null
+      ? null
+      : (watch ? ref.watch(provider) : ref.read(provider));
+  return canConcludeWithEvidence(
+    requiresEvidence: stop.requiresEvidence,
+    photoCount: photoCount,
+  );
+}

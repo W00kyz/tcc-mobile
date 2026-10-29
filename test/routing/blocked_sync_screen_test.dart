@@ -16,6 +16,10 @@ import 'package:route_monitor/sync/sync_worker.dart';
 /// `blockedForRoute` and `resetToPending` are exercised here.
 class _FakeLocalWriteStore implements LocalWriteStore {
   @override
+  Stream<Set<String>> watchImpededStopIds(String routeId) =>
+      throw UnimplementedError();
+
+  @override
   Future<bool> deletePendingPhoto(String operationId) =>
       throw UnimplementedError();
 

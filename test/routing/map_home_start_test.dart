@@ -1,8 +1,15 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/routing/batch_card_model.dart' show SlotState;
+import 'package:route_monitor/routing/live_approach.dart';
+import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/ui/map_sheet.dart';
+import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_connectivity.dart';
 import '../support/fake_route_repository.dart';
@@ -10,6 +17,9 @@ import 'map_home_harness.dart';
 
 // Ported from the deleted route_screen_test.dart: the start of the day and
 // the route states, now in the home's sheet (redesign §6.10).
+
+SlotState _slotState(WidgetTester tester, String stopId) =>
+    tester.widget<StampSlot>(slotOf(stopId)).slot.state;
 
 void main() {
   group('before the first batch', () {
@@ -60,14 +70,16 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(repository.allocationCalls, ['start']);
-        expect(repository.lastPosition, (lat: -7.23, lng: -35.88));
+        expect(repository.lastPosition, (lat: -7.21, lng: -35.91));
         expect(find.text(AppStrings.dayProgress(1, 0, 2)), findsOneWidget);
         expect(startButton(), findsNothing);
-        await openStopSheet(tester, 's1');
-        expect(find.text('Sala 101'), findsOneWidget);
-        await closeStopSheet(tester);
-        await openStopSheet(tester, 's2');
-        expect(find.text('Sala 102'), findsOneWidget);
+        // A new batch starts with no building selected: the map shows
+        // whole, and the batch's building opens on its pin.
+        expect(find.byType(MapSheet), findsNothing);
+        await tapPin(tester, 'b1');
+        // The batch's building, its two tasks on the floor card.
+        expect(slotOf('s1'), findsOneWidget);
+        expect(slotOf('s2'), findsOneWidget);
       },
     );
 
@@ -235,7 +247,7 @@ void main() {
   group('route states', () {
     testWidgets(
       'opens on the current batch under the done count of the whole day, a '
-      'released stop as released and with no action',
+      'stop released for an impediment as impossible and with no action',
       (tester) async {
         final route = routeWith(
           currentBatch: 2,
@@ -257,35 +269,18 @@ void main() {
             ),
           ],
         );
-        await pumpHome(tester, homeWith(repositoryWith(route)));
+        await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
         expect(find.text('Lote 2 · 1 de 2 pontos hoje'), findsOneWidget);
-        // The carousel opens on batch 2, the second card.
-        expect(carouselPage(tester), 1);
-        // The stops are read from their sheets, not a list on the home.
+        // The stops are read from the floor card, not a list on the home.
         expect(find.text('Sala Velha'), findsNothing);
-        final signal = find.widgetWithText(
-          TextButton,
-          AppStrings.routeSignalImpossibilityButton,
-        );
-
-        await openStopSheet(tester, 'b');
-        expect(find.text('Sala Impedida'), findsOneWidget);
+        expect(_slotState(tester, 'a'), SlotState.done);
+        expect(_slotState(tester, 'b'), SlotState.impeded);
         expect(
-          find.text(
-            AppStrings.routeStopReleased(
-              AppStrings.releaseReasonLabel('IMPEDIMENT'),
-            ),
-          ),
+          find.bySemanticsLabel('Sala Impedida, ${AppStrings.slotImpeded}'),
           findsOneWidget,
         );
-        expect(signal, findsNothing);
-        await closeStopSheet(tester);
-
-        // Only "Sala Nova" can still be signalled.
-        await openStopSheet(tester, 'c');
-        expect(find.text('Sala Nova'), findsOneWidget);
-        expect(signal, findsOneWidget);
+        expect(_slotState(tester, 'c'), SlotState.next);
       },
     );
 
@@ -306,7 +301,7 @@ void main() {
       final repository = repositoryWith(paused);
       await pumpHome(tester, homeWith(repository));
 
-      expect(find.text(AppStrings.routePausedTitle), findsOneWidget);
+      expect(find.byType(DraggableScrollableSheet), findsNothing);
       expect(
         find.text(
           AppStrings.routePausedReason(
@@ -316,13 +311,6 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Sala 101'), findsNothing);
-      expect(
-        find.widgetWithText(
-          TextButton,
-          AppStrings.routeSignalImpossibilityButton,
-        ),
-        findsNothing,
-      );
 
       await tester.tap(
         find.widgetWithText(FilledButton, AppStrings.dayResumeButton),
@@ -384,8 +372,8 @@ void main() {
 
       expect(repository.allocationCalls, ['start']);
       expect(checkAgainButton(), findsNothing);
-      await openStopSheet(tester, 's2');
-      expect(find.text('Sala 205'), findsOneWidget);
+      await tapPin(tester, 'b1');
+      expect(slotOf('s2'), findsOneWidget);
     });
 
     testWidgets('"Verificar de novo" with the pool still empty says so', (
@@ -405,32 +393,20 @@ void main() {
     });
   });
 
-  testWidgets('renders the travel-from-previous distance and time', (
+  testWidgets('the header reads how far the worker is from the building', (
     tester,
   ) async {
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
-      homeWith(
-        repositoryWith(
-          routeWith(
-            stops: [
-              stopIn(id: 's1'),
-              stopIn(
-                id: 's2',
-                orderIndex: 2,
-                distanceFromPrevM: 120,
-                durationFromPrevS: 180,
-              ),
-            ],
-          ),
-        ),
-      ),
+      homeWith(repositoryWith(routeWith(stops: [stopIn(id: 's1')]))),
     );
+    const worker = LatLng(-7.211, -35.91);
+    ProviderScope.containerOf(
+      tester.element(find.byType(MapHomeScreen)),
+    ).read(workerPositionProvider.notifier).update(worker);
+    await tester.pumpAndSettle();
 
-    // s1 is the next stop and has no leg; s2's reads on its sheet.
-    await openStopSheet(tester, 's2');
-
-    expect(find.textContaining('120 m'), findsOneWidget);
-    expect(find.textContaining('3 min'), findsOneWidget);
+    final meters = const Distance()(worker, const LatLng(-7.21, -35.91));
+    expect(find.text(AppStrings.meters(meters.round())), findsOneWidget);
   });
 }

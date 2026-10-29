@@ -186,6 +186,9 @@ class SyncWorker {
     final scope = BlockedScope(await _store.blockedForRoute(routeId));
     final dueIds = {for (final row in due) row.id};
     for (final row in await _store.unsyncedForRoute(routeId)) {
+      // A `held` photo waits for its stamp, not for a worker: it holds
+      // nothing back.
+      if (row.state == PendingOpState.held) continue;
       if (!dueIds.contains(row.id)) scope.add(row);
     }
     return scope;

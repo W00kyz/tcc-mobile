@@ -1,21 +1,37 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/stamp_painters.dart';
 
-const Duration _stampDuration = Duration(milliseconds: 220);
+// Spec §4: the stamp drops for 260 ms, then a ring of ink spreads for 320 ms.
+const int _dropMs = 260;
+const int _ringMs = 320;
+const Duration _stampDuration = Duration(milliseconds: _dropMs + _ringMs);
+const double _impactAt = _dropMs / (_dropMs + _ringMs);
+const double _dropFromScale = 1.6;
+const Interval _dropCurve = Interval(
+  0,
+  _impactAt,
+  curve: Curves.easeOutBack,
+);
 
 /// One slot of the batch card. Each state reads by mark and by semantic
-/// label, never by colour alone.
+/// label, never by colour alone. `done` and `stamped` print the moss stamp,
+/// `impeded` the brick one; a stamp that just landed ([animateStamp] for
+/// moss, [animateImpeded] for brick) drops once.
 class StampSlot extends StatefulWidget {
   const StampSlot({
     required this.slot,
     this.size = 48,
     this.animateStamp = false,
+    this.animateImpeded = false,
+    this.showFloorCaption = true,
     this.onTap,
     super.key,
   });
@@ -23,6 +39,12 @@ class StampSlot extends StatefulWidget {
   final CardSlot slot;
   final double size;
   final bool animateStamp;
+  final bool animateImpeded;
+
+  /// The floor label (and a release's reason) under the slot. Off on a card
+  /// already split by floor, where only the stamp — and a done one's hour —
+  /// shows.
+  final bool showFloorCaption;
 
   /// Opens the stop's actions. The slot and its caption are the target —
   /// never under 48dp (the circle alone is [size]).
@@ -35,6 +57,8 @@ class StampSlot extends StatefulWidget {
 class _StampSlotState extends State<StampSlot>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  bool _impacted = true;
+  bool _started = false;
 
   @override
   void initState() {
@@ -43,25 +67,45 @@ class _StampSlotState extends State<StampSlot>
       vsync: this,
       duration: _stampDuration,
       value: 1,
-    );
-    if (widget.animateStamp) _scheduleStamp();
+    )..addListener(_onTick);
+  }
+
+  /// MediaQuery is readable here, and this runs before the first build, so
+  /// the stamp never shows its final frame before it drops.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (_wantsDrop(widget)) _play();
   }
 
   @override
   void didUpdateWidget(StampSlot old) {
     super.didUpdateWidget(old);
-    if (widget.animateStamp && !old.animateStamp) _scheduleStamp();
+    if (_wantsDrop(widget) && !_wantsDrop(old)) _play();
   }
 
-  /// Plays the stamp once, after the first frame so MediaQuery is readable.
-  void _scheduleStamp() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-      if (reduce) return;
-      unawaited(HapticFeedback.lightImpact());
-      unawaited(_controller.forward(from: 0));
-    });
+  /// The drop plays when the slot is a stamp AND its flag is up, so a flag
+  /// raised a frame before the face changes still lands on the stamp.
+  bool _wantsDrop(StampSlot w) => switch (w.slot.state) {
+    SlotState.done || SlotState.stamped => w.animateStamp,
+    SlotState.impeded => w.animateImpeded,
+    _ => false,
+  };
+
+  /// Under reduced motion the controller stays at 1: an instant swap.
+  void _play() {
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return;
+    _impacted = false;
+    unawaited(_controller.forward(from: 0));
+  }
+
+  /// The haptic is the impact: the end of the drop, once per play.
+  void _onTick() {
+    if (_impacted || _controller.value < _impactAt) return;
+    _impacted = true;
+    unawaited(HapticFeedback.mediumImpact());
   }
 
   @override
@@ -75,8 +119,11 @@ class _StampSlotState extends State<StampSlot>
     return at == null ? '' : stampHour(at);
   }
 
+  /// The service point (when known), the state, then the sync mark.
   String _label() {
-    final base = _stateLabel();
+    final name = widget.slot.servicePointName;
+    final state = _stateLabel();
+    final base = name == null ? state : '$name, $state';
     return widget.slot.pendingSync
         ? '$base, ${AppStrings.slotPendingSync}'
         : base;
@@ -84,6 +131,8 @@ class _StampSlotState extends State<StampSlot>
 
   String _stateLabel() => switch (widget.slot.state) {
     SlotState.done => AppStrings.slotDone(_hour()),
+    SlotState.stamped => AppStrings.slotStamped,
+    SlotState.impeded => AppStrings.slotImpeded,
     SlotState.released => AppStrings.slotReleased(_reason),
     SlotState.pending => AppStrings.slotPending,
     SlotState.next => AppStrings.slotNext,
@@ -103,8 +152,10 @@ class _StampSlotState extends State<StampSlot>
           onTap: widget.onTap,
           child: ExcludeSemantics(child: _circle(p)),
         ),
-        const SizedBox(height: 3),
-        _caption(context, p),
+        if (widget.showFloorCaption) ...[
+          const SizedBox(height: 3),
+          _caption(context, p),
+        ],
       ],
     );
     return widget.onTap == null ? body : _tappable(body);
@@ -129,15 +180,19 @@ class _StampSlotState extends State<StampSlot>
         alignment: Alignment.center,
         children: [
           _face(p),
-          if (widget.slot.pendingSync) _syncBadge(p),
+          if (_showsCloud) _syncBadge(p),
         ],
       ),
     );
   }
 
+  /// The cloud: not sent yet, or stamped and waiting for the floor's exit.
+  bool get _showsCloud =>
+      widget.slot.pendingSync || widget.slot.state == SlotState.stamped;
+
   Widget _face(FieldPalette p) {
     final slot = widget.slot;
-    if (slot.state == SlotState.done) return _stamp(p);
+    if (_isStamp(slot.state)) return _stamp(p);
     final kind = switch (slot.state) {
       SlotState.next => RingKind.next,
       SlotState.inProgress => RingKind.inProgress,
@@ -150,40 +205,85 @@ class _StampSlotState extends State<StampSlot>
     );
   }
 
+  bool _isStamp(SlotState state) =>
+      state == SlotState.done ||
+      state == SlotState.stamped ||
+      state == SlotState.impeded;
+
   Widget _stamp(FieldPalette p) {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final t = Curves.easeOut.transform(_controller.value);
-        return Transform.rotate(
-          angle: widget.slot.stampRotationDeg * 3.14159265 / 180,
-          child: Transform.scale(
-            scale: 1.15 - 0.15 * t,
-            child: SizedBox.square(
-              dimension: widget.size,
-              child: CustomPaint(
-                painter: StampPainter(
-                  seed: seedOf(widget.slot.stopId),
-                  palette: p,
-                  ink: t,
-                ),
-                child: Align(
-                  alignment: const Alignment(0, 0.45),
-                  child: Text(
-                    _hour(),
-                    style: TextStyle(
-                      color: p.moss,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      height: 1,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
+        final v = _controller.value;
+        final drop = _dropCurve.transform(v);
+        return Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            if (v > _impactAt && v < 1) _inkRing(p, v),
+            _dropped(p, drop, opacity: (v / _impactAt).clamp(0.0, 1.0)),
+          ],
         );
       },
+    );
+  }
+
+  /// The ring of ink spreading out of the stamp once it has landed.
+  Widget _inkRing(FieldPalette p, double v) {
+    final progress = (v - _impactAt) / (1 - _impactAt);
+    return CustomPaint(
+      size: Size.square(widget.size),
+      painter: InkRingPainter(color: _ink(p), progress: progress),
+    );
+  }
+
+  Color _ink(FieldPalette p) =>
+      widget.slot.state == SlotState.impeded ? p.brick : p.moss;
+
+  /// The stamp at [drop] (0 = high above, 1 = landed): scale 1.6 to 1,
+  /// turning from upright to its own tilt, fading in.
+  Widget _dropped(FieldPalette p, double drop, {required double opacity}) {
+    final tilt = widget.slot.stampRotationDeg * math.pi / 180;
+    return Opacity(
+      opacity: opacity,
+      child: Transform.rotate(
+        angle: tilt * drop,
+        child: Transform.scale(
+          key: const ValueKey('stamp-drop'),
+          scale: _dropFromScale + (1 - _dropFromScale) * drop,
+          child: _stampBody(p, drop),
+        ),
+      ),
+    );
+  }
+
+  Widget _stampBody(FieldPalette p, double drop) => SizedBox.square(
+    dimension: widget.size,
+    child: CustomPaint(
+      painter: StampPainter(
+        seed: seedOf(widget.slot.stopId),
+        palette: p,
+        ink: drop.clamp(0.0, 1.0),
+        impossible: widget.slot.state == SlotState.impeded,
+      ),
+      child: _hourLabel(p),
+    ),
+  );
+
+  /// Only a stamp that is done carries the hour.
+  Widget? _hourLabel(FieldPalette p) {
+    if (widget.slot.state != SlotState.done) return null;
+    return Align(
+      alignment: const Alignment(0, 0.45),
+      child: Text(
+        _hour(),
+        style: TextStyle(
+          color: p.moss,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          height: 1,
+        ),
+      ),
     );
   }
 
@@ -219,7 +319,7 @@ class _StampSlotState extends State<StampSlot>
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            slot.floorLabel,
+            floorDisplayLabel(slot.floorLabel),
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,

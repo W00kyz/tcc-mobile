@@ -1,133 +1,114 @@
 import 'package:flutter/material.dart';
 import 'package:route_monitor/l10n/strings.dart';
-import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/stamp_painters.dart';
 
 /// The brief says 14 but also expects "Central de Aulas" (16) whole.
 const int _maxLabelChars = 16;
-const double _pinSize = 40;
+const double _headSize = 40;
+const double _stemHeight = 10;
 
 String truncateLabel(String name) => name.length <= _maxLabelChars
     ? name
     : '${name.substring(0, _maxLabelChars - 1)}…';
 
-/// A building on the map: a 40dp circle with `done/total` and the name above.
-/// The map hides the name when zoomed out ([showLabel] false); the circle and
-/// its count always stay.
+/// A building on the map, Shopee-style: a teardrop pin whose tip stands on
+/// the building, with its name above. Pending ones carry their number in
+/// route order; finished ones turn grey with a check; the next one wears the
+/// dashed ink ring. The map hides the name when zoomed out ([showLabel]
+/// false); the pin always stays.
+///
+///     BuildingPin(building: building, isNext: building == next)
 class BuildingPin extends StatelessWidget {
   const BuildingPin({
-    required this.group,
+    required this.building,
     this.selected = false,
     this.dimmed = false,
-    this.inProgress = false,
+    this.isNext = false,
     this.showLabel = true,
     super.key,
   });
 
-  final BuildingGroup group;
+  final DayBuilding building;
   final bool selected;
   final bool dimmed;
-  final bool inProgress;
+
+  /// The building holding the next task: its head gets the dashed ring.
+  final bool isNext;
   final bool showLabel;
 
   @override
   Widget build(BuildContext context) {
     final p = Theme.of(context).extension<FieldPalette>()!;
     return Opacity(
-      opacity: dimmed ? 0.4 : 1,
-      // The name sits above the circle, so the circle stays on the route line
-      // and neighbouring pins' names do not run into each other sideways.
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (showLabel) ...[_label(p), const SizedBox(height: 4)],
-          // Zoomed out, the name is not drawn but still read aloud.
-          if (showLabel)
-            _circle(p)
-          else
-            Semantics(label: group.buildingName, child: _circle(p)),
-        ],
-      ),
-    );
-  }
-
-  bool get _hasNext => group.slots.any((s) => s.state == SlotState.next);
-
-  Widget _circle(FieldPalette p) {
-    final complete = group.complete;
-    final dashed = inProgress || _hasNext;
-    return AnimatedScale(
-      scale: selected ? 1.2 : 1,
-      duration: const Duration(milliseconds: 120),
-      child: SizedBox(
-        width: _pinSize,
-        height: _pinSize,
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            _disc(p, complete, dashed),
-            if (inProgress) _seal(p),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _disc(FieldPalette p, bool complete, bool dashed) {
-    return Container(
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: complete ? p.moss : p.white,
-        border: dashed ? null : Border.all(color: complete ? p.moss : p.rule),
-      ),
-      child: CustomPaint(
-        painter: dashed ? RingPainter(kind: RingKind.next, palette: p) : null,
-        child: Center(
-          child: Text(
-            '${group.done}/${group.total}',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: complete ? p.white : p.ink,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// "Em andamento" mark: a small ink seal with a dot.
-  Widget _seal(FieldPalette p) {
-    return Positioned(
-      top: -3,
-      right: -3,
+      opacity: dimmed ? 0.45 : 1,
+      // The name sits above the pin, so the tip stays on the building and
+      // neighbouring pins' names do not run into each other sideways.
       child: Semantics(
-        label: AppStrings.slotInProgress,
+        label: AppStrings.buildingPinSemantics(
+          building.number,
+          building.name,
+          building.closedTasks,
+          building.totalTasks,
+        ),
+        // One announcement for the whole pin, not its number and name again.
         child: ExcludeSemantics(
-          child: Container(
-            width: 14,
-            height: 14,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: p.ink,
-              border: Border.all(color: p.white, width: 2),
-            ),
-            child: Center(
-              child: Container(
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: p.white,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (showLabel) ...[_label(p), const SizedBox(height: 4)],
+              _teardrop(p),
+            ],
           ),
         ),
       ),
+    );
+  }
+
+  /// Scales from the tip, so a selected pin grows without leaving its spot.
+  Widget _teardrop(FieldPalette p) {
+    final complete = building.complete;
+    return AnimatedScale(
+      scale: selected ? 1.15 : 1,
+      alignment: Alignment.bottomCenter,
+      duration: const Duration(milliseconds: 120),
+      child: CustomPaint(
+        key: const ValueKey('pin-teardrop'),
+        size: const Size(_headSize, _headSize + _stemHeight),
+        painter: _TeardropPainter(
+          fill: complete ? p.muted : p.white,
+          outline: complete ? p.muted : p.rule,
+          shadow: p.ink,
+        ),
+        child: SizedBox(
+          width: _headSize,
+          height: _headSize + _stemHeight,
+          child: Column(
+            children: [SizedBox(height: _headSize, child: _head(p, complete))],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _head(FieldPalette p, bool complete) {
+    final content = complete
+        ? Icon(Icons.check, size: 22, color: p.white)
+        : Text(
+            '${building.number}',
+            style: TextStyle(
+              fontFamily: kUiFont,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: p.ink,
+            ),
+          );
+    return CustomPaint(
+      painter: isNext && !complete
+          ? RingPainter(kind: RingKind.next, palette: p)
+          : null,
+      child: Center(child: content),
     );
   }
 
@@ -140,14 +121,63 @@ class BuildingPin extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        truncateLabel(group.buildingName),
+        truncateLabel(building.name),
         maxLines: 1,
         style: TextStyle(
           fontSize: 12,
-          fontWeight: inProgress ? FontWeight.w700 : FontWeight.w600,
+          fontWeight: FontWeight.w600,
           color: p.ink,
         ),
       ),
     );
   }
+}
+
+/// The pin's body: a 40dp circle with a tapered 10dp stem under it, filled
+/// and outlined as one shape so no seam shows where they meet.
+class _TeardropPainter extends CustomPainter {
+  const _TeardropPainter({
+    required this.fill,
+    required this.outline,
+    required this.shadow,
+  });
+
+  final Color fill;
+  final Color outline;
+  final Color shadow;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = _shape(size);
+    canvas
+      ..drawShadow(path, shadow, 2, false)
+      ..drawPath(path, Paint()..color = fill)
+      ..drawPath(
+        path,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5
+          ..color = outline,
+      );
+  }
+
+  /// The circle joined to a triangle whose base sits inside it, so the
+  /// union has no gap and its outline runs smoothly into the stem.
+  Path _shape(Size size) {
+    final centerX = size.width / 2;
+    final head = Path()
+      ..addOval(Rect.fromCircle(center: Offset(centerX, 20), radius: 20));
+    final stem = Path()
+      ..moveTo(centerX - 11.5, 36)
+      ..lineTo(centerX + 11.5, 36)
+      ..lineTo(centerX, size.height)
+      ..close();
+    return Path.combine(PathOperation.union, head, stem);
+  }
+
+  @override
+  bool shouldRepaint(_TeardropPainter oldDelegate) =>
+      oldDelegate.fill != fill ||
+      oldDelegate.outline != outline ||
+      oldDelegate.shadow != shadow;
 }

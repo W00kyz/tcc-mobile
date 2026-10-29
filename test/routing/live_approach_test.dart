@@ -47,6 +47,8 @@ void main() {
 
       expect(approach.approximate, isFalse);
       expect(approach.points, _streetLeg().points);
+      // The stop itself, so the map can bridge a snapped street end.
+      expect(approach.destination, _target.position);
       expect(api.calls, [(_here.latitude, _here.longitude)]);
     });
 
