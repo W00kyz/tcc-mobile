@@ -7,6 +7,7 @@ import 'package:route_monitor/execution/evidence_requirement.dart';
 import 'package:route_monitor/execution/evidence_thumbnail.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/photo_sequence_screen.dart';
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/local_write_store.dart' show PendingOpState;
 import 'package:route_monitor/routing/route_repository.dart';
@@ -97,7 +98,7 @@ class TaskPhotos extends ConsumerWidget {
       routeId: route.id,
       executionId: executionId,
       buildingName: stop.buildingName,
-      floorLabel: stop.floorLabel,
+      floorLabel: floorDisplayLabel(stop.floorLabel),
       minimum: stop.requiresEvidence ? minEvidencePhotos : null,
     );
     _refreshPhotos(ref, executionId);

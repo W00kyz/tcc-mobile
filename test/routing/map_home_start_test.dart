@@ -272,7 +272,7 @@ void main() {
         expect(_slotState(tester, 'a'), SlotState.done);
         expect(_slotState(tester, 'b'), SlotState.impeded);
         expect(
-          find.bySemanticsLabel(AppStrings.slotImpeded),
+          find.bySemanticsLabel('Sala Impedida, ${AppStrings.slotImpeded}'),
           findsOneWidget,
         );
         expect(_slotState(tester, 'c'), SlotState.next);

@@ -13,7 +13,7 @@ import 'package:route_monitor/auth/auth_providers.dart' show buildSessionDio;
 import 'package:route_monitor/execution/room_resolution.dart'
     show haversineMeters;
 import 'package:route_monitor/routing/approach_api.dart';
-import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
 /// The worker's last known position: the "Minha posição" read and every fix
@@ -147,20 +147,21 @@ class ApproachTracker {
 double _metersBetween(LatLng a, LatLng b) =>
     haversineMeters(a.latitude, a.longitude, b.latitude, b.longitude);
 
-/// The live first leg to [card]'s next stop, for a widget that draws it:
+/// The live first leg to the day's next task, for a widget that draws it:
 /// null without a worker position (the map draws as it always did) or
-/// without a next stop.
+/// without a next task. The next task is the day model's — it knows the
+/// local stamps and impediments the server has not heard of yet.
 ///
-///     final approach = watchLiveApproach(ref, route, card);
+///     final approach = watchLiveApproach(ref, route, buildings);
 LiveApproach? watchLiveApproach(
   WidgetRef ref,
   RouteSummary route,
-  BatchCard card,
+  List<DayBuilding> buildings,
 ) {
   final position = ref.watch(workerPositionProvider);
-  final next = card.next;
-  if (position == null || next == null) return null;
-  final stop = route.stops.firstWhere((s) => s.id == next.stopId);
+  final nextId = nextTaskStopId(buildings);
+  if (position == null || nextId == null) return null;
+  final stop = route.stops.firstWhere((s) => s.id == nextId);
   final target = ApproachTarget(
     stopId: stop.id,
     position: LatLng(stop.latitude, stop.longitude),

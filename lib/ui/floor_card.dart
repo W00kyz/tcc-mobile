@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
-import 'package:route_monitor/routing/batch_card_model.dart' show CardSlot;
+import 'package:route_monitor/routing/batch_card_model.dart'
+    show CardSlot, SlotState;
 import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 /// The selected building's stamp card: "Complete N tarefas" (or "Prédio
-/// concluído"), then one row per floor, its label over its task slots.
+/// concluído"), then one row per floor, its label over its task slots. A
+/// released task is hidden: it went back to the pool.
 ///
 ///     FloorCard(building: b, onSlotTap: (slot, floor) => open(slot))
 class FloorCard extends StatelessWidget {
@@ -77,7 +80,11 @@ class FloorCard extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: [for (final slot in floor.slots) _slot(slot, floor)],
+            children: [
+              for (final slot in floor.slots)
+                // A released task went back to the pool: not the worker's.
+                if (slot.state != SlotState.released) _slot(slot, floor),
+            ],
           ),
         ],
       ),
@@ -85,7 +92,7 @@ class FloorCard extends StatelessWidget {
   }
 
   Widget _floorLabel(FloorRow floor, FieldPalette p) => Text(
-    floor.label,
+    floorDisplayLabel(floor.label),
     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.ink),
   );
 
@@ -95,6 +102,7 @@ class FloorCard extends StatelessWidget {
       slot: slot,
       animateStamp: slot.stopId == animateStopId,
       animateImpeded: slot.stopId == animateImpededStopId,
+      showFloorCaption: false,
       onTap: () => onSlotTap(slot, floor),
     );
   }

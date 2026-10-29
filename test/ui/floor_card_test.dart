@@ -12,6 +12,7 @@ CardSlot _slot(String id, SlotState state) => CardSlot(
   stopId: id,
   state: state,
   floorLabel: 'Andar',
+  servicePointName: 'Sala $id',
   stampedAt: state == SlotState.done ? DateTime(2026, 10, 28, 9) : null,
   pendingSync: false,
   releaseReason: null,
@@ -112,6 +113,65 @@ void main() {
         .where((slot) => slot.animateStamp)
         .map((slot) => slot.slot.stopId);
     expect(animating, ['s2']);
+  });
+
+  testWidgets('a bare-number floor label reads "Andar <n>"', (tester) async {
+    await _pump(
+      tester,
+      _building([
+        FloorRow(
+          floorId: 'f1',
+          label: '1',
+          slots: [_slot('s1', SlotState.next)],
+        ),
+      ]),
+    );
+
+    expect(find.text(AppStrings.floorNumbered('1')), findsOneWidget);
+    expect(find.text('1'), findsNothing);
+  });
+
+  testWidgets('a released task is not drawn', (tester) async {
+    await _pump(
+      tester,
+      _building([
+        FloorRow(
+          floorId: 'f1',
+          label: 'Andar 1',
+          slots: [_slot('s1', SlotState.released), _slot('s2', SlotState.next)],
+        ),
+      ]),
+    );
+
+    expect(find.byKey(const ValueKey('floor-slot-s1')), findsNothing);
+    expect(find.byKey(const ValueKey('floor-slot-s2')), findsOneWidget);
+  });
+
+  testWidgets('no floor caption under the slots; a done stamp keeps its '
+      'hour; each slot speaks its service point and state', (tester) async {
+    await _pump(
+      tester,
+      _building([
+        FloorRow(
+          floorId: 'f1',
+          label: 'Andar 1',
+          slots: [_slot('s1', SlotState.done), _slot('s2', SlotState.next)],
+        ),
+      ]),
+    );
+
+    // The slots' own floor label ('Andar') is gone; the row's stays.
+    expect(find.text('Andar'), findsNothing);
+    expect(find.text('Andar 1'), findsOneWidget);
+    expect(find.text('09:00'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('Sala s1, ${AppStrings.slotDone('09:00')}'),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel('Sala s2, ${AppStrings.slotNext}'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a finished building reads "Prédio concluído"', (tester) async {

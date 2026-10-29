@@ -27,11 +27,16 @@ class CardSlot {
     required this.pendingSync,
     required this.releaseReason,
     required this.stampRotationDeg,
+    this.servicePointName,
   });
 
   final String stopId;
   final SlotState state;
   final String floorLabel;
+
+  /// The task's service point, read first by assistive technology; null
+  /// where the slot stands for no particular task.
+  final String? servicePointName;
 
   /// When the stop was done (local check-out beats the server's `done_at`).
   final DateTime? stampedAt;
@@ -60,10 +65,7 @@ class BuildingGroup {
   /// Released stops are not counted: they went back to the pool.
   int get total => slots.where((s) => s.state != SlotState.released).length;
 
-  /// Impeded stops count as closed: nothing more can be done about them.
-  int get impeded => slots.where((s) => s.state == SlotState.impeded).length;
-
-  bool get complete => total > 0 && done + impeded == total;
+  bool get complete => total > 0 && done == total;
 }
 
 class BatchCard {
@@ -140,6 +142,7 @@ CardSlot _slotOf(
     stopId: stop.id,
     state: state,
     floorLabel: stop.floorLabel,
+    servicePointName: stop.servicePointName,
     // When the stop was done: the local check-out beats the server's.
     stampedAt: state != SlotState.done
         ? null

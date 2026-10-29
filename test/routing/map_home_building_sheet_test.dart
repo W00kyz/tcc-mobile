@@ -166,6 +166,22 @@ void main() {
     expect(slotOf('s3'), findsNothing);
   });
 
+  testWidgets('a bare-number floor reads "Andar <n>" in the header and on '
+      'the card', (tester) async {
+    final route = routeWith(
+      stops: [
+        stopIn(id: 's1', buildingName: 'Central de Aulas', floorLabel: '1'),
+      ],
+    );
+    await pumpHome(tester, homeWith(repositoryWith(route)));
+
+    expect(
+      find.text(AppStrings.buildingFloor('Central de Aulas', 'Andar 1')),
+      findsOneWidget,
+    );
+    expect(find.text(AppStrings.floorNumbered('1')), findsOneWidget);
+  });
+
   testWidgets('tapping pin 2 swaps the card to building 2, "Prédio '
       'selecionado"', (tester) async {
     await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));

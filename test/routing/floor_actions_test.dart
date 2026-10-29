@@ -21,23 +21,26 @@ import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../support/fake_day_log_store.dart';
+import '../support/fake_route_repository.dart';
 import '../support/in_memory_database.dart';
 import 'map_home_fakes.dart';
 
 RouteStopSummary _stop(
   String id,
   int order, {
-  String floorId = 'f1',
+  String? floorId = 'f1',
   String status = 'PENDING',
+  String buildingId = 'b1',
+  String? floorLabel,
 }) => RouteStopSummary(
   id: id,
   orderIndex: order,
   batchNumber: 1,
   status: status,
   servicePointName: 'Sala $id',
-  buildingId: 'b1',
-  buildingName: 'Prédio',
-  floorLabel: 'Andar $floorId',
+  buildingId: buildingId,
+  buildingName: 'Prédio $buildingId',
+  floorLabel: floorLabel ?? 'Andar $floorId',
   floorId: floorId,
   latitude: -7.2,
   longitude: -35.9,
@@ -54,6 +57,10 @@ RouteSummary _route(List<RouteStopSummary> stops) => RouteSummary(
 );
 
 const _entryQr = 'v1.f1.1.sig';
+
+/// The first building of [route], as the sheet shows it.
+DayBuilding _first(RouteSummary route) =>
+    buildDayBuildings(route, {}, {}, {}).first;
 
 void main() {
   late AppDatabase db;
@@ -80,11 +87,13 @@ void main() {
   /// A button that runs [action]; returns the container for assertions.
   Future<ProviderContainer> pumpHost(
     WidgetTester tester,
-    Future<void> Function(BuildContext, WidgetRef) action,
-  ) async {
+    Future<void> Function(BuildContext, WidgetRef) action, {
+    RouteRepository? routes,
+  }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          if (routes != null) routeRepositoryProvider.overrideWithValue(routes),
           appDatabaseProvider.overrideWithValue(db),
           localWriteStoreProvider.overrideWithValue(store),
           stopProgressStoreProvider.overrideWithValue(progress),
@@ -134,7 +143,7 @@ void main() {
         'QR and one fresh key each', (tester) async {
       await pumpHost(
         tester,
-        (context, ref) => checkInFloor(context, ref, route),
+        (context, ref) => checkInFloor(context, ref, route, _first(route)),
       );
 
       await scanWith(tester, _entryQr);
@@ -156,7 +165,7 @@ void main() {
     ) async {
       await pumpHost(
         tester,
-        (context, ref) => checkInFloor(context, ref, route),
+        (context, ref) => checkInFloor(context, ref, route, _first(route)),
       );
 
       await scanWith(tester, 'v1.f-elsewhere.1.sig');
@@ -170,7 +179,7 @@ void main() {
     ) async {
       await pumpHost(
         tester,
-        (context, ref) => checkInFloor(context, ref, route),
+        (context, ref) => checkInFloor(context, ref, route, _first(route)),
       );
 
       await scanWith(tester, 'not-a-qr');
@@ -184,7 +193,7 @@ void main() {
       await progress.upsertInProgress('s1', 'exec-s1');
       await pumpHost(
         tester,
-        (context, ref) => checkInFloor(context, ref, route),
+        (context, ref) => checkInFloor(context, ref, route, _first(route)),
       );
 
       await scanWith(tester, _entryQr);
@@ -202,13 +211,69 @@ void main() {
       );
       await pumpHost(
         tester,
-        (context, ref) => checkInFloor(context, ref, route),
+        (context, ref) => checkInFloor(context, ref, route, _first(route)),
       );
 
       await scanWith(tester, _entryQr);
 
       final rows = await rowsOf(PendingOpKind.checkIn);
       expect(rows.map((r) => r.payload['route_stop_id']), ['s1']);
+    });
+
+    testWidgets("another building's floor QR checks nothing in and names "
+        'that building', (tester) async {
+      final twoBuildings = _route([
+        _stop('s1', 1),
+        _stop('s2', 2, floorId: 'f9', buildingId: 'b2'),
+      ]);
+      await pumpHost(
+        tester,
+        (context, ref) =>
+            checkInFloor(context, ref, twoBuildings, _first(twoBuildings)),
+      );
+
+      await scanWith(tester, 'v1.f9.1.sig');
+
+      expect(await store.unsyncedForRoute('r1'), isEmpty);
+      expect(find.text(AppStrings.entryQrOtherBuilding('Prédio b2')), findsOne);
+    });
+
+    group('a snapshot cached before floor ids', () {
+      final stale = _route([_stop('s1', 1, floorId: null)]);
+
+      testWidgets('reads the day again and checks in with its floor ids', (
+        tester,
+      ) async {
+        final routes = FakeRouteRepository(myDayWith(route));
+        await pumpHost(
+          tester,
+          (context, ref) => checkInFloor(context, ref, stale, _first(stale)),
+          routes: routes,
+        );
+
+        await scanWith(tester, _entryQr);
+
+        expect(routes.fetchCount, 1);
+        final rows = await rowsOf(PendingOpKind.checkIn);
+        expect(rows.map((r) => r.payload['route_stop_id']), ['s1', 's2']);
+      });
+
+      testWidgets('still without them, asks for a refresh online', (
+        tester,
+      ) async {
+        final routes = FakeRouteRepository(myDayWith(stale));
+        await pumpHost(
+          tester,
+          (context, ref) => checkInFloor(context, ref, stale, _first(stale)),
+          routes: routes,
+        );
+
+        await scanWith(tester, _entryQr);
+
+        expect(routes.fetchCount, 1);
+        expect(await store.unsyncedForRoute('r1'), isEmpty);
+        expect(find.text(AppStrings.floorDataOutdated), findsOneWidget);
+      });
     });
   });
 
@@ -284,6 +349,27 @@ void main() {
         'not-a-qr',
         AppStrings.scanInvalidQr,
       );
+    });
+
+    testWidgets('a bare-number floor is named "Andar <n>" on a wrong exit', (
+      tester,
+    ) async {
+      final route = _route([_stop('s1', 1, floorId: 'f3', floorLabel: '3')]);
+      await progress.upsertInProgress('s1', 'exec-s1');
+      await progress.markStamped('s1');
+      final floor = await _floorOf(
+        route,
+        progress,
+        expected: [SlotState.stamped],
+      );
+      await pumpHost(
+        tester,
+        (context, ref) => checkOutFloor(context, ref, route, floor),
+      );
+
+      await scanWith(tester, 'v1.f2.1.exit');
+
+      expect(find.text(AppStrings.exitQrWrongFloor('Andar 3')), findsOne);
     });
 
     testWidgets("another floor's QR checks nothing out and names the floor", (

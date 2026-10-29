@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/l10n/strings.dart';
+import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/approach_api.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 
@@ -85,5 +86,45 @@ void main() {
     expect(line.points, const [LatLng(-7.23, -35.88), LatLng(-7.214, -35.906)]);
     expect(line.pattern.segments, isNotNull);
     expect(find.text(AppStrings.mapApproximateLegLabel), findsOneWidget);
+  });
+
+  testWidgets('the leg heads for the day model next task, past one reported '
+      'impossible on this device', (tester) async {
+    final store = InMemoryLocalWriteStore();
+    // s1 impeded here, not yet synced: the server still has it PENDING.
+    await store.enqueue(
+      id: 'imp-1',
+      kind: PendingOpKind.impediment,
+      routeId: 'r1',
+      payload: const {'scope': 'STOP', 'route_stop_id': 's1'},
+    );
+    final route = routeWith(
+      stops: [
+        stopIn(id: 's1'),
+        stopIn(
+          id: 's2',
+          orderIndex: 2,
+          buildingId: 'b2',
+          latitude: -7.214,
+          longitude: -35.906,
+        ),
+      ],
+    );
+    final api = FakeApproachApi(
+      error: DioException(requestOptions: RequestOptions()),
+    );
+    await pumpHome(
+      tester,
+      homeWith(repositoryWith(route), approachApi: api, localWriteStore: store),
+    );
+
+    await _locate(tester);
+
+    expect(
+      _lines(tester).map((l) => l.points),
+      anyElement(
+        equals(const [LatLng(-7.23, -35.88), LatLng(-7.214, -35.906)]),
+      ),
+    );
   });
 }

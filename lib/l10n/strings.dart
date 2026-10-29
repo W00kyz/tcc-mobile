@@ -119,6 +119,15 @@ abstract final class AppStrings {
   static const String taskImpededDone = 'Impossibilidade registrada';
   static String exitQrWrongFloor(String floorLabel) =>
       'Este QR não é do $floorLabel';
+  static const String floorDataOutdated =
+      'Atualize a rota com internet para fazer o check-in do andar';
+
+  /// The entry QR of a floor in another building: `Este QR é de <prédio>`.
+  static String entryQrOtherBuilding(String building) =>
+      'Este QR é de $building';
+
+  /// A floor whose label is a bare number: `Andar <n>`.
+  static String floorNumbered(String n) => 'Andar $n';
   static String floorCheckInDone(int n) =>
       'Check-in do andar feito · $n ${n == 1 ? 'tarefa' : 'tarefas'}';
 
@@ -228,20 +237,10 @@ abstract final class AppStrings {
       '$n ${n == 1 ? 'ação' : 'ações'} aguardando sincronização';
 
   // --- in-progress block (redesign §6.2) ---
-  static const String takePhotosButton = 'Tirar fotos';
-
-  /// `<n> de 2 fotos obrigatórias` on a stop that requires evidence.
-  static String requiredPhotosProgress(int n) => '$n de 2 fotos obrigatórias';
-
   /// Under a closed "Concluir": `Falta 1 foto` / `Faltam <n> fotos`
   /// (ruling R11).
   static String missingPhotos(int n) =>
       n == 1 ? 'Falta 1 foto' : 'Faltam $n fotos';
-
-  // --- conclusion sheet (redesign §6.6) ---
-  static const String concludeObservationLabel = 'Observação (opcional)';
-  static const String concludeObservationHelper =
-      'Reclamações e sugestões também vão aqui';
 
   // --- photo-sequence camera ---
   static const String photoSequenceDone = 'Pronto';
@@ -587,6 +586,11 @@ abstract final class AppStrings {
   static const String profileEndDaySubtitle =
       'Libera as tarefas que faltam e pausa a rota';
   static const String profileNoServiceDay = 'Sem serviço';
+
+  /// "Encerrar por hoje" while a floor's check-in is open:
+  /// `Finalize <prédio> · <andar> antes de encerrar`.
+  static String endDayFinishOpenFloor(String building, String floor) =>
+      'Finalize $building · $floor antes de encerrar';
 
   /// `Lote <n> · <total> pontos em <h> h <min> min` under the full card.
   static String fullCardSummary(int batch, int total, Duration elapsed) =>

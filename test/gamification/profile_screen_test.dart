@@ -13,8 +13,10 @@ import 'package:route_monitor/gamification/profile_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/day_log_store.dart';
+import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/route_providers.dart';
+import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -242,18 +244,24 @@ void main() {
   group('Encerrar por hoje', () {
     late AppDatabase db;
     late InMemoryLocalWriteStore store;
+    late DriftStopProgressStore progress;
     late RecordingSyncWorker worker;
 
     setUp(() {
       db = inMemoryDatabase();
       addTearDown(db.close);
+      progress = DriftStopProgressStore(db);
       store = InMemoryLocalWriteStore();
       worker = RecordingSyncWorker();
     });
 
     /// The profile opened over a "map" button, with a day whose route has
     /// [routeStatus] (no route at all when null).
-    Future<void> openProfile(WidgetTester tester, {String? routeStatus}) async {
+    Future<void> openProfile(
+      WidgetTester tester, {
+      String? routeStatus,
+      List<RouteStopSummary>? stops,
+    }) async {
       tester.view
         ..physicalSize = const Size(420, 1400)
         ..devicePixelRatio = 1;
@@ -261,7 +269,7 @@ void main() {
       final route = routeStatus == null
           ? null
           : routeWith(
-              stops: [stopWith(id: 's1')],
+              stops: stops ?? [stopWith(id: 's1')],
               status: routeStatus,
             );
       await tester.pumpWidget(
@@ -274,10 +282,12 @@ void main() {
             ..._noAppealsBut(const []),
             myDayProvider.overrideWith((_) async => myDayWith(route)),
             syncWorkerProvider.overrideWithValue(worker),
+            localWriteStoreProvider.overrideWithValue(store),
+            stopProgressStoreProvider.overrideWithValue(progress),
             executionRepositoryProvider.overrideWithValue(
               ExecutionRepository(
                 store,
-                DriftStopProgressStore(db),
+                progress,
                 worker,
                 database: db,
                 dayLog: RecordingDayLogStore(),
@@ -361,6 +371,65 @@ void main() {
       );
       expect(find.byType(ProfileScreen), findsNothing);
       expect(find.text('map'), findsOneWidget);
+    });
+
+    testWidgets('off while a floor is checked in, naming that floor', (
+      tester,
+    ) async {
+      await progress.upsertInProgress('s1', 'exec-1');
+      await openProfile(tester, routeStatus: 'IN_PROGRESS');
+
+      final tile = tester.widget<ListTile>(
+        find.ancestor(
+          of: find.text(AppStrings.profileEndDay),
+          matching: find.byType(ListTile),
+        ),
+      );
+      expect(tile.enabled, isFalse);
+      expect(
+        find.text(AppStrings.endDayFinishOpenFloor('Prédio', 'Térreo')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text(AppStrings.profileEndDay));
+      await tester.pumpAndSettle();
+      expect(find.text(AppStrings.impedimentReasonOther), findsNothing);
+    });
+
+    testWidgets("confirming drops the held photos of the route's open tasks", (
+      tester,
+    ) async {
+      // s1 is still the worker's on the server; s2 is done and kept.
+      await progress.upsertInProgress('s1', 'exec-1');
+      await progress.markDone('s1');
+      await progress.upsertInProgress('s2', 'exec-2');
+      await progress.markDone('s2');
+      for (final (id, exec) in [('p1', 'exec-1'), ('p2', 'exec-2')]) {
+        await store.enqueue(
+          id: id,
+          kind: PendingOpKind.evidencePhoto,
+          payload: {'execution_id': exec},
+          routeId: 'r1',
+          initialState: PendingOpState.held,
+        );
+      }
+      await openProfile(
+        tester,
+        routeStatus: 'IN_PROGRESS',
+        stops: [
+          stopWith(id: 's1'),
+          stopWith(id: 's2', orderIndex: 2, status: 'DONE'),
+        ],
+      );
+
+      await tester.tap(find.text(AppStrings.profileEndDay));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(AppStrings.impedimentReasonOther));
+      await tester.pump();
+      await tester.tap(find.text(AppStrings.commonConfirm));
+      await tester.pumpAndSettle();
+
+      expect(await store.localPhotoCountFor('exec-1'), 0);
+      expect(await store.localPhotoCountFor('exec-2'), 1);
     });
 
     testWidgets('cancelling the reason reports nothing and stays', (

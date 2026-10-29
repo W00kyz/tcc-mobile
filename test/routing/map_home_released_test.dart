@@ -5,6 +5,7 @@ import 'package:route_monitor/appeals/appeal_api.dart';
 import 'package:route_monitor/appeals/appeal_form_screen.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/monitoring/notifications_screen.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
@@ -195,7 +196,35 @@ void main() {
       },
     );
 
-    testWidgets('a released stop without a reason reads just "Liberado"', (
+    testWidgets("a released stop's held photos are discarded on the day "
+        'reload; an open one keeps its own', (tester) async {
+      final store = InMemoryLocalWriteStore();
+      for (final (id, exec) in [('p1', 'exec-1'), ('p2', 'exec-2')]) {
+        await store.enqueue(
+          id: id,
+          kind: PendingOpKind.evidencePhoto,
+          payload: {'execution_id': exec},
+          routeId: 'r1',
+          initialState: PendingOpState.held,
+        );
+      }
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(route),
+          localWriteStore: store,
+          stopProgressStore: FakeStopProgressStore({
+            's1': 'exec-1',
+            's2': 'exec-2',
+          }),
+        ),
+      );
+
+      expect(await store.localPhotoCountFor('exec-1'), 0);
+      expect(await store.localPhotoCountFor('exec-2'), 1);
+    });
+
+    testWidgets('a released stop is no longer drawn on the floor card', (
       tester,
     ) async {
       await pumpHome(
@@ -212,9 +241,10 @@ void main() {
         ),
       );
 
-      // The slot's spoken label, with no reason after it.
-      expect(find.bySemanticsLabel('Liberado'), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('Liberado: ')), findsNothing);
+      // It went back to the pool: not the worker's any more.
+      expect(slotOf('s1'), findsNothing);
+      expect(find.bySemanticsLabel(RegExp('Liberado')), findsNothing);
+      expect(slotOf('s2'), findsOneWidget);
     });
 
     testWidgets(

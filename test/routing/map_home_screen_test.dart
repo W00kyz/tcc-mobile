@@ -325,10 +325,11 @@ void main() {
       );
       await pumpHome(tester, homeWith(repositoryWith(route)));
 
-      // The stamp's hour, on the card, and the slot's spoken label.
+      // The stamp's hour, on the card, and the slot's spoken label (its
+      // service point first).
       expect(find.text('10:05'), findsOneWidget);
       expect(
-        find.bySemanticsLabel(AppStrings.slotDone('10:05')),
+        find.bySemanticsLabel('Sala s1, ${AppStrings.slotDone('10:05')}'),
         findsOneWidget,
       );
     });

@@ -7,6 +7,7 @@ import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/impossibility_reason_dialog.dart';
 import 'package:route_monitor/execution/observation_draft.dart';
 import 'package:route_monitor/execution/task_photos.dart';
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
@@ -246,7 +247,10 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
           Text(stop.servicePointName, style: text.titleLarge),
           const SizedBox(height: 4),
           Text(
-            AppStrings.buildingFloor(stop.buildingName, stop.floorLabel),
+            AppStrings.buildingFloor(
+              stop.buildingName,
+              floorDisplayLabel(stop.floorLabel),
+            ),
             style: text.bodyMedium?.copyWith(color: p.muted),
           ),
         ],

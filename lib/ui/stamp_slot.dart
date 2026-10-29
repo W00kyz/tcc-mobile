@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/ui/app_theme.dart';
@@ -30,6 +31,7 @@ class StampSlot extends StatefulWidget {
     this.size = 48,
     this.animateStamp = false,
     this.animateImpeded = false,
+    this.showFloorCaption = true,
     this.onTap,
     super.key,
   });
@@ -38,6 +40,11 @@ class StampSlot extends StatefulWidget {
   final double size;
   final bool animateStamp;
   final bool animateImpeded;
+
+  /// The floor label (and a release's reason) under the slot. Off on a card
+  /// already split by floor, where only the stamp — and a done one's hour —
+  /// shows.
+  final bool showFloorCaption;
 
   /// Opens the stop's actions. The slot and its caption are the target —
   /// never under 48dp (the circle alone is [size]).
@@ -112,8 +119,11 @@ class _StampSlotState extends State<StampSlot>
     return at == null ? '' : stampHour(at);
   }
 
+  /// The service point (when known), the state, then the sync mark.
   String _label() {
-    final base = _stateLabel();
+    final name = widget.slot.servicePointName;
+    final state = _stateLabel();
+    final base = name == null ? state : '$name, $state';
     return widget.slot.pendingSync
         ? '$base, ${AppStrings.slotPendingSync}'
         : base;
@@ -142,8 +152,10 @@ class _StampSlotState extends State<StampSlot>
           onTap: widget.onTap,
           child: ExcludeSemantics(child: _circle(p)),
         ),
-        const SizedBox(height: 3),
-        _caption(context, p),
+        if (widget.showFloorCaption) ...[
+          const SizedBox(height: 3),
+          _caption(context, p),
+        ],
       ],
     );
     return widget.onTap == null ? body : _tappable(body);
@@ -307,7 +319,7 @@ class _StampSlotState extends State<StampSlot>
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            slot.floorLabel,
+            floorDisplayLabel(slot.floorLabel),
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,

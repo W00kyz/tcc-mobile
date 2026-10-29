@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'package:route_monitor/appeals/released_stop_listener.dart';
-import 'package:route_monitor/execution/observation_draft.dart';
 import 'package:route_monitor/execution/task_dialog.dart';
 import 'package:route_monitor/gamification/full_card_trigger.dart';
 import 'package:route_monitor/l10n/strings.dart';
@@ -24,6 +23,7 @@ import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/home_top_bar.dart';
 import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/location_service.dart';
+import 'package:route_monitor/routing/released_cleanup.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -132,7 +132,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         ? watchPendingSyncStops(ref, route!)
         : const <String>{};
     // The batch's card still feeds the full card and the day log (the
-    // gamification counts by batch), and the live first leg.
+    // gamification counts by batch).
     final card = _isWorked(route)
         ? buildBatchCard(route!, local, pendingSync)
         : null;
@@ -213,7 +213,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   /// common case).
   void _clearSelectionOnNewBatch() {
     ref.listen<AsyncValue<MyDay>>(myDayProvider, (previous, next) {
-      _forgetReleasedObservations(next.value?.route);
+      forgetReleasedStops(ref, next.value?.route);
       final before = previous?.value?.route;
       final after = next.value?.route;
       if (before?.id == after?.id &&
@@ -223,16 +223,6 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       _clearSelection();
       _forgetStamp();
     });
-  }
-
-  /// A released stop is no longer the worker's: its observation draft goes.
-  /// `invalidate` on a draft never opened is a no-op, so nothing is created.
-  void _forgetReleasedObservations(RouteSummary? route) {
-    for (final stop in route?.stops ?? const <RouteStopSummary>[]) {
-      if (stop.status == 'RELEASED') {
-        ref.invalidate(observationDraftProvider(stop.id));
-      }
-    }
   }
 
   /// A route whose batch is on the map: anything but paused or done.
@@ -267,7 +257,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
           : buildRouteMapData(
               route!,
               buildings: buildings,
-              approach: watchLiveApproach(ref, route, card),
+              approach: watchLiveApproach(ref, route, buildings),
             ),
       buildings: buildings,
       selectedBuildingId: selectedBuildingId,

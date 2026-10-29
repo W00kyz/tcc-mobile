@@ -20,7 +20,10 @@ import '../routing/map_home_fakes.dart';
 import '../support/fake_day_log_store.dart';
 import '../support/in_memory_database.dart';
 
-RouteStopSummary _stop({bool requiresEvidence = true}) => RouteStopSummary(
+RouteStopSummary _stop({
+  bool requiresEvidence = true,
+  String floorLabel = 'Térreo',
+}) => RouteStopSummary(
   id: 's1',
   orderIndex: 1,
   batchNumber: 1,
@@ -28,7 +31,7 @@ RouteStopSummary _stop({bool requiresEvidence = true}) => RouteStopSummary(
   servicePointName: 'Banheiro masculino',
   buildingId: 'b1',
   buildingName: 'Central de Aulas',
-  floorLabel: 'Térreo',
+  floorLabel: floorLabel,
   floorId: 'f1',
   latitude: -7.2,
   longitude: -35.9,
@@ -178,6 +181,14 @@ void main() {
     expect(find.text('Limpeza de banheiro'), findsOneWidget);
     expect(find.text(AppStrings.taskRequiresPhotos), findsOneWidget);
     expect(find.text(AppStrings.taskObservationLabel), findsOneWidget);
+  });
+
+  testWidgets('a bare-number floor reads "Andar <n>" under the name', (
+    tester,
+  ) async {
+    await openDialog(tester, stop: _stop(floorLabel: '1'));
+
+    expect(find.text('Central de Aulas · Andar 1'), findsOneWidget);
   });
 
   testWidgets('a task with no evidence flag does not ask for photos', (

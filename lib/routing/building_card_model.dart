@@ -107,6 +107,30 @@ DayBuilding? nextBuilding(List<DayBuilding> buildings) => buildings
     )
     .firstOrNull;
 
+/// A floor with a check-in open, and the building it is in.
+typedef OpenFloor = ({DayBuilding building, FloorRow floor});
+
+/// The first floor of [buildings] with a check-in open, if any.
+///
+///     openFloorOfDay(buildings)?.floor.label; // '1' while it is checked in
+OpenFloor? openFloorOfDay(Iterable<DayBuilding> buildings) {
+  for (final building in buildings) {
+    final floor = openFloorOf(building);
+    if (floor != null) return (building: building, floor: floor);
+  }
+  return null;
+}
+
+/// The stop of the day's `next` slot, or null when nothing is open.
+///
+///     nextTaskStopId(buildings); // 's3' once s2 was reported impossible
+String? nextTaskStopId(List<DayBuilding> buildings) => buildings
+    .expand((b) => b.floors)
+    .expand((f) => f.slots)
+    .where((s) => s.state == SlotState.next)
+    .firstOrNull
+    ?.stopId;
+
 /// The floor of [building] with a check-in open, if any.
 FloorRow? openFloorOf(DayBuilding building) =>
     building.floors.where((f) => f.hasOpenCheckIn).firstOrNull;
@@ -215,6 +239,7 @@ CardSlot _slotOf(
     stopId: stop.id,
     state: state,
     floorLabel: stop.floorLabel,
+    servicePointName: stop.servicePointName,
     stampedAt: state != SlotState.done
         ? null
         : (localDone ? localState!.updatedAt : stop.doneAt),

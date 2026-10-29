@@ -13,8 +13,11 @@ import 'package:route_monitor/gamification/achievements.dart';
 import 'package:route_monitor/gamification/gamification_providers.dart';
 import 'package:route_monitor/gamification/ink_stamp.dart';
 import 'package:route_monitor/gamification/streak.dart';
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/day_log_store.dart';
+import 'package:route_monitor/routing/building_card_model.dart';
+import 'package:route_monitor/routing/day_local_state.dart';
 import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
@@ -233,12 +236,7 @@ class _ProfileShortcuts extends ConsumerWidget {
             () => unawaited(context.push('/recursos')),
           ),
           if (route != null && route.status == 'IN_PROGRESS')
-            _row(
-              const Icon(Icons.event_busy_outlined),
-              AppStrings.profileEndDay,
-              () => unawaited(_endDay(context, ref, route)),
-              subtitle: AppStrings.profileEndDaySubtitle,
-            ),
+            _endDayRow(context, ref, route),
           _row(const Icon(Icons.logout), AppStrings.profileSignOut, () {
             unawaited(ref.read(sessionProvider.notifier).logout());
           }),
@@ -251,16 +249,43 @@ class _ProfileShortcuts extends ConsumerWidget {
   Widget _badged(IconData icon, int count) =>
       count == 0 ? Icon(icon) : Badge(label: Text('$count'), child: Icon(icon));
 
+  /// Off, saying which, while a floor's check-in is open: ending the day
+  /// then would strand its stamped tasks, never checked out.
+  Widget _endDayRow(BuildContext context, WidgetRef ref, RouteSummary route) {
+    final open = _openFloor(ref, route);
+    return _row(
+      const Icon(Icons.event_busy_outlined),
+      AppStrings.profileEndDay,
+      open == null ? () => unawaited(_endDay(context, ref, route)) : null,
+      subtitle: open == null
+          ? AppStrings.profileEndDaySubtitle
+          : AppStrings.endDayFinishOpenFloor(
+              open.building.name,
+              floorDisplayLabel(open.floor.label),
+            ),
+    );
+  }
+
+  /// The day's floor with a check-in open, as the map home draws it.
+  OpenFloor? _openFloor(WidgetRef ref, RouteSummary route) {
+    final impeded =
+        ref.watch(impededStopIdsProvider(route.id)).value ?? const <String>{};
+    final local = watchLocalStates(ref, route);
+    return openFloorOfDay(buildDayBuildings(route, local, impeded, const {}));
+  }
+
+  /// A null [onTap] draws the row disabled.
   Widget _row(
     Widget leading,
     String label,
-    VoidCallback onTap, {
+    VoidCallback? onTap, {
     String? subtitle,
   }) => ListTile(
     minTileHeight: 56,
     leading: leading,
     title: Text(label),
     subtitle: subtitle == null ? null : Text(subtitle),
+    enabled: onTap != null,
     onTap: onTap,
   );
 
@@ -288,9 +313,26 @@ class _ProfileShortcuts extends ConsumerWidget {
           scope: 'ROUTE_REMAINDER',
           reason: reason,
         );
+    await _discardHeldPhotos(container, route);
     notify(AppStrings.routeImpedimentReported);
     navigator.pop();
     await container.read(syncWorkerProvider).syncRoute(route.id);
     container.invalidate(myDayProvider);
+  }
+
+  /// The photos held for a task of [route] still open: it is handed back
+  /// with the rest, and the backend refuses evidence of a released stop.
+  Future<void> _discardHeldPhotos(
+    ProviderContainer container,
+    RouteSummary route,
+  ) async {
+    final progress = container.read(stopProgressStoreProvider);
+    final store = container.read(localWriteStoreProvider);
+    final open = route.stops
+        .where((s) => s.status == 'PENDING' || s.status == 'IN_PROGRESS')
+        .map((s) => s.id);
+    for (final entry in await progress.allForRoute(open)) {
+      await store.discardHeldPhotos(entry.executionId);
+    }
   }
 }

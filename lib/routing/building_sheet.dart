@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_card_model.dart' show SlotState;
 import 'package:route_monitor/routing/building_card_model.dart';
@@ -86,7 +87,10 @@ class BuildingSheetHeader extends ConsumerWidget {
   String _placeText() {
     final floor = currentFloorOf(building);
     if (floor == null) return building.name;
-    return AppStrings.buildingFloor(building.name, floor.label);
+    return AppStrings.buildingFloor(
+      building.name,
+      floorDisplayLabel(floor.label),
+    );
   }
 
   /// Straight-line metres from the worker's last fix; null without one.
@@ -102,9 +106,6 @@ class BuildingSheetHeader extends ConsumerWidget {
   );
 }
 
-/// A floor with a check-in open, and the building it is in.
-typedef OpenFloor = ({DayBuilding building, FloorRow floor});
-
 /// The floor checked in somewhere other than [building], if any: only one
 /// floor is open at a time, so its exit scan comes before any other entry.
 ///
@@ -112,14 +113,9 @@ typedef OpenFloor = ({DayBuilding building, FloorRow floor});
 OpenFloor? openFloorElsewhere(
   List<DayBuilding> buildings,
   DayBuilding building,
-) {
-  for (final other in buildings) {
-    if (other.buildingId == building.buildingId) continue;
-    final floor = openFloorOf(other);
-    if (floor != null) return (building: other, floor: floor);
-  }
-  return null;
-}
+) => openFloorOfDay(
+  buildings.where((other) => other.buildingId != building.buildingId),
+);
 
 /// The sheet's fixed footer: "Escanear QR" to check in to a floor of
 /// [building], or "Escanear QR de saída" while a floor is checked in. Off
@@ -183,7 +179,7 @@ class ScanFooter extends ConsumerWidget {
     if (floor == null && other != null) {
       return AppStrings.scanFinishOpenFloor(
         other.building.name,
-        other.floor.label,
+        floorDisplayLabel(other.floor.label),
       );
     }
     if (!near) return AppStrings.scanNeedsProximity;
@@ -194,7 +190,7 @@ class ScanFooter extends ConsumerWidget {
   }
 
   Future<void> _scan(BuildContext context, WidgetRef ref, FloorRow? floor) {
-    if (floor == null) return checkInFloor(context, ref, route);
+    if (floor == null) return checkInFloor(context, ref, route, building);
     return checkOutFloor(context, ref, route, floor);
   }
 }

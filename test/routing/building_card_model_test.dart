@@ -302,6 +302,38 @@ void main() {
       expect(floor.readyForCheckOut, isTrue);
     });
 
+    test('stamped and impeded together: ready to leave', () {
+      final route = _route([
+        for (var i = 0; i < 2; i++) _stop('s${i + 1}', i + 1, 'A'),
+      ]);
+      final floor = _build(
+        route,
+        local: {'s1': _local(StopLocalStatus.stamped)},
+        impeded: {'s2'},
+      ).single.floors.single;
+      expect(floor.readyForCheckOut, isTrue);
+    });
+
+    test('impeded only: no check-in open, nothing to leave', () {
+      final route = _route([_stop('s1', 1, 'A')]);
+      final floor = _build(route, impeded: {'s1'}).single.floors.single;
+      expect(floor.slots.single.state, SlotState.impeded);
+      expect(floor.hasOpenCheckIn, isFalse);
+      expect(floor.readyForCheckOut, isFalse);
+    });
+
+    test('openFloorOfDay finds the checked-in floor and its building', () {
+      final route = _route([_stop('s1', 1, 'A'), _stop('s2', 2, 'B')]);
+      final buildings = _build(
+        route,
+        local: {'s2': _local(StopLocalStatus.inProgress)},
+      );
+      final open = openFloorOfDay(buildings);
+      expect(open?.building.buildingId, 'B');
+      expect(open?.floor.slots.single.stopId, 's2');
+      expect(openFloorOfDay(_build(route)), isNull);
+    });
+
     test('no check-in at all: neither open nor ready', () {
       final floor = floorWith({'s1': StopLocalStatus.done});
       expect(floor.hasOpenCheckIn, isFalse);
@@ -347,6 +379,12 @@ void main() {
 
     test('nextBuilding is the one holding the next slot', () {
       expect(nextBuilding(_build(route))?.buildingId, 'B');
+    });
+
+    test('nextTaskStopId skips a task reported impossible here', () {
+      final route = _route([_stop('s1', 1, 'A'), _stop('s2', 2, 'B')]);
+      expect(nextTaskStopId(_build(route)), 's1');
+      expect(nextTaskStopId(_build(route, impeded: {'s1'})), 's2');
     });
 
     test('nextBuilding is null when nothing is open', () {

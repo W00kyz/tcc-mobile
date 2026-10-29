@@ -5,6 +5,7 @@ import 'package:route_monitor/checkin/checkin_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart' show ExitScan;
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/observation_draft.dart';
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_card_model.dart' show SlotState;
 import 'package:route_monitor/routing/building_card_model.dart';
@@ -68,16 +69,18 @@ final lastImpededStopProvider = NotifierProvider<LastStamped, String?>(
   LastStamped.new,
 );
 
-/// "Escanear QR" on a floor: one scan checks in every open task of that
-/// floor. An unverifiable QR gets the invalid-QR notice; a floor with no open
-/// task of the worker's gets [AppStrings.floorHasNoOpenTasks]. Either way
-/// nothing is enqueued.
+/// "Escanear QR" on a floor of [building]: one scan checks in every open task
+/// of that floor. An unverifiable QR gets the invalid-QR notice, a floor of
+/// another building [AppStrings.entryQrOtherBuilding], a floor with no open
+/// task of the worker's [AppStrings.floorHasNoOpenTasks]. Either way nothing
+/// is enqueued.
 ///
-///     onPressed: () => checkInFloor(context, ref, route)
+///     onPressed: () => checkInFloor(context, ref, route, building)
 Future<void> checkInFloor(
   BuildContext context,
   WidgetRef ref,
   RouteSummary route,
+  DayBuilding building,
 ) async {
   final notify = homeNotifier(ref, context);
   final scan = await scanAndLocate(context, ref, entryScanContext(route));
@@ -85,13 +88,45 @@ Future<void> checkInFloor(
 
   final qr = await ref.read(qrVerifierProvider).verify(scan.rawValue);
   if (qr == null) return notify(AppStrings.scanInvalidQr);
-  final stops = await _openCandidates(ref, route, qr.floorId);
+  final current = await _routeWithFloorIds(ref, route);
+  if (current == null) return notify(AppStrings.floorDataOutdated);
+  final owner = _floorOwner(current, qr.floorId);
+  if (owner != null && owner.buildingId != building.buildingId) {
+    return notify(AppStrings.entryQrOtherBuilding(owner.buildingName));
+  }
+  final stops = await _openCandidates(ref, current, qr.floorId);
   if (stops.isEmpty) return notify(AppStrings.floorHasNoOpenTasks);
 
-  await _enqueueCheckIns(ref, route, stops, scan);
+  await _enqueueCheckIns(ref, current, stops, scan);
   ref.invalidate(myDayProvider);
   notify(AppStrings.floorCheckInDone(stops.length));
 }
+
+/// [route], or the day read again when its current batch carries no floor
+/// id (a snapshot cached before the backend sent them): the scanned floor
+/// can only be matched by id. Null when even the fresh read has none.
+Future<RouteSummary?> _routeWithFloorIds(
+  WidgetRef ref,
+  RouteSummary route,
+) async {
+  if (_hasFloorIds(route)) return route;
+  try {
+    final fresh = (await ref.refresh(myDayProvider.future)).route;
+    return fresh != null && _hasFloorIds(fresh) ? fresh : null;
+  } on Object {
+    // Deliberately broad: offline or any failure reads as "still outdated".
+    return null;
+  }
+}
+
+bool _hasFloorIds(RouteSummary route) => route.stops.any(
+  (s) => s.batchNumber == route.currentBatch && s.floorId != null,
+);
+
+/// A stop of the day on [floorId]: a floor belongs to one building, so this
+/// says whose QR it is. Null for a floor with no task of the day.
+RouteStopSummary? _floorOwner(RouteSummary route, String floorId) =>
+    route.stops.where((s) => s.floorId == floorId).firstOrNull;
 
 /// One check-in per stop, all with the scan's QR and each its own key. The
 /// repository only enqueues + writes local state: nothing to catch.
@@ -223,7 +258,10 @@ Future<void> checkOutFloor(
   if (stamped.isEmpty) return;
   final notify = homeNotifier(ref, context);
   final building = route.stops.firstWhere((s) => s.id == stamped.first);
-  final exit = ExitScan(building.buildingName, floor.label);
+  final exit = ExitScan(
+    building.buildingName,
+    floorDisplayLabel(floor.label),
+  );
   final scan = await scanAndLocate(context, ref, exit);
   if (scan == null) return;
   if (!await _isFloorExitQr(ref, floor, scan, notify)) return;
@@ -256,7 +294,9 @@ Future<bool> _isFloorExitQr(
     return false;
   }
   final wrongFloor = floor.floorId != null && qr.floorId != floor.floorId;
-  if (wrongFloor) notify(AppStrings.exitQrWrongFloor(floor.label));
+  if (wrongFloor) {
+    notify(AppStrings.exitQrWrongFloor(floorDisplayLabel(floor.label)));
+  }
   return !wrongFloor;
 }
 

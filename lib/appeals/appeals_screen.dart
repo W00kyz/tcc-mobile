@@ -6,6 +6,7 @@ import 'package:route_monitor/appeals/appeal_form_screen.dart';
 import 'package:route_monitor/appeals/appeal_providers.dart';
 import 'package:route_monitor/appeals/day_time.dart';
 import 'package:route_monitor/appeals/released_stop_entry.dart';
+import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/ui/empty_state.dart';
@@ -172,7 +173,7 @@ class _EligibleStopTile extends StatelessWidget {
     subtitle: Text(
       AppStrings.appealEligibleDetails(
         building: stop.buildingName,
-        floor: stop.floorLabel,
+        floor: floorDisplayLabel(stop.floorLabel),
         reason: AppStrings.releaseReasonLabel(stop.releaseReason),
         deadline: formatDayTime(stop.deadline),
       ),
