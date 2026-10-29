@@ -41,7 +41,7 @@ void main() {
     ) async {
       final store = InMemoryLocalWriteStore();
       final route = _pendingRoute();
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(repositoryWith(route), localWriteStore: store),
       );
@@ -88,7 +88,7 @@ void main() {
           repository.day = myDayWith(secondBatch);
           return AllocationResult(route: secondBatch, poolEmpty: false);
         };
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repository,
@@ -113,6 +113,8 @@ void main() {
         await _signal(tester, first);
 
         expect(repository.allocationCalls, ['nextBatch:r1']);
+        // The new batch starts with no building selected.
+        await tapPin(tester, 'b1');
         expect(slotOf('s2'), findsOneWidget);
       },
     );

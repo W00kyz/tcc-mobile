@@ -3,15 +3,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/routing/floor_actions.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/selected_building.dart';
 import 'package:route_monitor/ui/floor_card.dart';
+import 'package:route_monitor/ui/map_sheet.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_route_repository.dart';
 import 'map_home_harness.dart';
 
 // Final review I-5: the stamp falls on the stamped stop's floor card, so a
-// stamp made with another building selected clears the selection first and
-// the sheet comes back to the stop's building.
+// stamp made with another building selected (or none, the sheet hidden)
+// selects the stop's building and the sheet shows it.
 
 /// s1 in progress in "Central de Aulas" (b1), s2 pending in "Bloco B".
 RouteSummary _inProgressInB1() => routeWith(
@@ -51,12 +53,39 @@ void main() {
     await concludeTask(ref, route, route.stops.first);
     await tester.pumpAndSettle();
 
-    expect(container.read(selectedBuildingProvider), isNull);
+    expect(container.read(selectedBuildingProvider), 'b1');
     expect(shownFloorCard(tester).building.buildingId, 'b1');
     final animating = tester
         .widgetList<StampSlot>(find.byType(StampSlot))
         .where((slot) => slot.animateStamp);
     expect(animating.map((slot) => slot.slot.stopId), ['s1']);
     expect(find.byType(FloorCard).hitTestable(), findsOneWidget);
+  });
+
+  testWidgets("a stamp with the sheet hidden opens the stop's building and "
+      'keeps it there', (tester) async {
+    final route = _inProgressInB1();
+    await pumpHome(
+      tester,
+      homeWith(
+        repositoryWith(route),
+        stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
+      ),
+    );
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(MapHomeScreen)),
+    );
+    expect(find.byType(MapSheet), findsNothing);
+
+    final ref = tester.element(find.byType(MapHomeScreen)) as WidgetRef;
+    await concludeTask(ref, route, route.stops.first);
+    await tester.pumpAndSettle();
+
+    expect(container.read(selectedBuildingProvider), 'b1');
+    expect(find.byType(MapSheet), findsOneWidget);
+    final animating = tester
+        .widgetList<StampSlot>(find.byType(StampSlot))
+        .where((slot) => slot.animateStamp);
+    expect(animating.map((slot) => slot.slot.stopId), ['s1']);
   });
 }

@@ -29,8 +29,9 @@ FloorRow? currentFloorOf(DayBuilding building) =>
 FloorRow? _floorWith(DayBuilding building, bool Function(SlotState) test) =>
     building.floors.where((f) => f.slots.any((s) => test(s.state))).firstOrNull;
 
-/// "Próximo ponto" (or "Prédio selecionado" after a pin tap), the building
-/// and its current floor, and how far the worker is from it.
+/// "Próximo ponto" (or "Prédio selecionado" when the tapped building is not
+/// the next one), the building and its current floor, and how far the worker
+/// is from it.
 ///
 ///     BuildingSheetHeader(building: b, selected: false)
 class BuildingSheetHeader extends ConsumerWidget {
@@ -42,7 +43,8 @@ class BuildingSheetHeader extends ConsumerWidget {
 
   final DayBuilding building;
 
-  /// The worker tapped this building's pin; otherwise it is the next one.
+  /// The worker tapped the pin of a building that is not the next one;
+  /// otherwise it is the next one.
   final bool selected;
 
   @override
@@ -230,18 +232,4 @@ class _FooterCaption extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The building the sheet is about: the one whose pin was tapped, else the
-/// one with a floor checked in (its exit scan is owed), else the next one,
-/// else the first with work left, else the last. Null with no building.
-///
-///     final building = sheetBuildingOf(buildings, selectedId);
-DayBuilding? sheetBuildingOf(List<DayBuilding> buildings, String? selectedId) {
-  if (buildings.isEmpty) return null;
-  return buildings.where((b) => b.buildingId == selectedId).firstOrNull ??
-      buildings.where((b) => openFloorOf(b) != null).firstOrNull ??
-      nextBuilding(buildings) ??
-      buildings.where((b) => !b.complete).firstOrNull ??
-      buildings.last;
 }

@@ -28,7 +28,7 @@ RouteSummary _pendingRoute() => routeWith(stops: [stopIn(id: 's1')]);
 void main() {
   group('the bell', () {
     testWidgets('shows the unread count on its badge', (tester) async {
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(_pendingRoute()),
@@ -45,13 +45,16 @@ void main() {
     testWidgets('shows no badge when there are no unread notifications', (
       tester,
     ) async {
-      await pumpHome(tester, homeWith(repositoryWith(_pendingRoute())));
+      await pumpHomeWithSheet(
+        tester,
+        homeWith(repositoryWith(_pendingRoute())),
+      );
 
       expect(find.byType(Badge), findsNothing);
     });
 
     testWidgets('a tap opens the notifications screen', (tester) async {
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(_pendingRoute()),
@@ -111,7 +114,7 @@ void main() {
       "stop's appeal form",
       (tester) async {
         final db = await dbWithNotice();
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repositoryWith(route),
@@ -138,7 +141,7 @@ void main() {
       tester,
     ) async {
       final db = await dbWithNotice();
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(route),
@@ -170,7 +173,7 @@ void main() {
     testWidgets('a release the worker cannot appeal shows no snackbar', (
       tester,
     ) async {
-      await pumpHome(tester, homeWith(repositoryWith(route)));
+      await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
       announce(tester, appealable: false);
       await tester.pumpAndSettle();
@@ -183,7 +186,7 @@ void main() {
       'released points meanwhile',
       (tester) async {
         final appealApi = RecordingAppealApi();
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(repositoryWith(route), appealApi: appealApi),
         );
@@ -208,7 +211,7 @@ void main() {
           initialState: PendingOpState.held,
         );
       }
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(route),
@@ -227,7 +230,7 @@ void main() {
     testWidgets('a released stop is no longer drawn on the floor card', (
       tester,
     ) async {
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(
@@ -251,7 +254,7 @@ void main() {
       'the account avatar counts the points the worker can contest and is a '
       'direct link to Perfil, with no menu',
       (tester) async {
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repositoryWith(route),

@@ -43,7 +43,7 @@ import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
-import '../routing/map_home_harness.dart' show slotOf;
+import '../routing/map_home_harness.dart' show slotOf, tapPin;
 import '../routing/no_tiles_tile_provider.dart';
 import '../support/fake_sync_notification_taps.dart';
 import '../support/in_memory_database.dart';
@@ -194,7 +194,9 @@ void main() {
       expect(find.text(AppStrings.dayProgress(2, 2, 3)), findsOneWidget);
       expect(_nextBatchOfflinePanel(), findsNothing);
       expect(find.byTooltip(AppStrings.routeAllSynced), findsOneWidget);
-      // Its stop reads on the floor card.
+      // Its stop reads on the floor card, once its building is tapped (a
+      // new batch starts with no building selected).
+      await tapPin(tester, 'b1');
       expect(slotOf('s3'), findsOneWidget);
 
       // ---- Idempotent re-drain -----------------------------------------

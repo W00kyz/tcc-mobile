@@ -28,6 +28,7 @@ import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/selected_building.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_notifications.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -161,6 +162,33 @@ void usePhoneSurface(WidgetTester tester, {Size size = const Size(420, 1400)}) {
 Future<void> pumpHome(WidgetTester tester, Widget app) async {
   usePhoneSurface(tester);
   await tester.pumpWidget(app);
+  await tester.pumpAndSettle();
+}
+
+/// Selects [buildingId] as a pin tap does, without needing its pin on
+/// screen (the map centres on a tapped pin, which can push the others out
+/// of view), and settles: its sheet opens.
+Future<void> selectBuilding(WidgetTester tester, String buildingId) async {
+  ProviderScope.containerOf(
+    tester.element(find.byType(MapHomeScreen)),
+  ).read(selectedBuildingProvider.notifier).select(buildingId);
+  await tester.pumpAndSettle();
+}
+
+/// Pumps [app] with [buildingId] selected, so its sheet shows: the sheet is
+/// hidden until a building is selected.
+Future<void> pumpHomeWithSheet(
+  WidgetTester tester,
+  Widget app, {
+  String buildingId = 'b1',
+}) async {
+  await pumpHome(tester, app);
+  await selectBuilding(tester, buildingId);
+}
+
+/// Taps the pin of [buildingId] and settles: its sheet opens.
+Future<void> tapPin(WidgetTester tester, String buildingId) async {
+  await tester.tap(pinCircle(buildingId));
   await tester.pumpAndSettle();
 }
 

@@ -214,7 +214,7 @@ void main() {
       // Stamped before the restart: no stamp lands in this run.
       final progress = FakeStopProgressStore({'s2': 'exec-2'});
       await progress.markStamped('s2');
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(routeWith(stops: stops(), currentBatch: 2)),

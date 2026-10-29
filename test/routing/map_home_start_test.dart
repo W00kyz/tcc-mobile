@@ -8,6 +8,7 @@ import 'package:route_monitor/routing/batch_card_model.dart' show SlotState;
 import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/ui/map_sheet.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_connectivity.dart';
@@ -72,6 +73,10 @@ void main() {
         expect(repository.lastPosition, (lat: -7.23, lng: -35.88));
         expect(find.text(AppStrings.dayProgress(1, 0, 2)), findsOneWidget);
         expect(startButton(), findsNothing);
+        // A new batch starts with no building selected: the map shows
+        // whole, and the batch's building opens on its pin.
+        expect(find.byType(MapSheet), findsNothing);
+        await tapPin(tester, 'b1');
         // The batch's building, its two tasks on the floor card.
         expect(slotOf('s1'), findsOneWidget);
         expect(slotOf('s2'), findsOneWidget);
@@ -264,7 +269,7 @@ void main() {
             ),
           ],
         );
-        await pumpHome(tester, homeWith(repositoryWith(route)));
+        await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
         expect(find.text('Lote 2 · 1 de 2 pontos hoje'), findsOneWidget);
         // The stops are read from the floor card, not a list on the home.
@@ -367,6 +372,7 @@ void main() {
 
       expect(repository.allocationCalls, ['start']);
       expect(checkAgainButton(), findsNothing);
+      await tapPin(tester, 'b1');
       expect(slotOf('s2'), findsOneWidget);
     });
 
@@ -390,7 +396,7 @@ void main() {
   testWidgets('the header reads how far the worker is from the building', (
     tester,
   ) async {
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(repositoryWith(routeWith(stops: [stopIn(id: 's1')]))),
     );

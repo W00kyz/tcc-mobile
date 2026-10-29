@@ -7,6 +7,7 @@ import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/blocked_sync_screen.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/sync_status.dart';
+import 'package:route_monitor/ui/map_sheet.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_connectivity.dart';
@@ -54,7 +55,7 @@ void main() {
         final worker = RecordingSyncWorker(
           statusStream: Stream<RouteSyncStatus>.value(_statusOf(pending: 2)),
         );
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(repositoryWith(_pendingRoute()), syncWorker: worker),
         );
@@ -74,7 +75,7 @@ void main() {
       final worker = RecordingSyncWorker(
         statusStream: Stream<RouteSyncStatus>.value(_statusOf(pending: 1)),
       );
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(repositoryWith(_pendingRoute()), syncWorker: worker),
       );
@@ -88,7 +89,7 @@ void main() {
       final worker = RecordingSyncWorker(
         statusStream: Stream<RouteSyncStatus>.value(_statusOf()),
       );
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(repositoryWith(_pendingRoute()), syncWorker: worker),
       );
@@ -103,7 +104,7 @@ void main() {
       final worker = RecordingSyncWorker(
         statusStream: Stream<RouteSyncStatus>.value(_statusOf(pending: 2)),
       );
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(repositoryWith(_pendingRoute()), syncWorker: worker),
       );
@@ -128,7 +129,7 @@ void main() {
           _statusOf(state: RouteSyncState.blocked, blocked: 1),
         ),
       );
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(_pendingRoute()),
@@ -157,7 +158,7 @@ void main() {
           routeId: 'r1',
           payload: {'route_stop_id': 's1'},
         );
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repositoryWith(
@@ -188,7 +189,7 @@ void main() {
           routeId: 'r1',
           payload: {'execution_id': 'exec-1'},
         );
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repositoryWith(
@@ -216,7 +217,7 @@ void main() {
         payload: {'execution_id': 'exec-1'},
         initialState: PendingOpState.held,
       );
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(
@@ -243,7 +244,7 @@ void main() {
         payload: {'route_stop_id': 's1'},
       );
       await store.markBlocked('op-1', 'HTTP 422');
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
       );
@@ -288,7 +289,7 @@ void main() {
         handOutSecondBatch(repository);
         final progress = FakeStopProgressStore({'s1': 'exec-1'});
         await progress.markStamped('s1');
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repository,
@@ -304,6 +305,9 @@ void main() {
         expect(repository.allocationCalls, ['nextBatch:r1']);
         expect(await store.unsyncedForRoute('r1'), isEmpty);
         expect(find.text(AppStrings.dayProgress(2, 1, 2)), findsOneWidget);
+        // A new batch starts with no building selected: no sheet yet.
+        expect(find.byType(MapSheet), findsNothing);
+        await tapPin(tester, 'b1');
         expect(slotOf('s2'), findsOneWidget);
       },
     );
@@ -318,7 +322,7 @@ void main() {
         await progress.markDone('s1');
         final repository = repositoryWith(lastStopInProgress());
         handOutSecondBatch(repository);
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repository,
@@ -335,6 +339,7 @@ void main() {
 
         expect(repository.allocationCalls, ['nextBatch:r1']);
         expect(nextBatchOfflinePanel(), findsNothing);
+        await tapPin(tester, 'b1');
         expect(slotOf('s2'), findsOneWidget);
       },
     );
@@ -344,7 +349,7 @@ void main() {
     ) async {
       final progress = FakeStopProgressStore({'s1': 'exec-1'});
       await progress.markDone('s1');
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(lastStopInProgress()),
@@ -376,7 +381,7 @@ void main() {
         events.add('pull');
         return pull();
       };
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repository,
@@ -416,7 +421,7 @@ void main() {
         final worker = RecordingSyncWorker(statusStream: status.stream);
         final repository = repositoryWith(lastStopInProgress());
         handOutSecondBatch(repository);
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(
             repository,
@@ -442,6 +447,7 @@ void main() {
 
         expect(worker.syncAllCount, 1);
         expect(repository.allocationCalls, ['nextBatch:r1']);
+        await tapPin(tester, 'b1');
         expect(slotOf('s2'), findsOneWidget);
       },
     );

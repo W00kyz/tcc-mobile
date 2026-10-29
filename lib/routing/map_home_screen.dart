@@ -26,6 +26,7 @@ import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/released_cleanup.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/selected_building.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_snackbars.dart';
 import 'package:route_monitor/ui/app_theme.dart';
@@ -34,33 +35,18 @@ import 'package:route_monitor/ui/map_sheet.dart';
 import 'package:route_monitor/ui/snackbar_lane.dart';
 import 'package:route_monitor/ui/sync_indicator.dart';
 
-/// The building whose pin the worker tapped: the other pins dim (redesign
-/// §6.3) and the sheet shows that building's floor card. Null shows the
-/// next building's.
-///
-///     ref.read(selectedBuildingProvider.notifier).select('b2');
-final selectedBuildingProvider = NotifierProvider<SelectedBuilding, String?>(
-  SelectedBuilding.new,
-);
-
-class SelectedBuilding extends Notifier<String?> {
-  @override
-  String? build() => null;
-
-  // A method, not a setter: reads as the action it is at the call site.
-  // ignore: use_setters_to_change_properties
-  void select(String buildingId) => state = buildingId;
-
-  void clear() => state = null;
-}
+/// How far above the system bar "Minha posição" and the snackbars sit when
+/// the building sheet is hidden.
+const double _hiddenSheetReach = 24;
 
 /// Below this the map's camera keeps clear of the top bar and the chips.
 const double _topOverlayHeight = 150;
 
 /// The home (`/rota`, redesign §6.2): the campus map edge to edge, the top
 /// bar and chips floating over it, and the three-height sheet with the day's
-/// state — one building's floor card and its scan button while the route is
-/// worked; before it starts (or while paused), only the start button.
+/// state — the selected building's floor card and its scan button while the
+/// route is worked (no sheet until a pin is tapped, and the worker can hide
+/// it again); before it starts (or while paused), only the start button.
 ///
 ///     GoRoute(path: '/rota', builder: (_, _) => const MapHomeScreen())
 class MapHomeScreen extends ConsumerStatefulWidget {
@@ -82,12 +68,16 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   late final SnackbarLane _lane = SnackbarLane(
     contextOf: () => mounted ? context : null,
     sheet: _sheet,
-    startBarReach: _startBarReach,
+    startBarReach: _bottomReach,
   );
 
   /// The start bar shown in place of a sheet, as last built; null while a
   /// sheet shows.
   StartBarContent? _startBar;
+
+  /// A route is worked but no building is selected: no sheet, the map whole.
+  /// As last built, like [_startBar].
+  bool _sheetHidden = false;
 
   /// The pins last drawn, so the stamp listener finds the stop's building.
   List<DayBuilding> _buildings = const [];
@@ -141,6 +131,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     final pinned = buildings.any((b) => b.buildingId == selectedId)
         ? selectedId
         : null;
+    _sheetHidden =
+        buildings.isNotEmpty &&
+        pinned == null &&
+        nextBatch != NextBatchState.waitingForNetwork;
     return PopScope(
       canPop: pinned == null,
       onPopInvokedWithResult: (didPop, _) {
@@ -173,7 +167,8 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
                     ),
                     _topOverlay(route, local),
                     _myPositionButton(constraints.maxHeight),
-                    _sheetFor(dayAsync, local, buildings, pinned, nextBatch),
+                    if (!_sheetHidden)
+                      _sheetFor(dayAsync, local, buildings, pinned, nextBatch),
                   ],
                 ),
               ),
@@ -183,6 +178,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       ),
     );
   }
+
+  /// No sheet over the map: the start bar shows instead, or the building
+  /// sheet is hidden.
+  bool get _noSheet => _startBar != null || _sheetHidden;
 
   /// The day once read (a reload keeps showing it); while the first read
   /// fails — Riverpod retries it meanwhile — the error and "Tentar de novo";
@@ -202,10 +201,15 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     return _panelSheet(const CardSkeleton());
   }
 
-  /// What the map, "Minha posição" and the snackbars clear at the bottom:
-  /// the start bar (with its caption, if any) when no sheet shows.
-  double _startBarReach(BuildContext context) =>
-      startBarHeight(context, withCaption: _startBar?.caption != null);
+  /// What the map, "Minha posição" and the snackbars clear at the bottom
+  /// when no sheet shows: the start bar (with its caption, if any), or just
+  /// the system bar and some air once the worker hid the building sheet.
+  double _bottomReach(BuildContext context) {
+    if (_startBar != null) {
+      return startBarHeight(context, withCaption: _startBar?.caption != null);
+    }
+    return MediaQuery.paddingOf(context).bottom + _hiddenSheetReach;
+  }
 
   /// A new batch (or route) starts with no building highlighted: a
   /// selection left from the last batch would still dim the pins and
@@ -271,9 +275,9 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         48,
         top,
         48,
-        _startBar == null
-            ? constraints.maxHeight * kMapSheetInitial + 24
-            : _startBarReach(context) + 24,
+        _noSheet
+            ? _bottomReach(context) + 24
+            : constraints.maxHeight * kMapSheetInitial + 24,
       ),
       tileProviderOverride: widget.mapTileProvider,
     );
@@ -316,18 +320,18 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     );
   }
 
-  /// "Minha posição", at the right just above the sheet (or the start bar);
-  /// hidden while the sheet is open past half, where it would sit under the
-  /// top bar.
+  /// "Minha posição", at the right just above the sheet (or the start bar,
+  /// or the bottom edge once the sheet is hidden); hidden while the sheet is
+  /// open past half, where it would sit under the top bar.
   Widget _myPositionButton(double height) {
-    final hasSheet = _startBar == null;
+    final hasSheet = !_noSheet;
     return ListenableBuilder(
       listenable: _sheet,
       builder: (context, _) {
         final size = _sheet.isAttached ? _sheet.size : kMapSheetInitial;
         final p =
             Theme.of(context).extension<FieldPalette>() ?? FieldPalette.light;
-        final above = hasSheet ? height * size : _startBarReach(context);
+        final above = hasSheet ? height * size : _bottomReach(context);
         return Positioned(
           right: 16,
           bottom: above + 16,
@@ -376,8 +380,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     body: const SizedBox.shrink(),
   );
 
-  /// The route being worked: the tapped building, or the one the worker is
-  /// on or heading to — its header, floor card and scan button.
+  /// The route being worked: the tapped building's header, floor card and
+  /// scan button. With no building tapped the build leaves the sheet out
+  /// ([_sheetHidden]), bar the next-batch offline notice, which has no
+  /// building to hang on.
   Widget _buildingSheet(
     RouteSummary route,
     List<DayBuilding> buildings,
@@ -385,7 +391,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     NextBatchState nextBatch,
   ) {
     final offline = nextBatch == NextBatchState.waitingForNetwork;
-    final building = sheetBuildingOf(buildings, pinned);
+    final building = buildings.where((b) => b.buildingId == pinned).firstOrNull;
     if (building == null) {
       return _panelSheet(
         offline ? const NextBatchOfflinePanel() : const CardSkeleton(),
@@ -393,13 +399,15 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     }
     return MapSheet(
       controller: _sheet,
+      onDismissed: _clearSelection,
       header: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (offline) const NextBatchOfflinePanel(),
           BuildingSheetHeader(
             building: building,
-            selected: building.buildingId == pinned,
+            selected:
+                building.buildingId != nextBuilding(buildings)?.buildingId,
           ),
         ],
       ),
@@ -416,27 +424,21 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     animateImpededStopId: ref.watch(lastImpededStopProvider),
   );
 
-  /// After a stamp (done or impossible, redesign §6.6): the map centres on
-  /// the stop's building and the sheet comes to half height, where its
-  /// floor card — and the stamp falling on it — shows. The selection goes
-  /// first, so a building tapped before does not hold the sheet (final
-  /// review I-5).
+  /// After a stamp (done or impossible, redesign §6.6): the stop's building
+  /// is selected — a building tapped before does not hold the sheet (final
+  /// review I-5), and a hidden sheet comes back — the map centres on it and
+  /// the sheet comes to half height, where its floor card, and the stamp
+  /// falling on it, show.
   void _onStamped(String stopId) {
-    _clearSelection();
     final building = _buildings
         .where(
           (b) => b.floors.any((f) => f.slots.any((s) => s.stopId == stopId)),
         )
         .firstOrNull;
-    if (building != null) _map.move(building.position, _map.camera.zoom);
-    if (!_sheet.isAttached) return;
-    unawaited(
-      _sheet.animateTo(
-        kMapSheetInitial,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      ),
-    );
+    if (building == null) return _clearSelection();
+    ref.read(selectedBuildingProvider.notifier).select(building.buildingId);
+    _map.move(building.position, _map.camera.zoom);
+    _sheetToHalf();
   }
 
   /// Pin tap: select the building, centre the map on it and bring the sheet
@@ -445,6 +447,12 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
     ref.read(selectedBuildingProvider.notifier).select(building.buildingId);
     _forgetStamp();
     _map.move(building.position, _map.camera.zoom);
+    _sheetToHalf();
+  }
+
+  /// Brings an open sheet to half height; a sheet still to be built starts
+  /// there.
+  void _sheetToHalf() {
     if (!_sheet.isAttached) return;
     unawaited(
       _sheet.animateTo(

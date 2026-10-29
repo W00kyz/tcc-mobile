@@ -152,7 +152,10 @@ void main() {
   testWidgets('IN_PROGRESS shows the next building with its floors in order', (
     tester,
   ) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoBuildings())),
+    );
 
     expect(find.text(AppStrings.buildingSheetNext), findsOneWidget);
     expect(
@@ -173,7 +176,7 @@ void main() {
         stopIn(id: 's1', buildingName: 'Central de Aulas', floorLabel: '1'),
       ],
     );
-    await pumpHome(tester, homeWith(repositoryWith(route)));
+    await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
     expect(
       find.text(AppStrings.buildingFloor('Central de Aulas', 'Andar 1')),
@@ -182,29 +185,37 @@ void main() {
     expect(find.text(AppStrings.floorNumbered('1')), findsOneWidget);
   });
 
-  testWidgets('tapping pin 2 swaps the card to building 2, "Prédio '
-      'selecionado"', (tester) async {
+  testWidgets('tapping pin 2 opens building 2, "Prédio selecionado"; the '
+      'next building reads "Próximo ponto"', (tester) async {
     await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
 
-    await tester.tap(pinCircle('b2'));
-    await tester.pumpAndSettle();
+    await tapPin(tester, 'b2');
 
     expect(find.text(AppStrings.buildingSheetSelected), findsOneWidget);
     expect(shownFloorCard(tester).building.buildingId, 'b2');
     expect(_floorLabelsShown(tester), ['2º andar']);
     expect(find.text(AppStrings.floorCardTitle(1)), findsOneWidget);
 
+    // The map centred on b2: b1's pin may be out of view.
+    await selectBuilding(tester, 'b1');
+
+    expect(find.text(AppStrings.buildingSheetNext), findsOneWidget);
+    expect(find.text(AppStrings.buildingSheetSelected), findsNothing);
+    expect(shownFloorCard(tester).building.buildingId, 'b1');
+
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
 
-    expect(find.text(AppStrings.buildingSheetNext), findsOneWidget);
-    expect(shownFloorCard(tester).building.buildingId, 'b1');
+    expect(find.byType(MapSheet), findsNothing);
   });
 
   testWidgets('the scan button is off 200 m away and on at 10 m', (
     tester,
   ) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoBuildings())),
+    );
 
     await _placeWorker(tester, _northOfB1(200));
     expect(find.text(AppStrings.scanQrButton), findsOneWidget);
@@ -225,7 +236,7 @@ void main() {
         stopIn(id: 's2', orderIndex: 2, floorLabel: '1º andar'),
       ],
     );
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(repositoryWith(route), stopProgressStore: progress),
     );
@@ -271,11 +282,10 @@ void main() {
         stopProgressStore: FakeStopProgressStore({'s1': 'exec-1'}),
       ),
     );
-    // The sheet stays on the building whose floor is open.
-    expect(shownFloorCard(tester).building.buildingId, 'b1');
+    // An open floor does not open the sheet: only a pin does.
+    expect(find.byType(MapSheet), findsNothing);
 
-    await tester.tap(pinCircle('b2'));
-    await tester.pumpAndSettle();
+    await tapPin(tester, 'b2');
 
     expect(find.text(AppStrings.scanQrButton), findsOneWidget);
     expect(scanFooterEnabled(tester), isFalse);
@@ -313,7 +323,7 @@ void main() {
     tester,
   ) async {
     final store = InMemoryLocalWriteStore();
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(repositoryWith(_twoBuildings()), localWriteStore: store),
     );
@@ -330,7 +340,10 @@ void main() {
   testWidgets('tapping an open task slot opens its task dialog', (
     tester,
   ) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoBuildings())),
+    );
 
     await tapInSheet(tester, slotOf('s2'));
 
@@ -345,7 +358,7 @@ void main() {
         stopIn(id: 's2', orderIndex: 2),
       ],
     );
-    await pumpHome(tester, homeWith(repositoryWith(route)));
+    await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
     await tapInSheet(tester, slotOf('s1'));
 

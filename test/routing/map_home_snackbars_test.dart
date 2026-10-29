@@ -70,7 +70,7 @@ void main() {
     final status = statusController();
     final progress = FakeStopProgressStore({'s1': 'exec-1'});
     await progress.markStamped('s1');
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(
         repositoryWith(_inProgressStopRoute()),
@@ -108,7 +108,10 @@ void main() {
     testWidgets('at $size the check-in confirmation stays off Escanear QR', (
       tester,
     ) async {
-      await pumpHome(tester, homeWith(repositoryWith(_twoPendingRoute())));
+      await pumpHomeWithSheet(
+        tester,
+        homeWith(repositoryWith(_twoPendingRoute())),
+      );
       await snapSheetTo(tester, size);
 
       await scanWith(tester, qrOf('Térreo'));
@@ -128,7 +131,10 @@ void main() {
 
   testWidgets('at the open snap a snackbar stays under the top bar and off '
       'Escanear QR (M-1)', (tester) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoPendingRoute())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoPendingRoute())),
+    );
     await snapSheetTo(tester, 0.9);
 
     await scanWith(tester, qrOf('Térreo'));

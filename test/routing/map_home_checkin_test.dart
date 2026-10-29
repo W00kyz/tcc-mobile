@@ -37,13 +37,16 @@ void main() {
     testWidgets('shows on an in-progress route with a pending stop', (
       tester,
     ) async {
-      await pumpHome(tester, homeWith(repositoryWith(_pendingRoute())));
+      await pumpHomeWithSheet(
+        tester,
+        homeWith(repositoryWith(_pendingRoute())),
+      );
 
       expect(scanQrButton(), findsOneWidget);
     });
 
     testWidgets('hides when every stop is already done', (tester) async {
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(
@@ -65,7 +68,7 @@ void main() {
         // so it stayed visible here — the backend has no PENDING candidate
         // to resolve on that floor any more, so scanning again would only
         // get a confusing 422 FLOOR_NOT_ON_ROUTE dead end (task-17 review).
-        await pumpHome(
+        await pumpHomeWithSheet(
           tester,
           homeWith(repositoryWith(_inProgressStopRoute())),
         );
@@ -80,7 +83,7 @@ void main() {
     'runs the check-in flow end-to-end: scans, checks in and shows success',
     (tester) async {
       final store = InMemoryLocalWriteStore();
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
       );
@@ -101,7 +104,7 @@ void main() {
     tester,
   ) async {
     final store = InMemoryLocalWriteStore();
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
     );
@@ -117,7 +120,7 @@ void main() {
     'coordinates',
     (tester) async {
       final store = InMemoryLocalWriteStore();
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(_pendingRoute()),
@@ -151,7 +154,7 @@ void main() {
   testWidgets('one floor scan checks in every open task of that floor and '
       'none of another', (tester) async {
     final store = InMemoryLocalWriteStore();
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(repositoryWith(_twoFloorsRoute()), localWriteStore: store),
     );
@@ -168,7 +171,7 @@ void main() {
     tester,
   ) async {
     final store = InMemoryLocalWriteStore();
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(repositoryWith(_pendingRoute()), localWriteStore: store),
     );
@@ -200,7 +203,7 @@ void main() {
     testWidgets('a check-in written locally does not reset the clock', (
       tester,
     ) async {
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(repositoryWith(_pendingRoute()), silenceWatchdog: watchdog),
       );
@@ -219,7 +222,7 @@ void main() {
       final progress = FakeStopProgressStore({'s1': 'exec-1'});
       await progress.markStamped('s1');
       final store = InMemoryLocalWriteStore();
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(
           repositoryWith(_inProgressStopRoute()),
@@ -240,7 +243,7 @@ void main() {
 
     testWidgets('a silent worker sees the warning chip', (tester) async {
       now = t0.add(const Duration(minutes: 32));
-      await pumpHome(
+      await pumpHomeWithSheet(
         tester,
         homeWith(repositoryWith(_pendingRoute()), silenceWatchdog: watchdog),
       );
@@ -254,7 +257,7 @@ void main() {
   ) async {
     // RecordingSyncWorker never delivers: the server still says PENDING,
     // only the device's own progress row says the stop is open.
-    await pumpHome(tester, homeWith(repositoryWith(_pendingRoute())));
+    await pumpHomeWithSheet(tester, homeWith(repositoryWith(_pendingRoute())));
     expect(find.text(AppStrings.scanExitQrButton), findsNothing);
 
     await scanWith(tester, _terreoQr);
@@ -272,7 +275,7 @@ void main() {
     await progress.markStamped('s1', observation: 'pia entupida');
     final store = InMemoryLocalWriteStore();
     final repository = repositoryWith(_inProgressStopRoute());
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(repository, localWriteStore: store, stopProgressStore: progress),
     );
@@ -293,7 +296,7 @@ void main() {
   testWidgets('a local IN_PROGRESS row overrides a server PENDING stop', (
     tester,
   ) async {
-    await pumpHome(
+    await pumpHomeWithSheet(
       tester,
       homeWith(
         repositoryWith(_pendingRoute()),

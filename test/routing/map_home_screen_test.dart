@@ -9,8 +9,10 @@ import 'package:route_monitor/routing/floor_actions.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/selected_building.dart';
 import 'package:route_monitor/ui/building_pin.dart';
 import 'package:route_monitor/ui/floor_card.dart';
+import 'package:route_monitor/ui/map_sheet.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../support/fake_route_repository.dart';
@@ -150,7 +152,10 @@ void main() {
   testWidgets('in-progress route shows the floor card and Escanear QR', (
     tester,
   ) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoBuildings())),
+    );
 
     expect(find.byType(FloorCard), findsOneWidget);
     expect(scanQrButton(), findsOneWidget);
@@ -158,7 +163,10 @@ void main() {
   });
 
   testWidgets('Escanear QR visible at all three snaps', (tester) async {
-    await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
+    await pumpHomeWithSheet(
+      tester,
+      homeWith(repositoryWith(_twoBuildings())),
+    );
 
     for (final size in [0.22, 0.5, 0.9]) {
       await snapSheetTo(tester, size);
@@ -175,7 +183,7 @@ void main() {
         stopIn(id: 's2', orderIndex: 2, status: 'DONE'),
       ],
     );
-    await pumpHome(tester, homeWith(repositoryWith(route)));
+    await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
     expect(scanQrButton(), findsNothing);
     expect(find.text(AppStrings.scanExitQrButton), findsOneWidget);
@@ -204,7 +212,7 @@ void main() {
 
     expect(container.read(selectedBuildingProvider), isNull);
     expect(_map(tester).selectedBuildingId, isNull);
-    expect(shownFloorCard(tester).building.buildingId, 'b1');
+    expect(find.byType(MapSheet), findsNothing);
   });
 
   testWidgets(
@@ -323,7 +331,7 @@ void main() {
           stopIn(id: 's2', orderIndex: 2),
         ],
       );
-      await pumpHome(tester, homeWith(repositoryWith(route)));
+      await pumpHomeWithSheet(tester, homeWith(repositoryWith(route)));
 
       // The stamp's hour, on the card, and the slot's spoken label (its
       // service point first).
@@ -342,8 +350,7 @@ void main() {
         ),
       );
       await pumpHome(tester, homeWith(repository));
-      await tester.tap(pinCircle('b1'));
-      await tester.pumpAndSettle();
+      await tapPin(tester, 'b1');
       final container = ProviderScope.containerOf(
         tester.element(find.byType(MapHomeScreen)),
       );
@@ -362,8 +369,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(container.read(selectedBuildingProvider), isNull);
-      expect(find.text(AppStrings.buildingSheetNext), findsOneWidget);
-      expect(find.text(AppStrings.buildingSheetSelected), findsNothing);
+      expect(find.byType(MapSheet), findsNothing);
+      expect(_map(tester).selectedBuildingId, isNull);
     });
 
     testWidgets('on a small phone the closed sheet still shows the next '
@@ -375,6 +382,7 @@ void main() {
       addTearDown(tester.view.reset);
       await tester.pumpWidget(homeWith(repositoryWith(_twoBuildings())));
       await tester.pumpAndSettle();
+      await selectBuilding(tester, 'b1');
 
       await snapSheetTo(tester, 0.22);
 
