@@ -265,8 +265,10 @@ class _ProfileShortcuts extends ConsumerWidget {
   );
 
   /// "Encerrar por hoje": asks why, hands the rest of the route back
-  /// (`ROUTE_REMAINDER`), syncs, reloads the day and returns to the map.
-  /// Cancelling the reason reports nothing.
+  /// (`ROUTE_REMAINDER`) and returns to the map as soon as the report is
+  /// written; the sync and the day reload follow without holding the worker
+  /// on this screen (offline must not delay the pop). Cancelling the reason
+  /// reports nothing.
   Future<void> _endDay(
     BuildContext context,
     WidgetRef ref,
@@ -274,8 +276,11 @@ class _ProfileShortcuts extends ConsumerWidget {
   ) async {
     final reason = await showImpossibilityReasonDialog(context);
     if (reason == null || !context.mounted) return;
+    // Captured before any await: this screen is gone once it pops.
+    final container = ProviderScope.containerOf(context);
     final notify = homeNotifier(ref, context);
-    await ref
+    final navigator = Navigator.of(context);
+    await container
         .read(executionRepositoryProvider)
         .reportImpediment(
           routeId: route.id,
@@ -283,9 +288,9 @@ class _ProfileShortcuts extends ConsumerWidget {
           scope: 'ROUTE_REMAINDER',
           reason: reason,
         );
-    await ref.read(syncWorkerProvider).syncRoute(route.id);
-    ref.invalidate(myDayProvider);
     notify(AppStrings.routeImpedimentReported);
-    if (context.mounted) Navigator.of(context).pop();
+    navigator.pop();
+    await container.read(syncWorkerProvider).syncRoute(route.id);
+    container.invalidate(myDayProvider);
   }
 }

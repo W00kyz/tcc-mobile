@@ -86,21 +86,8 @@ class StampPainter extends CustomPainter {
 
   void _paintMark(Canvas canvas, Size size) {
     final w = size.width;
-    final mark = Path();
-    if (impossible) {
-      mark
-        ..moveTo(w * 0.34, w * 0.34)
-        ..lineTo(w * 0.66, w * 0.66)
-        ..moveTo(w * 0.66, w * 0.34)
-        ..lineTo(w * 0.34, w * 0.66);
-    } else {
-      mark
-        ..moveTo(w * 0.34, w * 0.34)
-        ..lineTo(w * 0.43, w * 0.43)
-        ..lineTo(w * 0.62, w * 0.24);
-    }
     canvas.drawPath(
-      mark,
+      impossible ? _crossPath(w) : _checkPath(w),
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2
@@ -109,6 +96,17 @@ class StampPainter extends CustomPainter {
         ..color = color,
     );
   }
+
+  Path _checkPath(double w) => Path()
+    ..moveTo(w * 0.34, w * 0.34)
+    ..lineTo(w * 0.43, w * 0.43)
+    ..lineTo(w * 0.62, w * 0.24);
+
+  Path _crossPath(double w) => Path()
+    ..moveTo(w * 0.34, w * 0.34)
+    ..lineTo(w * 0.66, w * 0.66)
+    ..moveTo(w * 0.66, w * 0.34)
+    ..lineTo(w * 0.34, w * 0.66);
 
   @override
   bool shouldRepaint(StampPainter old) =>

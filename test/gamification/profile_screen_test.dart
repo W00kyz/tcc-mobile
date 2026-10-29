@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -73,6 +75,17 @@ Future<void> _pump(
     ),
   );
   await tester.pumpAndSettle();
+}
+
+/// A sync that never answers, like a pass stuck on a dead network.
+class HangingSyncWorker extends RecordingSyncWorker {
+  final Completer<void> _never = Completer<void>();
+
+  @override
+  Future<void> syncRoute(String routeId) {
+    syncedRoutes.add(routeId);
+    return _never.future;
+  }
 }
 
 void main() {
@@ -326,6 +339,26 @@ void main() {
       expect(row.payload['reason'], 'HEALTH_ISSUE');
       expect(row.payload['route_stop_id'], isNull);
       expect(worker.syncedRoutes, contains('r1'));
+      expect(find.byType(ProfileScreen), findsNothing);
+      expect(find.text('map'), findsOneWidget);
+    });
+
+    testWidgets('an offline sync does not hold the worker on the profile', (
+      tester,
+    ) async {
+      worker = HangingSyncWorker();
+      await openProfile(tester, routeStatus: 'IN_PROGRESS');
+      await tester.tap(find.text(AppStrings.profileEndDay));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(AppStrings.impedimentReasonOther));
+      await tester.pump();
+      await tester.tap(find.text(AppStrings.commonConfirm));
+      await tester.pumpAndSettle();
+
+      expect(
+        (await store.unsyncedForRoute('r1')).single.payload['scope'],
+        'ROUTE_REMAINDER',
+      );
       expect(find.byType(ProfileScreen), findsNothing);
       expect(find.text('map'), findsOneWidget);
     });

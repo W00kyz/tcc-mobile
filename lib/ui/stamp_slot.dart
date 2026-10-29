@@ -239,22 +239,24 @@ class _StampSlotState extends State<StampSlot>
         child: Transform.scale(
           key: const ValueKey('stamp-drop'),
           scale: _dropFromScale + (1 - _dropFromScale) * drop,
-          child: SizedBox.square(
-            dimension: widget.size,
-            child: CustomPaint(
-              painter: StampPainter(
-                seed: seedOf(widget.slot.stopId),
-                palette: p,
-                ink: drop.clamp(0.0, 1.0),
-                impossible: widget.slot.state == SlotState.impeded,
-              ),
-              child: _hourLabel(p),
-            ),
-          ),
+          child: _stampBody(p, drop),
         ),
       ),
     );
   }
+
+  Widget _stampBody(FieldPalette p, double drop) => SizedBox.square(
+    dimension: widget.size,
+    child: CustomPaint(
+      painter: StampPainter(
+        seed: seedOf(widget.slot.stopId),
+        palette: p,
+        ink: drop.clamp(0.0, 1.0),
+        impossible: widget.slot.state == SlotState.impeded,
+      ),
+      child: _hourLabel(p),
+    ),
+  );
 
   /// Only a stamp that is done carries the hour.
   Widget? _hourLabel(FieldPalette p) {
