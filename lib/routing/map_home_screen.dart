@@ -89,6 +89,11 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   void initState() {
     super.initState();
     _laneSlot = ref.read(homeSnackbarLaneProvider)..attach(_lane);
+    // The dot as the map opens: the position reporter only reads the GPS
+    // once a route is in progress, and then a full interval later, so
+    // without this the worker sees no dot until they tap "Minha posição".
+    // Silent and without moving the camera — the worker asked for neither.
+    unawaited(_readPosition());
   }
 
   @override
@@ -475,19 +480,30 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   /// One GPS read, drawn as the worker's dot and centred on.
   Future<void> _locateMe() async {
+    final position = await _readPosition();
+    if (!mounted) return;
+    if (position == null) {
+      _lane.show(SnackKind.action, AppStrings.routeLocationUnavailable);
+      return;
+    }
+    _map.move(position, _map.camera.zoom);
+  }
+
+  /// One GPS read into the worker's dot; null when there is none now.
+  Future<LatLng?> _readPosition() async {
     try {
       final here = await ref
           .read(locationServiceProvider)
           .getCurrentPosition(purpose: LocationPurpose.tracking);
-      if (!mounted) return;
+      if (!mounted) return null;
       final position = LatLng(here.latitude, here.longitude);
       ref.read(workerPositionProvider.notifier).update(position);
-      _map.move(position, _map.camera.zoom);
+      return position;
       // Deliberately broad, like the check-in's GPS read: any failure means
       // "no position now", never a crash.
       // ignore: avoid_catches_without_on_clauses
     } catch (_) {
-      _lane.show(SnackKind.action, AppStrings.routeLocationUnavailable);
+      return null;
     }
   }
 }

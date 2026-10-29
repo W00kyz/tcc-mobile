@@ -152,7 +152,7 @@ void main() {
       expect(rows.map((r) => r.payload['route_stop_id']), ['s1', 's2']);
       expect(rows.map((r) => r.payload['qr_payload']).toSet(), {_entryQr});
       expect(rows.map((r) => r.id).toSet(), hasLength(2));
-      expect(rows.first.payload['latitude'], -7.23);
+      expect(rows.first.payload['latitude'], -7.21);
       expect(
         (await progress.progressFor('s1'))?.status,
         StopLocalStatus.inProgress,

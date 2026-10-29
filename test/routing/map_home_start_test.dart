@@ -70,7 +70,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(repository.allocationCalls, ['start']);
-        expect(repository.lastPosition, (lat: -7.23, lng: -35.88));
+        expect(repository.lastPosition, (lat: -7.21, lng: -35.91));
         expect(find.text(AppStrings.dayProgress(1, 0, 2)), findsOneWidget);
         expect(startButton(), findsNothing);
         // A new batch starts with no building selected: the map shows

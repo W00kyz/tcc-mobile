@@ -94,8 +94,8 @@ void main() {
       expect(rows, hasLength(1));
       expect(rows.single.kind, PendingOpKind.checkIn);
       expect(rows.single.payload['qr_payload'], _terreoQr);
-      expect(rows.single.payload['latitude'], -7.23);
-      expect(rows.single.payload['longitude'], -35.88);
+      expect(rows.single.payload['latitude'], -7.21);
+      expect(rows.single.payload['longitude'], -35.91);
       expect(find.text(AppStrings.floorCheckInDone(1)), findsOneWidget);
     },
   );

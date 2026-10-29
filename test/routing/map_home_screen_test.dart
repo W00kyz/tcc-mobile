@@ -275,12 +275,10 @@ void main() {
     expect(find.text(AppStrings.silenceWarning(12, 33)), findsOneWidget);
   });
 
-  testWidgets('"Minha posição" draws the worker on the map', (tester) async {
+  testWidgets('the map opens with the worker drawn, no tap needed', (
+    tester,
+  ) async {
     await pumpHome(tester, homeWith(repositoryWith(_twoBuildings())));
-    expect(find.byKey(const ValueKey('worker-position')), findsNothing);
-
-    await tester.tap(find.byTooltip(AppStrings.myPositionTooltip));
-    await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('worker-position')), findsOneWidget);
   });

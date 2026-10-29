@@ -107,11 +107,14 @@ class InMemorySyncMetaStore implements SyncMetaStore {
       appInForeground = inForeground;
 }
 
+/// The worker stands at `stopIn`'s default building (b1): the map reads the
+/// GPS as it opens, and a fix far from the building would gate every scan
+/// (`isNearBuilding`) in tests that are not about distance.
 class FakeLocationService implements LocationService {
   @override
   Future<Coordinates> getCurrentPosition({
     required LocationPurpose purpose,
-  }) async => const Coordinates(latitude: -7.23, longitude: -35.88);
+  }) async => const Coordinates(latitude: -7.21, longitude: -35.91);
 }
 
 /// GPS is unavailable (e.g. a basement, RF29/RNF13) — every failure shape

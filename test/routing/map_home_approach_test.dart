@@ -11,9 +11,9 @@ import '../support/fake_route_repository.dart';
 import 'fake_approach_api.dart';
 import 'map_home_harness.dart';
 
-// The live first leg on the home map: from the worker's position (here the
-// "Minha posição" read, FakeLocationService at -7.23, -35.88) to the card's
-// next stop.
+// The live first leg on the home map: from the worker's position (the read
+// taken as the map opens, or "Minha posição"; FakeLocationService at -7.21,
+// -35.91) to the card's next stop.
 
 final RouteSummary _route = routeWith(
   stops: [
@@ -29,7 +29,7 @@ final RouteSummary _route = routeWith(
 );
 
 const _street = [
-  LatLng(-7.23, -35.88),
+  LatLng(-7.21, -35.91),
   LatLng(-7.22, -35.89),
   LatLng(-7.214, -35.906),
 ];
@@ -47,10 +47,28 @@ void main() {
     tester,
   ) async {
     final api = FakeApproachApi();
-    await pumpHome(tester, homeWith(repositoryWith(_route), approachApi: api));
+    await pumpHome(
+      tester,
+      homeWith(
+        repositoryWith(_route),
+        approachApi: api,
+        locationService: FailingLocationService(),
+      ),
+    );
 
     expect(api.calls, isEmpty);
     expect(_lines(tester), hasLength(1));
+    // The read on open is silent: only a tap on "Minha posição" says so.
+    expect(find.text(AppStrings.routeLocationUnavailable), findsNothing);
+  });
+
+  testWidgets('opening the map reads the position, no tap needed', (
+    tester,
+  ) async {
+    final api = FakeApproachApi();
+    await pumpHome(tester, homeWith(repositoryWith(_route), approachApi: api));
+
+    expect(api.calls, [(-7.21, -35.91)]);
   });
 
   testWidgets('a position draws the street path to the next stop', (
@@ -68,7 +86,7 @@ void main() {
 
     await _locate(tester);
 
-    expect(api.calls, [(-7.23, -35.88)]);
+    expect(api.calls, [(-7.21, -35.91)]);
     // The server leg s1 → s2 gives way to the live one: drawn once.
     expect(_lines(tester).single.points, _street);
     expect(find.text(AppStrings.mapApproximateLegLabel), findsNothing);
@@ -83,7 +101,7 @@ void main() {
     await _locate(tester);
 
     final line = _lines(tester).single;
-    expect(line.points, const [LatLng(-7.23, -35.88), LatLng(-7.214, -35.906)]);
+    expect(line.points, const [LatLng(-7.21, -35.91), LatLng(-7.214, -35.906)]);
     expect(line.pattern.segments, isNotNull);
     expect(find.text(AppStrings.mapApproximateLegLabel), findsOneWidget);
   });
@@ -123,7 +141,7 @@ void main() {
     expect(
       _lines(tester).map((l) => l.points),
       anyElement(
-        equals(const [LatLng(-7.23, -35.88), LatLng(-7.214, -35.906)]),
+        equals(const [LatLng(-7.21, -35.91), LatLng(-7.214, -35.906)]),
       ),
     );
   });

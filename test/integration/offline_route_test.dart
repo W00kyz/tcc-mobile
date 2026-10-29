@@ -30,6 +30,7 @@ import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/routing/live_approach.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
@@ -43,6 +44,7 @@ import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../appeals/fake_appeal_api.dart';
+import '../routing/fake_approach_api.dart';
 import '../routing/map_home_harness.dart' show slotOf, tapPin;
 import '../routing/no_tiles_tile_provider.dart';
 import '../support/fake_sync_notification_taps.dart';
@@ -723,6 +725,9 @@ class _Fixture {
         evidenceApiProvider.overrideWithValue(evidenceApi),
         routeRepositoryProvider.overrideWithValue(routeApi),
         locationServiceProvider.overrideWithValue(_FakeLocationService()),
+        // The map reads the GPS as it opens, so the live first leg asks the
+        // server for its path: a fake, never the real Dio client.
+        approachApiProvider.overrideWithValue(FakeApproachApi()),
         apiBaseUrlProvider.overrideWithValue('http://test-base'),
         appealApiProvider.overrideWithValue(appealApi),
         syncNotificationTapsProvider.overrideWithValue(
