@@ -208,6 +208,31 @@ void main() {
       expect(dayLog.calls, contains(startsWith('stopDone:')));
     });
 
+    testWidgets('an app restarted after the last stamp still records the '
+        'card on the exit scan alone', (tester) async {
+      final dayLog = RecordingDayLogStore();
+      // Stamped before the restart: no stamp lands in this run.
+      final progress = FakeStopProgressStore({'s2': 'exec-2'});
+      await progress.markStamped('s2');
+      await pumpHome(
+        tester,
+        homeWith(
+          repositoryWith(routeWith(stops: stops(), currentBatch: 2)),
+          stopProgressStore: progress,
+          syncWorker: RecordingSyncWorker(),
+          dayLogStore: dayLog,
+        ),
+      );
+
+      await scanWith(tester, qrOf('Térreo'));
+
+      expect(find.text(AppStrings.fullCardTitle), findsOneWidget);
+      expect(
+        dayLog.calls.where((c) => c.startsWith('cardCompleted')),
+        [endsWith(':true')],
+      );
+    });
+
     testWidgets("an earlier stop's unsent row makes the card not clean", (
       tester,
     ) async {

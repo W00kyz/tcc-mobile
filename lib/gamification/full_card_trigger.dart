@@ -41,7 +41,8 @@ class FullCardTrigger extends ConsumerStatefulWidget {
 }
 
 class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
-  /// The stop just stamped, until a card with its slot done is drawn.
+  /// The stop just stamped (or one the floor exit checks out), until a card
+  /// with its slot done is drawn.
   String? _stamped;
 
   @override
@@ -54,9 +55,15 @@ class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<String?>(lastStampedStopProvider, (_, stopId) {
-      if (stopId != null) _stamped = stopId;
-    });
+    ref
+      ..listen<String?>(lastStampedStopProvider, (_, stopId) {
+        if (stopId != null) _stamped = stopId;
+      })
+      // The exit arms the trigger too: an app restarted after the last
+      // stamp only does the exit scan, and the card must still count.
+      ..listen<Set<String>>(lastFloorExitProvider, (_, stopIds) {
+        if (stopIds.isNotEmpty) _stamped = stopIds.first;
+      });
     _openWhenComplete(widget.card, widget.routeId);
     return widget.child;
   }
