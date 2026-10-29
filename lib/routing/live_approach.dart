@@ -60,11 +60,20 @@ class ApproachTarget {
 /// a straight hop flagged [approximate] (drawn dashed) when offline or when
 /// the server could not route it.
 class LiveApproach {
-  const LiveApproach({required this.points, required this.approximate});
+  const LiveApproach({
+    required this.points,
+    required this.approximate,
+    this.destination,
+  });
 
   /// Worker first, in `LatLng(lat, lng)` order.
   final List<LatLng> points;
   final bool approximate;
+
+  /// The stop itself. OSRM snaps both ends of a street path to the nearest
+  /// mapped road, so [points] may stop short of it; the map bridges that gap
+  /// on foot. Null when unknown.
+  final LatLng? destination;
 }
 
 /// Decides when to ask the server for the live first leg, and what to draw
@@ -121,7 +130,11 @@ class ApproachTracker {
     final leg = await _tryFetch(position);
     _inFlight = false;
     if (leg == null || !_reachesTarget(leg)) return current(position);
-    return _lastGood = LiveApproach(points: leg.points, approximate: false);
+    return _lastGood = LiveApproach(
+      points: leg.points,
+      approximate: false,
+      destination: target.position,
+    );
   }
 
   Future<ApproachLeg?> _tryFetch(LatLng position) async {

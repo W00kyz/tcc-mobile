@@ -262,6 +262,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
               route!,
               buildings: buildings,
               approach: watchLiveApproach(ref, route, buildings),
+              worker: ref.watch(workerPositionProvider),
             ),
       buildings: buildings,
       selectedBuildingId: selectedBuildingId,

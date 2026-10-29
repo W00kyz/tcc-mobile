@@ -20,7 +20,7 @@ const double _pinMarkerHeight = 96;
 Polyline legPolyline(RouteMapLeg leg, FieldPalette p) {
   final (color, width) = switch (leg.kind) {
     LegKind.walked => (p.rule, 4.0),
-    LegKind.next => (p.moss, 6.0),
+    LegKind.next => (p.moss, leg.walk ? 4.0 : 6.0),
     LegKind.rest => (p.ink, 3.0),
   };
   return Polyline(
@@ -90,16 +90,27 @@ const double _lineCircleDiameter = 12;
 ///     CircleLayer(circles: routeLineCircles(data, palette));
 List<CircleMarker> routeLineCircles(RouteMapData data, FieldPalette p) {
   final approach = data.approach;
+  final ends = _legsWithEndCircle(data);
   return [
-    if (approach != null && approach.points.isNotEmpty)
+    // With a walk in, the line starts under the worker's own dot.
+    if (approach != null && approach.points.isNotEmpty && data.walkIn == null)
       _lineCircle(approach.points.first, p.white, p.ink, 2),
     // The next destination last, so it sits on top of any it overlaps.
-    for (final leg in data.drawnLegs.where((l) => l.kind != LegKind.next))
+    for (final leg in ends.where((l) => l.kind != LegKind.next))
       ?_destinationCircle(leg, p),
-    for (final leg in data.drawnLegs.where((l) => l.kind == LegKind.next))
+    for (final leg in ends.where((l) => l.kind == LegKind.next))
       ?_destinationCircle(leg, p),
   ];
 }
+
+/// Every drawn leg but the walk in (it ends where the street begins) and,
+/// when a walk out reaches the stop, the street path whose end it bridges.
+Iterable<RouteMapLeg> _legsWithEndCircle(RouteMapData data) =>
+    data.drawnLegs.where(
+      (leg) =>
+          !identical(leg, data.walkIn) &&
+          !(identical(leg, data.approach) && data.walkOut != null),
+    );
 
 CircleMarker? _destinationCircle(RouteMapLeg leg, FieldPalette p) {
   if (leg.points.isEmpty) return null;

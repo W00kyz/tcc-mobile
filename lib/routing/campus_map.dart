@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:pmtiles/pmtiles.dart';
+import 'package:route_monitor/routing/approach_walk.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/campus_map_layers.dart';
@@ -24,7 +25,13 @@ import 'package:vector_tile_renderer/vector_tile_renderer.dart'
 /// kept apart from the widget so it can be unit-tested without `pumpWidget`
 /// (Ruling 10 — the map stays a thin seam over flutter_map + vector_map_tiles).
 class RouteMapData {
-  RouteMapData({required this.stops, required this.legs, this.approach});
+  RouteMapData({
+    required this.stops,
+    required this.legs,
+    this.approach,
+    this.walkIn,
+    this.walkOut,
+  });
 
   /// The stops in visiting order.
   final List<RouteMapStop> stops;
@@ -38,13 +45,22 @@ class RouteMapData {
   /// every time the worker moves.
   final RouteMapLeg? approach;
 
-  /// What the map strokes: [legs], then [approach]. While an approach is
-  /// live, the server's leg into the next stop (it starts at the previous
-  /// stop, not at the worker) is hidden rather than drawn twice.
+  /// The dashed walk from the worker to where [approach] starts, and from
+  /// where it ends to the stop: OSRM snaps both ends of a street path to the
+  /// nearest mapped road, and the campus paths between buildings are not
+  /// mapped. Null when there is no gap to bridge.
+  final RouteMapLeg? walkIn;
+  final RouteMapLeg? walkOut;
+
+  /// What the map strokes: [legs], then [approach] and its walks. While an
+  /// approach is live, the server's leg into the next stop (it starts at the
+  /// previous stop, not at the worker) is hidden rather than drawn twice.
   List<RouteMapLeg> get drawnLegs => [
     for (final leg in legs)
       if (approach == null || leg.kind != LegKind.next) leg,
     ?approach,
+    ?walkIn,
+    ?walkOut,
   ];
 }
 
@@ -78,6 +94,7 @@ class RouteMapLeg {
     required this.approximate,
     this.kind = LegKind.rest,
     this.destinationDone = false,
+    this.walk = false,
   });
 
   /// The polyline vertices, in `LatLng(lat, lng)` order.
@@ -93,6 +110,10 @@ class RouteMapLeg {
 
   /// The stop this leg reaches is done: its circle on the line fills moss.
   final bool destinationDone;
+
+  /// An off-road walk bridging a snapped street end: dashed and thinner,
+  /// and not an "approximate route" for the legend.
+  final bool walk;
 }
 
 /// Pure transform from the API summary to what the map draws: the stops of
@@ -116,6 +137,7 @@ RouteMapData buildRouteMapData(
   RouteSummary route, {
   List<DayBuilding>? buildings,
   LiveApproach? approach,
+  LatLng? worker,
 }) {
   final states = _slotStates(
     buildings ?? buildDayBuildings(route, const {}, const {}, const {}),
@@ -136,6 +158,12 @@ RouteMapData buildRouteMapData(
         _legTo(drawn[i], drawn[i - 1], states[drawn[i].id]),
     ],
     approach: approach == null ? null : _approachLeg(approach),
+    walkIn: approach == null
+        ? null
+        : approachWalk(worker, approach.points, toStart: true),
+    walkOut: approach == null
+        ? null
+        : approachWalk(approach.destination, approach.points, toStart: false),
   );
 }
 
@@ -276,7 +304,7 @@ class CampusMap extends StatelessWidget {
             _RefitOnNewRoute(points: _allPoints, padding: overlayPadding),
           ],
         ),
-        if (data.drawnLegs.any((leg) => leg.approximate))
+        if (data.drawnLegs.any((leg) => leg.approximate && !leg.walk))
           ApproximateLegend(padding: overlayPadding),
       ],
     );

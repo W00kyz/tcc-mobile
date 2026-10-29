@@ -122,6 +122,83 @@ void main() {
     });
   });
 
+  group('walks bridging the snapped street ends', () {
+    // The street path starts ~110 m from the worker and ends ~6 m short of
+    // s2, as OSRM snaps both ends to the nearest mapped road.
+    const worker = LatLng(-7.2108, -35.9122);
+    const stopS2 = LatLng(-7.213, -35.913);
+    const snapped = LiveApproach(
+      points: [LatLng(-7.2115, -35.9115), LatLng(-7.21295, -35.91295)],
+      approximate: false,
+      destination: stopS2,
+    );
+
+    test('a dashed walk joins the worker to the street start and the '
+        'street end to the stop', () {
+      final data = buildRouteMapData(
+        _route,
+        buildings: buildings,
+        approach: snapped,
+        worker: worker,
+      );
+
+      expect(data.walkIn!.points, [worker, snapped.points.first]);
+      expect(data.walkOut!.points, [snapped.points.last, stopS2]);
+      for (final walk in [data.walkIn!, data.walkOut!]) {
+        expect(walk.walk, isTrue);
+        expect(walk.approximate, isTrue);
+        expect(walk.kind, LegKind.next);
+      }
+      expect(data.drawnLegs, containsAll([data.walkIn, data.walkOut]));
+    });
+
+    test('no walk when the ends are on the spot or unknown', () {
+      final data = buildRouteMapData(
+        _route,
+        buildings: buildings,
+        approach: _approach,
+        worker: _approach.points.first,
+      );
+
+      expect(data.walkIn, isNull);
+      expect(data.walkOut, isNull);
+    });
+
+    test(
+      'the line starts under the worker and its circle sits on the stop',
+      () {
+        final data = buildRouteMapData(
+          _route,
+          buildings: buildings,
+          approach: snapped,
+          worker: worker,
+        );
+        final points = routeLineCircles(
+          data,
+          FieldPalette.light,
+        ).map((c) => c.point).toList();
+
+        expect(points, contains(stopS2));
+        expect(points, isNot(contains(snapped.points.first)));
+        expect(points, isNot(contains(snapped.points.last)));
+      },
+    );
+
+    test('a walk is drawn thinner than the street path, and dashed', () {
+      final data = buildRouteMapData(
+        _route,
+        buildings: buildings,
+        approach: snapped,
+        worker: worker,
+      );
+      final line = legPolyline(data.walkIn!, FieldPalette.light);
+
+      expect(line.strokeWidth, 4);
+      expect(legPolyline(data.approach!, FieldPalette.light).strokeWidth, 6);
+      expect(line.pattern, isNot(const StrokePattern.solid()));
+    });
+  });
+
   group('circles on the route line', () {
     const p = FieldPalette.light;
 
