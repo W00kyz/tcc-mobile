@@ -14,6 +14,7 @@ class FakeLocationGateSource implements LocationGateSource {
   final StreamController<LocationGate> _changes =
       StreamController<LocationGate>.broadcast();
   final List<LatLng> watchedTargets = [];
+  final List<double> watchedRadii = [];
   LocationGate _current;
 
   void emit(LocationGate gate) {
@@ -22,8 +23,9 @@ class FakeLocationGateSource implements LocationGateSource {
   }
 
   @override
-  Stream<LocationGate> watch(LatLng target) async* {
+  Stream<LocationGate> watch(LatLng target, double radiusMeters) async* {
     watchedTargets.add(target);
+    watchedRadii.add(radiusMeters);
     yield _current;
     yield* _changes.stream;
   }

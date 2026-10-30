@@ -6,11 +6,10 @@ import 'package:route_monitor/routing/route_repository.dart';
 /// `backend/app/domain/execution/geo.py` (`_EARTH_RADIUS_M`).
 const _earthRadiusM = 6371000.0;
 
-// spec Ruling 4 wants this cached from `GET /settings` at the last sync;
-// deferred — Etapa 6 open point. The server re-validates with the real
-// configured radius, so a stale local value only affects the auto-vs-picker
-// choice, and a mismatch degrades to a review flag.
-const _checkRadiusMeters = 50.0;
+// The radius is `kDefaultCheckRadiusMeters` (the server's default
+// `check_radius_meters`), not the route's: the server re-validates with the
+// real configured radius, so a stale local value only affects the
+// auto-vs-picker choice, and a mismatch degrades to a review flag.
 
 /// Haversine distance in metres between two `(lat, lng)` points. Ported
 /// verbatim from `backend/app/domain/execution/geo.py` (`haversine_meters`)
@@ -79,7 +78,7 @@ class AmbiguousRooms extends RoomResolution {
 ///
 /// Mirrors the SHAPE of `backend/app/domain/execution/validation.py`'s
 /// `resolve_room`:
-/// - exactly 1 stop within [_checkRadiusMeters] → [ResolvedRoom];
+/// - exactly 1 stop within [kDefaultCheckRadiusMeters] → [ResolvedRoom];
 /// - 2+ within radius → [AmbiguousRooms] over those, nearest-first;
 /// - 0 within radius (or no GPS) but exactly 1 PENDING stop on the whole
 ///   route → [ResolvedRoom] anyway (mirrors `validation.py:117`, "a single
@@ -109,7 +108,9 @@ RoomResolution resolveRoomLocally({
   ];
 
   final inRadius = candidates
-      .where((c) => c.distanceM != null && c.distanceM! <= _checkRadiusMeters)
+      .where(
+        (c) => c.distanceM != null && c.distanceM! <= kDefaultCheckRadiusMeters,
+      )
       .toList();
   if (inRadius.length == 1) return ResolvedRoom(inRadius.single.routeStopId);
   if (inRadius.length >= 2) return AmbiguousRooms(_nearestFirst(inRadius));

@@ -19,7 +19,6 @@ import 'package:route_monitor/routing/floor_actions.dart';
 import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_repository.dart';
-import 'package:route_monitor/routing/scan_proximity.dart';
 import 'package:route_monitor/routing/stop_completion.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -188,11 +187,14 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
 
   /// The live gate of a location stop; `searching` until its first reading.
   LocationGate _gate() {
-    final reading = ref.watch(locationGateProvider(_gateTarget)).value;
+    final reading = ref.watch(locationGateProvider(_gateKey)).value;
     return reading ?? const LocationGate(GateState.searching);
   }
 
-  LatLng get _gateTarget => LatLng(widget.stop.latitude, widget.stop.longitude);
+  LocationGateKey get _gateKey => (
+    target: LatLng(widget.stop.latitude, widget.stop.longitude),
+    radiusMeters: widget.route.checkRadiusMeters.toDouble(),
+  );
 
   /// The open execution of the task: set from the floor check-in until the
   /// stamp; null before the check-in and while the progress row loads. A
@@ -389,7 +391,7 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
     GateState.searching => AppStrings.taskGateSearching,
     GateState.tooFar => AppStrings.taskGateTooFar(
       (gate.distanceM ?? 0).round(),
-      kScanProximityMeters.round(),
+      widget.route.checkRadiusMeters,
     ),
   };
 
@@ -412,7 +414,7 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
     }
     // Re-read at the tap (not watched): an emission since the last build may
     // have closed the gate, and the fix handed on must be a ready one.
-    final gate = ref.read(locationGateProvider(_gateTarget)).value;
+    final gate = ref.read(locationGateProvider(_gateKey)).value;
     if (gate == null || gate.state != GateState.ready) return;
     Navigator.of(context).pop(TaskConcluded(observation, fix: gate.fix));
   }

@@ -146,6 +146,11 @@ class RouteStopSummary {
   final bool requiresEvidence;
 }
 
+/// The check radius assumed when the route carries none (a snapshot cached
+/// before the server sent it): `system_settings.check_radius_meters`'s own
+/// default. The server is authoritative; this only picks the gate's button.
+const int kDefaultCheckRadiusMeters = 50;
+
 class RouteSummary {
   const RouteSummary({
     required this.id,
@@ -155,6 +160,7 @@ class RouteSummary {
     required this.startedAt,
     required this.currentBatch,
     required this.stops,
+    this.checkRadiusMeters = kDefaultCheckRadiusMeters,
   });
 
   factory RouteSummary.fromJson(Map<String, dynamic> json) => RouteSummary(
@@ -166,6 +172,9 @@ class RouteSummary {
     status: json['status'] as String,
     startedAt: _parseOptionalTimestamp(json['started_at']),
     currentBatch: json['current_batch'] as int,
+    // Tolerant: a snapshot cached by an older build has no radius.
+    checkRadiusMeters:
+        json['check_radius_meters'] as int? ?? kDefaultCheckRadiusMeters,
     stops: (json['stops'] as List<dynamic>)
         .map((raw) => RouteStopSummary.fromJson(raw as Map<String, dynamic>))
         .toList(),
@@ -180,6 +189,10 @@ class RouteSummary {
   final String status;
   final DateTime? startedAt;
   final int currentBatch;
+
+  /// How close the worker must stand to conclude a stop by location — the
+  /// server's `check_radius_meters`, the very radius it refuses beyond.
+  final int checkRadiusMeters;
 
   /// Every stop of the day, of every batch, released ones included.
   final List<RouteStopSummary> stops;

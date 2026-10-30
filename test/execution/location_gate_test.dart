@@ -6,6 +6,7 @@ import 'package:route_monitor/execution/location_gate.dart';
 import 'package:route_monitor/routing/location_service.dart';
 
 const LatLng _target = LatLng(-7.2, -35.9);
+const double _radius = 50;
 
 /// A fix [metres] due north of [_target] (1 degree of latitude is a constant
 /// ~111.19 km on the sphere `latlong2` uses).
@@ -21,31 +22,47 @@ void main() {
         serviceEnabled: false,
         fix: _fixAt(0),
         target: _target,
+        radiusMeters: _radius,
       );
 
       expect(gate.state, GateState.locationOff);
     });
 
     test('service off without a fix is locationOff', () {
-      final gate = gateFor(serviceEnabled: false, fix: null, target: _target);
+      final gate = gateFor(
+        serviceEnabled: false,
+        fix: null,
+        target: _target,
+        radiusMeters: _radius,
+      );
 
       expect(gate.state, GateState.locationOff);
     });
 
     test('service on and no fix is searching, not near', () {
-      final gate = gateFor(serviceEnabled: true, fix: null, target: _target);
+      final gate = gateFor(
+        serviceEnabled: true,
+        fix: null,
+        target: _target,
+        radiusMeters: _radius,
+      );
 
       expect(gate.state, GateState.searching);
       expect(gate.distanceM, isNull);
       expect(gate.fix, isNull);
     });
 
-    test('79 m is ready', () {
-      final fix = _fixAt(79);
-      final gate = gateFor(serviceEnabled: true, fix: fix, target: _target);
+    test('49 m is ready', () {
+      final fix = _fixAt(49);
+      final gate = gateFor(
+        serviceEnabled: true,
+        fix: fix,
+        target: _target,
+        radiusMeters: _radius,
+      );
 
       expect(gate.state, GateState.ready);
-      expect(gate.distanceM, closeTo(79, 0.5));
+      expect(gate.distanceM, closeTo(49, 0.5));
       expect(gate.fix, same(fix));
     });
 
@@ -73,20 +90,38 @@ void main() {
       expect(justOutside.state, GateState.tooFar);
     });
 
-    test('the default radius is 80 m: 81 m is tooFar', () {
-      final gate = gateFor(
-        serviceEnabled: true,
-        fix: _fixAt(81),
-        target: _target,
-      );
+    test(
+      "the server's radius rules: 60 m is tooFar at 50 m, ready at 65 m",
+      () {
+        final fix = _fixAt(60);
 
-      expect(gate.state, GateState.tooFar);
-      expect(gate.distanceM, closeTo(81, 0.5));
-    });
+        final strict = gateFor(
+          serviceEnabled: true,
+          fix: fix,
+          target: _target,
+          radiusMeters: 50,
+        );
+        final lenient = gateFor(
+          serviceEnabled: true,
+          fix: fix,
+          target: _target,
+          radiusMeters: 65,
+        );
+
+        expect(strict.state, GateState.tooFar);
+        expect(strict.distanceM, closeTo(60, 0.5));
+        expect(lenient.state, GateState.ready);
+      },
+    );
 
     test('far away is tooFar and keeps the fix', () {
       final fix = _fixAt(1500);
-      final gate = gateFor(serviceEnabled: true, fix: fix, target: _target);
+      final gate = gateFor(
+        serviceEnabled: true,
+        fix: fix,
+        target: _target,
+        radiusMeters: _radius,
+      );
 
       expect(gate.state, GateState.tooFar);
       expect(
@@ -113,6 +148,7 @@ void main() {
         serviceEnabled: service.stream,
         fixes: () => fixes.stream,
         target: _target,
+        radiusMeters: _radius,
       ).listen(seen.add);
     });
 

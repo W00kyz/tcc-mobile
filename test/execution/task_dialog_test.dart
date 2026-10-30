@@ -48,15 +48,17 @@ RouteStopSummary _stop({
   requiresEvidence: requiresEvidence,
 );
 
-RouteSummary _route(RouteStopSummary stop) => RouteSummary(
-  id: 'r1',
-  fieldWorkerName: 'João',
-  routeDate: DateTime(2026, 10, 28),
-  status: 'IN_PROGRESS',
-  startedAt: null,
-  currentBatch: 1,
-  stops: [stop],
-);
+RouteSummary _route(RouteStopSummary stop, {int checkRadiusMeters = 50}) =>
+    RouteSummary(
+      checkRadiusMeters: checkRadiusMeters,
+      id: 'r1',
+      fieldWorkerName: 'João',
+      routeDate: DateTime(2026, 10, 28),
+      status: 'IN_PROGRESS',
+      startedAt: null,
+      currentBatch: 1,
+      stops: [stop],
+    );
 
 CardSlot _slot(SlotState state, {String stopId = 's1'}) => CardSlot(
   stopId: stopId,
@@ -100,6 +102,7 @@ void main() {
     SlotState state = SlotState.inProgress,
     String? tappedStopId,
     StopProgressStore? progressStore,
+    int checkRadiusMeters = 50,
   }) async {
     final shown = stop ?? _stop();
     tester.view
@@ -128,14 +131,17 @@ void main() {
                     ? showTaskDialog(
                         context,
                         ref,
-                        route: _route(shown),
+                        route: _route(
+                          shown,
+                          checkRadiusMeters: checkRadiusMeters,
+                        ),
                         stop: shown,
                         slot: _slot(state),
                       )
                     : showSlotTask(
                         context,
                         ref,
-                        _route(shown),
+                        _route(shown, checkRadiusMeters: checkRadiusMeters),
                         _slot(state, stopId: tappedStopId),
                       ),
                 child: const Text('go'),
@@ -504,7 +510,7 @@ void main() {
 
       expect(concludeButton(tester).onPressed, isNull);
       expect(
-        find.text('Você está a 312 m do local; chegue a até 80 m.'),
+        find.text('Você está a 312 m do local; chegue a até 50 m.'),
         findsOneWidget,
       );
     });
@@ -544,6 +550,16 @@ void main() {
 
       expect(concludeButton(tester).onPressed, isNull);
       expect(find.text(AppStrings.taskGateLocationOff), findsOneWidget);
+    });
+
+    testWidgets("the hint and the gate use the route's check radius", (
+      tester,
+    ) async {
+      gates.emit(const LocationGate(GateState.tooFar, distanceM: 90));
+      await openDialog(tester, stop: place, checkRadiusMeters: 65);
+
+      expect(find.text(AppStrings.taskGateTooFar(90, 65)), findsOneWidget);
+      expect(gates.watchedRadii, [65.0]);
     });
 
     testWidgets("the gate watches the stop's own coordinates", (
@@ -669,7 +685,7 @@ void main() {
 
       expect(popped, isEmpty);
       expect(find.byType(Dialog), findsOneWidget);
-      expect(find.text(AppStrings.taskGateTooFar(300, 80)), findsOneWidget);
+      expect(find.text(AppStrings.taskGateTooFar(300, 50)), findsOneWidget);
     });
 
     testWidgets('Sinalizar impossibilidade drops the photos held for the '

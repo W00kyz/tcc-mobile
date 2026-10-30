@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:latlong2/latlong.dart';
 
 import 'package:route_monitor/routing/location_service.dart';
-import 'package:route_monitor/routing/scan_proximity.dart';
 
 /// Where a worker stands against the "Concluir tarefa" gate of a location stop.
 enum GateState { ready, locationOff, searching, tooFar }
@@ -23,12 +22,17 @@ class LocationGate {
 /// no position yet is still `searching`. A stale [fix] with the location
 /// service off is ignored.
 ///
-///     gateFor(serviceEnabled: true, fix: fix, target: place).state;
+///     gateFor(
+///       serviceEnabled: true,
+///       fix: fix,
+///       target: place,
+///       radiusMeters: route.checkRadiusMeters.toDouble(),
+///     ).state;
 LocationGate gateFor({
   required bool serviceEnabled,
   required Coordinates? fix,
   required LatLng target,
-  double radiusMeters = kScanProximityMeters,
+  required double radiusMeters,
 }) {
   if (!serviceEnabled) return const LocationGate(GateState.locationOff);
   if (fix == null) return const LocationGate(GateState.searching);
@@ -50,12 +54,13 @@ LocationGate gateFor({
 ///       serviceEnabled: serviceStates,
 ///       fixes: () => positions,
 ///       target: place,
+///       radiusMeters: 50,
 ///     ).listen(show);
 Stream<LocationGate> trackLocationGate({
   required Stream<bool> serviceEnabled,
   required Stream<Coordinates> Function() fixes,
   required LatLng target,
-  double radiusMeters = kScanProximityMeters,
+  required double radiusMeters,
 }) {
   return _GateTracker(serviceEnabled, fixes, target, radiusMeters).stream;
 }

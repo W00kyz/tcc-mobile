@@ -12,19 +12,22 @@ import 'package:route_monitor/routing/location_service.dart';
 // ignore: one_member_abstracts
 abstract class LocationGateSource {
   /// A gate on every change of the location service or of the position, until
-  /// the subscription is cancelled.
-  Stream<LocationGate> watch(LatLng target);
+  /// the subscription is cancelled. [radiusMeters] is the route's
+  /// `check_radius_meters`.
+  Stream<LocationGate> watch(LatLng target, double radiusMeters);
 }
 
 /// The real source. Only exercisable on a device; the rule it feeds is
 /// covered by `test/execution/location_gate_test.dart`.
 class GeolocatorLocationGateSource implements LocationGateSource {
   @override
-  Stream<LocationGate> watch(LatLng target) => trackLocationGate(
-    serviceEnabled: _serviceStates(),
-    fixes: _positions,
-    target: target,
-  );
+  Stream<LocationGate> watch(LatLng target, double radiusMeters) =>
+      trackLocationGate(
+        serviceEnabled: _serviceStates(),
+        fixes: _positions,
+        target: target,
+        radiusMeters: radiusMeters,
+      );
 
   Stream<bool> _serviceStates() async* {
     yield await Geolocator.isLocationServiceEnabled();
@@ -59,9 +62,15 @@ final locationGateSourceProvider = Provider<LocationGateSource>(
   (ref) => GeolocatorLocationGateSource(),
 );
 
-/// The live gate of the stop at a target (its coordinates); disposed with the
-/// dialog watching it, which stops the GPS.
-final StreamProviderFamily<LocationGate, LatLng> locationGateProvider =
-    StreamProvider.autoDispose.family<LocationGate, LatLng>(
-      (ref, target) => ref.watch(locationGateSourceProvider).watch(target),
+/// What identifies one live gate: the stop's coordinates and the route's check
+/// radius (part of the key so a changed radius re-evaluates the gate).
+typedef LocationGateKey = ({LatLng target, double radiusMeters});
+
+/// The live gate of the stop at a target (its coordinates) within the route's
+/// radius; disposed with the dialog watching it, which stops the GPS.
+final StreamProviderFamily<LocationGate, LocationGateKey> locationGateProvider =
+    StreamProvider.autoDispose.family<LocationGate, LocationGateKey>(
+      (ref, key) => ref
+          .watch(locationGateSourceProvider)
+          .watch(key.target, key.radiusMeters),
     );

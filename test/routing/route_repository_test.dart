@@ -46,6 +46,7 @@ Map<String, dynamic> _routePayload() => {
   'started_at': '2026-10-20T11:15:00Z',
   'routing_degraded': false,
   'current_batch': 2,
+  'check_radius_meters': 65,
   'stops': [
     _stopPayload(id: 'a', orderIndex: 1, batchNumber: 1, status: 'DONE'),
     _stopPayload(
@@ -136,6 +137,25 @@ void main() {
         [-35.91, -7.21],
         [-35.92, -7.22],
       ]);
+    });
+
+    test("reads the server's check radius off the route", () async {
+      final repository = DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: _routePayload())),
+      );
+
+      final route = (await repository.fetchMyDay()).route!;
+
+      expect(route.checkRadiusMeters, 65);
+    });
+
+    test('a snapshot cached before the radius existed falls back to 50', () {
+      final payload = _routePayload()..remove('check_radius_meters');
+
+      final route = RouteSummary.fromJson(payload);
+
+      expect(route.checkRadiusMeters, kDefaultCheckRadiusMeters);
+      expect(kDefaultCheckRadiusMeters, 50);
     });
 
     test('parses the building, floor and done_at of a stop', () async {
