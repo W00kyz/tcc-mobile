@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 
 import 'package:route_monitor/execution/evidence_photo_count.dart';
 import 'package:route_monitor/execution/evidence_requirement.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/impossibility_reason_dialog.dart';
+import 'package:route_monitor/execution/location_execution_id.dart';
+import 'package:route_monitor/execution/location_gate.dart';
+import 'package:route_monitor/execution/location_gate_source.dart';
 import 'package:route_monitor/execution/observation_draft.dart';
 import 'package:route_monitor/execution/task_photos.dart';
 import 'package:route_monitor/l10n/floor_label.dart';
@@ -13,7 +17,9 @@ import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/floor_actions.dart';
 import 'package:route_monitor/routing/home_notices.dart';
+import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/scan_proximity.dart';
 import 'package:route_monitor/routing/stop_completion.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -39,9 +45,12 @@ sealed class TaskDecision {
 }
 
 class TaskConcluded extends TaskDecision {
-  const TaskConcluded(this.observation);
+  const TaskConcluded(this.observation, {this.fix});
 
   final String? observation;
+
+  /// The position that opened the gate of a location stop; null for a QR stop.
+  final Coordinates? fix;
 }
 
 class TaskImpossible extends TaskDecision {
@@ -174,9 +183,22 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
     super.dispose();
   }
 
+  bool get _isLocationStop => widget.stop.completion == StopCompletion.location;
+
+  /// The live gate of a location stop; `searching` until its first reading.
+  LocationGate _gate() {
+    final stop = widget.stop;
+    final target = LatLng(stop.latitude, stop.longitude);
+    final reading = ref.watch(locationGateProvider(target)).value;
+    return reading ?? const LocationGate(GateState.searching);
+  }
+
   /// The open execution of the task: set from the floor check-in until the
-  /// stamp; null before the check-in and while the progress row loads.
+  /// stamp; null before the check-in and while the progress row loads. A
+  /// location stop has no check-in: its id is derived from the stop, so its
+  /// photos can be taken with the location off.
   String? _openExecutionId() {
+    if (_isLocationStop) return locationExecutionId(widget.stop.id);
     final entry = ref.watch(stopProgressForProvider(widget.stop.id)).value;
     if (entry == null || entry.status != StopLocalStatus.inProgress) {
       return null;
@@ -187,6 +209,7 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
   /// Whether the progress row was read: until then no hint says "faça o
   /// check-in", which would flash on a task already checked in.
   bool get _progressKnown =>
+      _isLocationStop ||
       ref.watch(stopProgressForProvider(widget.stop.id)).hasValue;
 
   @override
@@ -311,6 +334,7 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
   List<Widget> _actions(FieldPalette p, String? executionId) {
     final mayConclude =
         executionId != null &&
+        (!_isLocationStop || _gate().state == GateState.ready) &&
         stopMayConclude(
           ref,
           widget.route.id,
@@ -343,9 +367,10 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
   /// Why "Concluir tarefa" is closed, or null when it is open.
   String? _concludeHint(String? executionId) {
     if (!_progressKnown) return null;
-    // INTENTIONAL: a location stop has no floor check-in to ask for. Its
-    // conclusion by location is wired in the next tasks of the places spec.
-    if (widget.stop.completion == StopCompletion.location) return null;
+    // INTENTIONAL: a location stop has no floor check-in to ask for: its
+    // reason to stay closed is the gate first, then the photos.
+    final gateHint = _isLocationStop ? _gateHint(_gate()) : null;
+    if (gateHint != null) return gateHint;
     if (executionId == null) return AppStrings.taskNeedsFloorCheckIn;
     if (!widget.stop.requiresEvidence) return null;
     final count = ref.watch(
@@ -354,6 +379,16 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
     final missing = missingEvidencePhotos(count ?? 0);
     return missing == 0 ? null : AppStrings.missingPhotos(missing);
   }
+
+  String? _gateHint(LocationGate gate) => switch (gate.state) {
+    GateState.ready => null,
+    GateState.locationOff => AppStrings.taskGateLocationOff,
+    GateState.searching => AppStrings.taskGateSearching,
+    GateState.tooFar => AppStrings.taskGateTooFar(
+      (gate.distanceM ?? 0).round(),
+      kScanProximityMeters.round(),
+    ),
+  };
 
   Widget _hintLine(String hint, FieldPalette p) {
     return Padding(
@@ -367,7 +402,10 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
   }
 
   void _conclude() => Navigator.of(context).pop(
-    TaskConcluded(observationToSend(_observation.text)),
+    TaskConcluded(
+      observationToSend(_observation.text),
+      fix: _isLocationStop ? _gate().fix : null,
+    ),
   );
 
   /// The reason dialog over this one; a cancel there leaves the task open.

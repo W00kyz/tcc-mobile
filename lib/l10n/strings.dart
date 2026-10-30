@@ -139,6 +139,13 @@ abstract final class AppStrings {
   static const String taskNeedsFloorCheckIn =
       'Faça o check-in do andar para registrar esta tarefa';
   static const String taskConclude = 'Concluir tarefa';
+  static const String taskGateLocationOff =
+      'Ative a localização para concluir.';
+  static const String taskGateSearching = 'Buscando sua posição…';
+
+  /// The gate of a place: [distanceM] away, [radiusM] allowed.
+  static String taskGateTooFar(int distanceM, int radiusM) =>
+      'Você está a $distanceM m do local; chegue a até $radiusM m.';
   static const String taskRequiresPhotos = 'Exige pelo menos 2 fotos';
   static const String impossibilityReasonTitle = 'Por que não é possível?';
   static const String impossibilityNoteTrimmed =

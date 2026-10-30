@@ -3,27 +3,36 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
+import 'package:route_monitor/execution/location_execution_id.dart';
+import 'package:route_monitor/execution/location_gate.dart';
+import 'package:route_monitor/execution/location_gate_source.dart';
 import 'package:route_monitor/execution/task_dialog.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
+import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/stop_completion.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../routing/map_home_fakes.dart';
 import '../support/fake_day_log_store.dart';
 import '../support/in_memory_database.dart';
+import 'location_gate_fakes.dart';
 
 RouteStopSummary _stop({
   bool requiresEvidence = true,
   String floorLabel = 'Térreo',
+  StopCompletion completion = StopCompletion.qr,
 }) => RouteStopSummary(
+  completion: completion,
   id: 's1',
   orderIndex: 1,
   batchNumber: 1,
@@ -64,8 +73,10 @@ void main() {
   late DriftStopProgressStore progress;
   late InMemoryLocalWriteStore store;
   late ExecutionRepository repository;
+  late FakeLocationGateSource gates;
 
   setUp(() {
+    gates = FakeLocationGateSource();
     db = inMemoryDatabase();
     addTearDown(db.close);
     progress = DriftStopProgressStore(db);
@@ -106,6 +117,7 @@ void main() {
           syncWorkerProvider.overrideWithValue(RecordingSyncWorker()),
           executionRepositoryProvider.overrideWithValue(repository),
           evidenceApiProvider.overrideWithValue(FakeEvidenceApi()),
+          locationGateSourceProvider.overrideWithValue(gates),
         ],
         child: MaterialApp(
           theme: buildAppTheme(),
@@ -406,6 +418,206 @@ void main() {
 
     expect(find.text(AppStrings.taskSaveFailed), findsOneWidget);
     expect(await store.unsyncedForRoute('r1'), isEmpty);
+  });
+
+  group('a location stop', () {
+    final place = _stop(
+      requiresEvidence: false,
+      completion: StopCompletion.location,
+    );
+    final evidencePlace = _stop(completion: StopCompletion.location);
+    const ready = LocationGate(
+      GateState.ready,
+      distanceM: 12,
+      fix: Coordinates(latitude: -7.2, longitude: -35.9),
+    );
+
+    testWidgets('Concluir is off and says to turn the location on', (
+      tester,
+    ) async {
+      gates.emit(const LocationGate(GateState.locationOff));
+      await openDialog(tester, stop: place);
+
+      expect(concludeButton(tester).onPressed, isNull);
+      expect(find.text(AppStrings.taskGateLocationOff), findsOneWidget);
+      expect(find.text(AppStrings.taskNeedsFloorCheckIn), findsNothing);
+    });
+
+    testWidgets('Concluir is off while the position is being found', (
+      tester,
+    ) async {
+      await openDialog(tester, stop: place);
+
+      expect(concludeButton(tester).onPressed, isNull);
+      expect(find.text(AppStrings.taskGateSearching), findsOneWidget);
+    });
+
+    testWidgets('Concluir is off too far away and says how far', (
+      tester,
+    ) async {
+      gates.emit(const LocationGate(GateState.tooFar, distanceM: 312.4));
+      await openDialog(tester, stop: place);
+
+      expect(concludeButton(tester).onPressed, isNull);
+      expect(
+        find.text('Você está a 312 m do local; chegue a até 80 m.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('Concluir is on when ready, with no check-in needed', (
+      tester,
+    ) async {
+      gates.emit(ready);
+      await openDialog(tester, stop: place);
+
+      expect(concludeButton(tester).onPressed, isNotNull);
+      expect(find.text(AppStrings.taskGateSearching), findsNothing);
+    });
+
+    testWidgets('Concluir turns on when the gate becomes ready, dialog open', (
+      tester,
+    ) async {
+      await openDialog(tester, stop: place);
+      expect(concludeButton(tester).onPressed, isNull);
+
+      gates.emit(ready);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(concludeButton(tester).onPressed, isNotNull);
+      expect(find.text(AppStrings.taskGateSearching), findsNothing);
+    });
+
+    testWidgets('Concluir turns off again when the location goes off', (
+      tester,
+    ) async {
+      gates.emit(ready);
+      await openDialog(tester, stop: place);
+
+      gates.emit(const LocationGate(GateState.locationOff));
+      await tester.pumpAndSettle();
+
+      expect(concludeButton(tester).onPressed, isNull);
+      expect(find.text(AppStrings.taskGateLocationOff), findsOneWidget);
+    });
+
+    testWidgets("the gate watches the stop's own coordinates", (
+      tester,
+    ) async {
+      await openDialog(tester, stop: place);
+
+      expect(gates.watchedTargets, [const LatLng(-7.2, -35.9)]);
+    });
+
+    testWidgets('the camera and Sinalizar impossibilidade stay on with '
+        'location off', (tester) async {
+      gates.emit(const LocationGate(GateState.locationOff));
+      await openDialog(tester, stop: place);
+
+      expect(cameraButton(tester).onPressed, isNotNull);
+      final impossible = tester.widget<TextButton>(
+        find.widgetWithText(
+          TextButton,
+          AppStrings.routeSignalImpossibilityButton,
+        ),
+      );
+      expect(impossible.onPressed, isNotNull);
+    });
+
+    testWidgets('a photo already held under the id shows as a thumbnail', (
+      tester,
+    ) async {
+      await repository.addPhoto(
+        routeId: 'r1',
+        executionId: locationExecutionId('s1'),
+        photo: CapturedPhoto(bytes: onePixelPng, sha256: 'sha-0'),
+      );
+      await openDialog(tester, stop: place);
+
+      expect(find.byTooltip(AppStrings.taskRemovePhoto), findsOneWidget);
+    });
+
+    testWidgets('with required evidence, ready is not enough without '
+        'two photos', (tester) async {
+      gates.emit(ready);
+      await openDialog(tester, stop: evidencePlace);
+
+      expect(concludeButton(tester).onPressed, isNull);
+      expect(find.text(AppStrings.missingPhotos(2)), findsOneWidget);
+    });
+
+    testWidgets('with required evidence, two photos and ready open Concluir', (
+      tester,
+    ) async {
+      gates.emit(ready);
+      for (var i = 0; i < 2; i++) {
+        await repository.addPhoto(
+          routeId: 'r1',
+          executionId: locationExecutionId('s1'),
+          photo: CapturedPhoto(bytes: onePixelPng, sha256: 'sha-$i'),
+        );
+      }
+      await openDialog(tester, stop: evidencePlace);
+
+      expect(concludeButton(tester).onPressed, isNotNull);
+    });
+
+    testWidgets('with required evidence and two photos, too far still '
+        'blocks', (tester) async {
+      gates.emit(const LocationGate(GateState.tooFar, distanceM: 200));
+      for (var i = 0; i < 2; i++) {
+        await repository.addPhoto(
+          routeId: 'r1',
+          executionId: locationExecutionId('s1'),
+          photo: CapturedPhoto(bytes: onePixelPng, sha256: 'sha-$i'),
+        );
+      }
+      await openDialog(tester, stop: evidencePlace);
+
+      expect(concludeButton(tester).onPressed, isNull);
+    });
+
+    testWidgets('concluding writes no QR-style stamp (the completion write is '
+        'separate) and closes the dialog', (tester) async {
+      gates.emit(ready);
+      await openDialog(tester, stop: place);
+
+      await tester.tap(find.text(AppStrings.taskConclude));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Dialog), findsNothing);
+      expect(await progress.progressFor('s1'), isNull);
+      expect(await store.unsyncedForRoute('r1'), isEmpty);
+    });
+
+    testWidgets('Sinalizar impossibilidade drops the photos held for the '
+        'stop', (tester) async {
+      gates.emit(const LocationGate(GateState.locationOff));
+      await repository.addPhoto(
+        routeId: 'r1',
+        executionId: locationExecutionId('s1'),
+        photo: CapturedPhoto(bytes: onePixelPng, sha256: 'sha-0'),
+      );
+      await openDialog(tester, stop: place);
+
+      await signalImpossibleWith(tester, AppStrings.impedimentReasonOther);
+      await tester.tap(find.text(AppStrings.commonConfirm));
+      await tester.pumpAndSettle();
+
+      expect(await rowsOf(PendingOpKind.evidencePhoto), isEmpty);
+      expect(await rowsOf(PendingOpKind.impediment), hasLength(1));
+    });
+  });
+
+  testWidgets('a QR stop ignores the location gate entirely', (tester) async {
+    await progress.upsertInProgress('s1', 'exec-1');
+    gates.emit(const LocationGate(GateState.locationOff));
+    await openDialog(tester, stop: _stop(requiresEvidence: false));
+
+    expect(concludeButton(tester).onPressed, isNotNull);
+    expect(find.text(AppStrings.taskGateLocationOff), findsNothing);
+    expect(gates.watchedTargets, isEmpty);
   });
 
   testWidgets('while the progress row loads no check-in hint flashes and '

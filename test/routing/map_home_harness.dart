@@ -13,6 +13,7 @@ import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/evidence_camera.dart';
 import 'package:route_monitor/execution/execution_providers.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
+import 'package:route_monitor/execution/location_gate_source.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
@@ -39,6 +40,7 @@ import 'package:route_monitor/ui/floor_card.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 import '../appeals/fake_appeal_api.dart';
+import '../execution/location_gate_fakes.dart';
 import '../support/fake_connectivity.dart';
 import '../support/fake_day_log_store.dart';
 import '../support/fake_sync_notification_taps.dart';
@@ -113,6 +115,7 @@ Widget homeWith(
       stopProgressStoreProvider.overrideWithValue(progress),
       evidenceApiProvider.overrideWithValue(evidenceApi ?? FakeEvidenceApi()),
       localWriteStoreProvider.overrideWithValue(store),
+      locationGateSourceProvider.overrideWithValue(FakeLocationGateSource()),
       syncMetaStoreProvider.overrideWithValue(InMemorySyncMetaStore()),
       apiBaseUrlProvider.overrideWithValue(apiBaseUrl ?? 'http://test-base'),
       // "Iniciar rota" settles the location mode first: never the real

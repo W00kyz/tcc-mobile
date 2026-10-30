@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:route_monitor/checkin/checkin_providers.dart';
 import 'package:route_monitor/checkin/scan_screen.dart' show ExitScan;
 import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/location_execution_id.dart';
 import 'package:route_monitor/execution/observation_draft.dart';
 import 'package:route_monitor/l10n/floor_label.dart';
 import 'package:route_monitor/l10n/strings.dart';
@@ -187,6 +188,10 @@ Future<void> concludeTask(
   RouteStopSummary stop, {
   String? observation,
 }) async {
+  // WARNING: a location stop is not concluded by a QR-style stamp (no floor
+  // check-in, no `checkout`); its completion is a separate write. Until that
+  // lands, concluding one records nothing rather than a wrong stamp.
+  if (stop.completion == StopCompletion.location) return;
   final entry = await ref.read(stopProgressStoreProvider).progressFor(stop.id);
   await ref
       .read(executionRepositoryProvider)
@@ -223,6 +228,13 @@ Future<void> signalTaskImpossible(
   if (context.mounted) ref.invalidate(myDayProvider);
 }
 
+/// The id the photos of a location stop are held under (it has no progress
+/// row); null for a QR stop, whose photos wait on its check-in's id.
+String? _locationExecutionOf(RouteStopSummary stop) =>
+    stop.completion == StopCompletion.location
+    ? locationExecutionId(stop.id)
+    : null;
+
 Future<void> _recordImpediment(
   WidgetRef ref,
   RouteSummary route,
@@ -238,7 +250,7 @@ Future<void> _recordImpediment(
         routeStopId: stop.id,
         reason: reason,
         note: note,
-        executionId: entry?.executionId,
+        executionId: entry?.executionId ?? _locationExecutionOf(stop),
       );
   ref
     ..invalidate(observationDraftProvider(stop.id))
