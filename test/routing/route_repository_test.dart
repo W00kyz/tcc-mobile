@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/route_snapshot_cache.dart';
+import 'package:route_monitor/routing/stop_completion.dart';
 
 Map<String, dynamic> _stopPayload({
   required String id,
@@ -153,6 +154,86 @@ void main() {
       expect(route.stops[0].floorLabel, 'Térreo');
       expect(route.stops[0].doneAt, DateTime.parse('2026-10-20T10:20:00Z'));
       expect(route.stops[1].doneAt, isNull);
+    });
+
+    test(
+      'parses an outdoor place stop: LOCATION, place_id, no floor',
+      () async {
+        final route = _routePayload();
+        (route['stops'] as List<dynamic>)[2] = {
+          ..._stopPayload(id: 'c', orderIndex: 3),
+          'completion': 'LOCATION',
+          'place_id': 'p-praca',
+          'building_id': null,
+          'floor_id': null,
+          'floor_label': null,
+          'building_name': 'Praça central',
+        };
+        final repository = DioRouteRepository(
+          _dioAnswering(200, _myDayPayload(route: route)),
+        );
+
+        final stop = (await repository.fetchMyDay()).route!.stops[2];
+
+        expect(stop.completion, StopCompletion.location);
+        expect(stop.placeId, 'p-praca');
+        expect(stop.buildingId, isNull);
+        expect(stop.floorId, isNull);
+        expect(stop.floorLabel, isNull);
+        expect(stop.siteId, 'p-praca');
+        expect(stop.siteName, 'Praça central');
+      },
+    );
+
+    test(
+      'a stop cached before places existed is a QR stop of a building',
+      () async {
+        final repository = DioRouteRepository(
+          _dioAnswering(200, _myDayPayload(route: _routePayload())),
+        );
+
+        final stop = (await repository.fetchMyDay()).route!.stops[0];
+
+        expect(stop.completion, StopCompletion.qr);
+        expect(stop.placeId, isNull);
+        expect(stop.siteId, 'b-caa');
+        expect(stop.siteName, 'CAA');
+      },
+    );
+
+    test('a stop with neither building_id nor place_id is not parsed', () {
+      final json = _stopPayload(id: 'x', orderIndex: 1)..remove('building_id');
+
+      expect(
+        () => RouteStopSummary.fromJson(json),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('siteId of a stop with no building and no place names the stop', () {
+      const stop = RouteStopSummary(
+        id: 'orphan',
+        orderIndex: 1,
+        batchNumber: 1,
+        status: 'PENDING',
+        servicePointName: 'Sala',
+        buildingId: null,
+        buildingName: 'Nowhere',
+        floorLabel: null,
+        latitude: 0,
+        longitude: 0,
+      );
+
+      expect(
+        () => stop.siteId,
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('orphan'),
+          ),
+        ),
+      );
     });
 
     test('derives the done count over every batch of the day', () async {

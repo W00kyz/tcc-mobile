@@ -147,6 +147,17 @@ bool _noteWillBeTrimmed(String draft) =>
 /// never writes a stamp or an impediment, it pops a [TaskDecision] and
 /// [showTaskDialog] writes it. The observation draft lives in memory only
 /// ([observationDraftProvider]) until that write.
+/// "Building · floor" for a room's stop; just the place's name for an
+/// outdoor place, which has no floor.
+String _where(RouteStopSummary stop) {
+  final floorLabel = stop.floorLabel;
+  if (floorLabel == null) return stop.siteName;
+  return AppStrings.buildingFloor(
+    stop.siteName,
+    floorDisplayLabel(floorLabel),
+  );
+}
+
 class TaskDialog extends ConsumerStatefulWidget {
   const TaskDialog({required this.route, required this.stop, super.key});
 
@@ -247,10 +258,7 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
           Text(stop.servicePointName, style: text.titleLarge),
           const SizedBox(height: 4),
           Text(
-            AppStrings.buildingFloor(
-              stop.buildingName,
-              floorDisplayLabel(stop.floorLabel),
-            ),
+            _where(stop),
             style: text.bodyMedium?.copyWith(color: p.muted),
           ),
         ],

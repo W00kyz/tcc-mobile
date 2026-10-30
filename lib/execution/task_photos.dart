@@ -98,7 +98,8 @@ class TaskPhotos extends ConsumerWidget {
       routeId: route.id,
       executionId: executionId,
       buildingName: stop.buildingName,
-      floorLabel: floorDisplayLabel(stop.floorLabel),
+      // A place has no floor: '' until the place UI (spec §6) words its title.
+      floorLabel: floorDisplayLabel(stop.floorLabel ?? ''),
       minimum: stop.requiresEvidence ? minEvidencePhotos : null,
     );
     _refreshPhotos(ref, executionId);

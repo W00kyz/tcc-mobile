@@ -2,6 +2,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/stop_completion.dart';
 
 /// One floor of a building: the tasks of the day on it, in route order.
 class FloorRow {
@@ -30,7 +31,8 @@ class FloorRow {
       _has(SlotState.stamped) && !_has(SlotState.inProgress);
 }
 
-/// A building of the day, numbered by its place in the route.
+/// A site of the day — a building, or an outdoor place — numbered by its
+/// place in the route.
 class DayBuilding {
   const DayBuilding({
     required this.buildingId,
@@ -38,10 +40,18 @@ class DayBuilding {
     required this.number,
     required this.position,
     required this.floors,
+    this.completion = StopCompletion.qr,
   });
 
+  /// The site's id: a building's, or a place's (see [RouteStopSummary.siteId]).
   final String buildingId;
   final String name;
+
+  /// `qr` for a building, `location` for an outdoor place.
+  final StopCompletion completion;
+
+  /// An outdoor place: one floor-less row, completed by location.
+  bool get isPlace => completion == StopCompletion.location;
 
   /// 1..n among the buildings with something to show.
   final int number;
@@ -154,7 +164,7 @@ List<RouteStopSummary> _sortedStops(RouteSummary route) =>
 Iterable<List<RouteStopSummary>> _stopsByBuilding(RouteSummary route) {
   final byBuilding = <String, List<RouteStopSummary>>{};
   for (final stop in _sortedStops(route)) {
-    byBuilding.putIfAbsent(stop.buildingId, () => []).add(stop);
+    byBuilding.putIfAbsent(stop.siteId, () => []).add(stop);
   }
   return byBuilding.values;
 }
@@ -167,8 +177,9 @@ DayBuilding _buildingOf(
 ) {
   final shown = stops.where((s) => !_isReleased(s, impededStopIds)).toList();
   return DayBuilding(
-    buildingId: stops.first.buildingId,
-    name: stops.first.buildingName,
+    buildingId: stops.first.siteId,
+    name: stops.first.siteName,
+    completion: stops.first.completion,
     number: number,
     position: LatLng(
       _mean(shown.map((s) => s.latitude)),
@@ -194,14 +205,18 @@ List<FloorRow> _floorsOf(
     for (final floorStops in byFloor.values)
       FloorRow(
         floorId: floorStops.first.floorId,
-        label: floorStops.first.floorLabel,
+        label: floorStops.first.floorLabel ?? '',
         slots: floorStops.map(slotOf).toList(),
       ),
   ];
 }
 
-String _floorKey(RouteStopSummary stop) =>
-    stop.floorId != null ? 'id:${stop.floorId}' : 'label:${stop.floorLabel}';
+String _floorKey(RouteStopSummary stop) {
+  if (stop.placeId != null) return 'place:${stop.placeId}';
+  return stop.floorId != null
+      ? 'id:${stop.floorId}'
+      : 'label:${stop.floorLabel}';
+}
 
 bool _isImpeded(RouteStopSummary stop, Set<String> impededStopIds) =>
     impededStopIds.contains(stop.id) ||
@@ -238,7 +253,7 @@ CardSlot _slotOf(
   return CardSlot(
     stopId: stop.id,
     state: state,
-    floorLabel: stop.floorLabel,
+    floorLabel: stop.floorLabel ?? '',
     servicePointName: stop.servicePointName,
     stampedAt: state != SlotState.done
         ? null

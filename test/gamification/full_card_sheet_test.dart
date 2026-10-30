@@ -97,7 +97,7 @@ Future<void> _stampAndLeave(WidgetTester tester, String stopId) async {
   final stop = route.stops.firstWhere((s) => s.id == stopId);
   await concludeTask(ref, route, stop);
   await tester.pumpAndSettle();
-  await scanWith(tester, qrOf(stop.floorLabel));
+  await scanWith(tester, qrOf(stop.floorLabel!));
 }
 
 void main() {

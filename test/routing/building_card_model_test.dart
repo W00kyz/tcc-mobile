@@ -3,6 +3,7 @@ import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/stop_completion.dart';
 
 RouteStopSummary _stop(
   String id,
@@ -25,6 +26,31 @@ RouteStopSummary _stop(
   buildingName: 'Prédio $buildingId',
   floorLabel: floorLabel,
   floorId: floorId,
+  latitude: lat,
+  longitude: lng,
+  releaseReason: releaseReason,
+);
+
+RouteStopSummary _placeStop(
+  String id,
+  int order,
+  String placeId, {
+  String status = 'PENDING',
+  int batch = 1,
+  String? releaseReason,
+  double lat = -7.25,
+  double lng = -35.95,
+}) => RouteStopSummary(
+  id: id,
+  orderIndex: order,
+  batchNumber: batch,
+  status: status,
+  servicePointName: 'Ponto $id',
+  buildingId: null,
+  buildingName: 'Local $placeId',
+  floorLabel: null,
+  placeId: placeId,
+  completion: StopCompletion.location,
   latitude: lat,
   longitude: lng,
   releaseReason: releaseReason,
@@ -58,6 +84,75 @@ SlotState _stateOf(List<DayBuilding> buildings, String id) => buildings
     .state;
 
 void main() {
+  group('buildDayBuildings with outdoor places', () {
+    final mixed = _route([
+      _stop('a1', 1, 'A'),
+      _placeStop('p1', 2, 'P', lat: -7.3, lng: -35.8),
+      _stop('a2', 3, 'A', floorId: 'f-1', floorLabel: '1º andar'),
+    ]);
+
+    test('numbers a place with the buildings, in route order', () {
+      final sites = _build(mixed);
+      expect(sites.map((b) => b.buildingId), ['A', 'P']);
+      expect(sites.map((b) => b.number), [1, 2]);
+      expect(sites.map((b) => b.isPlace), [false, true]);
+      expect(sites.map((b) => b.completion), [
+        StopCompletion.qr,
+        StopCompletion.location,
+      ]);
+    });
+
+    test('a place has one row with no floor id and an empty label', () {
+      final place = _build(mixed).last;
+      expect(place.name, 'Local P');
+      expect(place.floors, hasLength(1));
+      expect(place.floors.single.floorId, isNull);
+      expect(place.floors.single.label, '');
+    });
+
+    test('a place sits at its stops coordinates', () {
+      final position = _build(mixed).last.position;
+      expect(position.latitude, closeTo(-7.3, 1e-9));
+      expect(position.longitude, closeTo(-35.8, 1e-9));
+    });
+
+    test('a building keeps both its floors beside a place', () {
+      final building = _build(mixed).first;
+      expect(building.floors.map((f) => f.floorId), ['f-0', 'f-1']);
+    });
+
+    test('a place is complete once its stops are done or impeded', () {
+      final route = _route([
+        _placeStop('p1', 1, 'P', status: 'DONE'),
+        _placeStop('p2', 2, 'P'),
+      ]);
+      expect(_build(route).single.complete, isFalse);
+      final closed = _build(
+        route,
+        local: {'p2': _local(StopLocalStatus.done)},
+      );
+      expect(closed.single.complete, isTrue);
+      final impeded = _build(route, impeded: {'p2'});
+      expect(impeded.single.complete, isTrue);
+    });
+
+    test('drops a place with only released stops and renumbers', () {
+      final route = _route([
+        _placeStop(
+          'p1',
+          1,
+          'P',
+          status: 'RELEASED',
+          releaseReason: 'END_OF_DAY',
+        ),
+        _stop('b1', 2, 'B'),
+      ]);
+      final sites = _build(route);
+      expect(sites.map((b) => b.buildingId), ['B']);
+      expect(sites.single.number, 1);
+    });
+  });
+
   group('buildDayBuildings order and numbering', () {
     test('numbers buildings 1..n by first order index', () {
       final route = _route([

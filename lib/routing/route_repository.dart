@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:route_monitor/api/api_client.dart' show apiErrorCode;
 import 'package:route_monitor/routing/route_snapshot_cache.dart';
+import 'package:route_monitor/routing/stop_completion.dart';
 
 DateTime? _parseOptionalTimestamp(Object? raw) =>
     raw == null ? null : DateTime.parse(raw as String);
@@ -19,6 +20,8 @@ class RouteStopSummary {
     required this.floorLabel,
     required this.latitude,
     required this.longitude,
+    this.placeId,
+    this.completion = StopCompletion.qr,
     this.floorId,
     this.releaseReason,
     this.doneAt,
@@ -30,7 +33,20 @@ class RouteStopSummary {
     this.requiresEvidence = false,
   });
 
-  factory RouteStopSummary.fromJson(Map<String, dynamic> json) =>
+  factory RouteStopSummary.fromJson(Map<String, dynamic> json) {
+    // A stop belongs to a building or to a place. A payload with neither
+    // (a snapshot older than `building_id`) fails here, not later in siteId,
+    // so the snapshot cache can discard it.
+    if (json['building_id'] == null && json['place_id'] == null) {
+      throw FormatException(
+        'Stop "${json['id']}" has neither building_id nor place_id; '
+        'expected one of them.',
+      );
+    }
+    return RouteStopSummary._fromValidJson(json);
+  }
+
+  factory RouteStopSummary._fromValidJson(Map<String, dynamic> json) =>
       RouteStopSummary(
         id: json['id'] as String,
         orderIndex: json['order_index'] as int,
@@ -38,10 +54,12 @@ class RouteStopSummary {
         status: json['status'] as String,
         releaseReason: json['release_reason'] as String?,
         servicePointName: json['service_point_name'] as String,
-        buildingId: json['building_id'] as String,
+        buildingId: json['building_id'] as String?,
         buildingName: json['building_name'] as String,
-        floorLabel: json['floor_label'] as String,
+        floorLabel: json['floor_label'] as String?,
         floorId: json['floor_id'] as String?,
+        placeId: json['place_id'] as String?,
+        completion: StopCompletion.parse(json['completion'] as String?),
         doneAt: _parseOptionalTimestamp(json['done_at']),
         latitude: (json['latitude'] as num).toDouble(),
         longitude: (json['longitude'] as num).toDouble(),
@@ -77,13 +95,38 @@ class RouteStopSummary {
   /// null for any other status.
   final String? releaseReason;
   final String servicePointName;
-  final String buildingId;
+
+  /// Null for a stop of an outdoor place.
+  final String? buildingId;
+
+  /// The building's name, or the place's name for a stop of a place.
   final String buildingName;
-  final String floorLabel;
+
+  /// Null for a stop of an outdoor place (it has no floor).
+  final String? floorLabel;
+
+  /// Set for a stop of an outdoor place; null for a room's stop.
+  final String? placeId;
+
+  /// `qr` for a room, `location` for an outdoor place; `qr` for a snapshot
+  /// cached before places existed.
+  final StopCompletion completion;
 
   /// The floor's id, to group a building's stops per floor; null for a
   /// snapshot cached before the backend sent it.
   final String? floorId;
+
+  /// The building or place this stop belongs to, to group the day's stops.
+  /// Throws when the stop has neither (not a valid stop of any payload).
+  String get siteId =>
+      buildingId ??
+      placeId ??
+      (throw StateError(
+        'Stop "$id" has neither buildingId nor placeId; expected one of them.',
+      ));
+
+  /// The name of [siteId]'s building or place.
+  String get siteName => buildingName;
 
   /// When the server recorded the stop done; null until then.
   final DateTime? doneAt;

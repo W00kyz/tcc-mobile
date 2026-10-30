@@ -121,8 +121,8 @@ BatchCard _buildCardFor(
       mayBeNext: !nextAssigned,
     );
     if (slot.state == SlotState.next) nextAssigned = true;
-    slotsByBuilding.putIfAbsent(stop.buildingId, () => []).add(slot);
-    stopsByBuilding.putIfAbsent(stop.buildingId, () => []).add(stop);
+    slotsByBuilding.putIfAbsent(stop.siteId, () => []).add(slot);
+    stopsByBuilding.putIfAbsent(stop.siteId, () => []).add(stop);
   }
   return BatchCard(
     batchNumber: batchNumber,
@@ -141,7 +141,7 @@ CardSlot _slotOf(
   return CardSlot(
     stopId: stop.id,
     state: state,
-    floorLabel: stop.floorLabel,
+    floorLabel: stop.floorLabel ?? '',
     servicePointName: stop.servicePointName,
     // When the stop was done: the local check-out beats the server's.
     stampedAt: state != SlotState.done
@@ -180,7 +180,7 @@ List<BuildingGroup> _groupsOf(
   for (final entry in stopsByBuilding.entries)
     BuildingGroup(
       buildingId: entry.key,
-      buildingName: entry.value.first.buildingName,
+      buildingName: entry.value.first.siteName,
       slots: slotsByBuilding[entry.key]!,
       position: LatLng(
         _mean(entry.value.map((s) => s.latitude)),
