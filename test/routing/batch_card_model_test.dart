@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/stop_completion.dart';
 
 RouteStopSummary _stop(
   String id,
@@ -205,6 +206,38 @@ void main() {
       expect(done.groups.single.complete, isTrue);
       expect(done.next, isNull);
       expect(buildBatchCard(route, {}, {}).complete, isFalse);
+    });
+  });
+
+  group('buildBatchCard with an outdoor place', () {
+    RouteStopSummary placeStop(String id, int order) => RouteStopSummary(
+      id: id,
+      orderIndex: order,
+      batchNumber: 1,
+      status: 'PENDING',
+      servicePointName: 'Ponto $id',
+      buildingId: null,
+      buildingName: 'Praça central',
+      floorLabel: null,
+      placeId: 'p1',
+      completion: StopCompletion.location,
+      latitude: -7.3,
+      longitude: -35.8,
+    );
+
+    test('groups a place by its site id, named by the site name', () {
+      final route = _route([
+        _stop('a', 1, 'b1', 'Prédio'),
+        placeStop('p1s1', 2),
+        placeStop('p1s2', 3),
+      ]);
+
+      final groups = buildBatchCard(route, {}, {}).groups;
+
+      expect(groups.map((g) => g.buildingName), ['Prédio', 'Praça central']);
+      expect(groups.last.buildingId, 'p1');
+      expect(groups.last.slots.map((s) => s.stopId), ['p1s1', 'p1s2']);
+      expect(groups.last.slots.first.floorLabel, '');
     });
   });
 

@@ -318,15 +318,17 @@ class _StampSlotState extends State<StampSlot>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            floorDisplayLabel(slot.floorLabel),
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: style.copyWith(
-              decoration: released ? TextDecoration.lineThrough : null,
+          // A place's slot has no floor: nothing to caption.
+          if (slot.floorLabel.isNotEmpty)
+            Text(
+              floorDisplayLabel(slot.floorLabel),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: style.copyWith(
+                decoration: released ? TextDecoration.lineThrough : null,
+              ),
             ),
-          ),
           if (released && _reason != null) _reasonText(p),
         ],
       ),

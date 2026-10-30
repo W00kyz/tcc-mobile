@@ -9,7 +9,8 @@ import 'package:route_monitor/ui/app_theme.dart';
 import 'package:route_monitor/ui/stamp_slot.dart';
 
 /// The selected building's stamp card: "Complete N tarefas" (or "Prédio
-/// concluído"), then one row per floor, its label over its task slots. A
+/// concluído"), then one row per floor, its label over its task slots. An
+/// outdoor place has no floor: its slots follow the title directly. A
 /// released task is hidden: it went back to the pool.
 ///
 ///     FloorCard(building: b, onSlotTap: (slot, floor) => open(slot))
@@ -75,8 +76,12 @@ class FloorCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _floorLabel(floor, p),
-          const SizedBox(height: 8),
+          // A place has one floor-less row: its slots sit right under the
+          // title, with no floor name to give.
+          if (!building.isPlace) ...[
+            _floorLabel(floor, p),
+            const SizedBox(height: 8),
+          ],
           Wrap(
             spacing: 8,
             runSpacing: 8,

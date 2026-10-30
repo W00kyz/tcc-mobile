@@ -21,11 +21,13 @@ AppealableStop _eligible({
   String id = 'rs-1',
   String name = 'Sala 101',
   String reason = 'LOCATION_SILENCE',
+  String buildingName = 'Bloco CAA',
+  String? floorLabel = 'Térreo',
 }) => AppealableStop(
   routeStopId: id,
   servicePointName: name,
-  buildingName: 'Bloco CAA',
-  floorLabel: 'Térreo',
+  buildingName: buildingName,
+  floorLabel: floorLabel,
   releaseReason: reason,
   deadline: _deadline,
 );
@@ -98,6 +100,27 @@ void main() {
       );
     },
   );
+
+  testWidgets('a released place stop is listed by its name alone', (
+    tester,
+  ) async {
+    final place = _eligible(buildingName: 'Praça central', floorLabel: null);
+    await tester.pumpWidget(_app(RecordingAppealApi(eligibleStops: [place])));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        AppStrings.appealEligibleDetails(
+          building: 'Praça central',
+          floor: null,
+          reason: AppStrings.releaseReasonLabel('LOCATION_SILENCE'),
+          deadline: formatDayTime(_deadline),
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Praça central ·'), findsNothing);
+  });
 
   testWidgets('lists "Meus recursos" with each status and the review', (
     tester,

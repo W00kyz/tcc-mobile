@@ -13,4 +13,16 @@ void main() {
     expect(floorDisplayLabel('-1'), '-1');
     expect(floorDisplayLabel(''), '');
   });
+
+  group('siteWithFloor', () {
+    test('a room reads "Prédio · Andar"', () {
+      expect(siteWithFloor('CAA', '1'), 'CAA · Andar 1');
+      expect(siteWithFloor('CAA', 'Térreo'), 'CAA · Térreo');
+    });
+
+    test('a place, with no floor, reads as its name alone', () {
+      expect(siteWithFloor('Praça central', null), 'Praça central');
+      expect(siteWithFloor('Praça central', ''), 'Praça central');
+    });
+  });
 }

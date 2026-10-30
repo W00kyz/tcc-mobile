@@ -141,18 +141,22 @@ String? nextTaskStopId(List<DayBuilding> buildings) => buildings
     .firstOrNull
     ?.stopId;
 
-/// The floor of [building] with a check-in open, if any.
-FloorRow? openFloorOf(DayBuilding building) =>
-    building.floors.where((f) => f.hasOpenCheckIn).firstOrNull;
+/// The floor of [building] with a check-in open, if any. A place has none:
+/// it is never checked in by QR.
+FloorRow? openFloorOf(DayBuilding building) => building.isPlace
+    ? null
+    : building.floors.where((f) => f.hasOpenCheckIn).firstOrNull;
 
 /// The stops the worker can check in to on [floorId]: `PENDING` ones of the
-/// current batch, in route order.
+/// current batch, in route order. A stop completed by location is never one:
+/// it has no QR to scan, whatever floor id it carries.
 List<RouteStopSummary> checkInCandidates(RouteSummary route, String floorId) =>
     _sortedStops(route)
         .where(
           (s) =>
               s.batchNumber == route.currentBatch &&
               s.status == 'PENDING' &&
+              s.completion == StopCompletion.qr &&
               s.floorId == floorId,
         )
         .toList();

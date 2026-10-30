@@ -1,7 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// The building whose pin the worker tapped: the other pins dim (redesign
-/// §6.3) and the sheet shows that building's floor card. Null hides the
+/// The site — a building, or an outdoor place — whose pin the worker tapped,
+/// keyed by its site id (`DayBuilding.buildingId`): the other pins dim
+/// (redesign §6.3) and the sheet shows that site's card. Null hides the
 /// sheet while a route is worked: the map shows whole.
 ///
 ///     ref.read(selectedBuildingProvider.notifier).select('b2');

@@ -167,13 +167,19 @@ class _EligibleStopTile extends StatelessWidget {
 
   final AppealableStop stop;
 
+  /// The floor as the worker reads it; null for an outdoor place.
+  static String? _floorOf(AppealableStop stop) {
+    final label = stop.floorLabel;
+    return label == null ? null : floorDisplayLabel(label);
+  }
+
   @override
   Widget build(BuildContext context) => ListTile(
     title: Text(stop.servicePointName),
     subtitle: Text(
       AppStrings.appealEligibleDetails(
         building: stop.buildingName,
-        floor: floorDisplayLabel(stop.floorLabel),
+        floor: _floorOf(stop),
         reason: AppStrings.releaseReasonLabel(stop.releaseReason),
         deadline: formatDayTime(stop.deadline),
       ),

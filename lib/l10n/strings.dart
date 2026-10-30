@@ -256,8 +256,11 @@ abstract final class AppStrings {
       'Não foi possível salvar a foto.';
   static const String photoSequenceDeleteError =
       'Não foi possível apagar a foto.';
-  static String photoSequenceTitle(String building, String floor) =>
-      '$building · $floor';
+
+  /// `<prédio> · <andar>`; an outdoor place has no floor, so [floor] is null
+  /// and the title is its name alone.
+  static String photoSequenceTitle(String building, String? floor) =>
+      floor == null ? building : '$building · $floor';
   static String photoSequenceRequiredCounter(int n, int minimum) =>
       '$n de $minimum obrigatórias';
   static String photoSequenceCounter(int n) => n == 1 ? '1 foto' : '$n fotos';
@@ -358,13 +361,17 @@ abstract final class AppStrings {
       'Estes pontos foram liberados — você pode recorrer.';
   static const String releasedStopsSnackbarAction = 'Recorrer';
 
-  /// The details line of a contestable point.
+  /// The details line of a contestable point. [floor] is null for an
+  /// outdoor place, which has none.
   static String appealEligibleDetails({
     required String building,
-    required String floor,
+    required String? floor,
     required String reason,
     required String deadline,
-  }) => '$building · $floor\nMotivo: $reason · Prazo: $deadline';
+  }) {
+    final where = floor == null ? building : '$building · $floor';
+    return '$where\nMotivo: $reason · Prazo: $deadline';
+  }
 
   /// The details line of a filed appeal: `<prédio> · enviado em <quando>`.
   static String appealFiledDetails(String building, String filedAt) =>

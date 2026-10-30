@@ -85,15 +85,10 @@ class BuildingSheetHeader extends ConsumerWidget {
     );
   }
 
-  /// `Nome · Andar`, or the name alone once no floor has work left.
-  String _placeText() {
-    final floor = currentFloorOf(building);
-    if (floor == null) return building.name;
-    return AppStrings.buildingFloor(
-      building.name,
-      floorDisplayLabel(floor.label),
-    );
-  }
+  /// `Nome · Andar`, or the name alone once no floor has work left and for
+  /// an outdoor place, which has no floor.
+  String _placeText() =>
+      siteWithFloor(building.name, currentFloorOf(building)?.label);
 
   /// Straight-line metres from the worker's last fix; null without one.
   String? _distanceText(LatLng? worker) {
@@ -198,7 +193,8 @@ class ScanFooter extends ConsumerWidget {
 }
 
 /// The footer for [building] among the day's [buildings]; null for a
-/// finished building, which has nothing left to scan.
+/// finished building, which has nothing left to scan, and for an outdoor
+/// place, which has no QR at all.
 ///
 ///     stickyFooter: scanFooterFor(route, buildings, building)
 ScanFooter? scanFooterFor(
@@ -206,7 +202,7 @@ ScanFooter? scanFooterFor(
   List<DayBuilding> buildings,
   DayBuilding building,
 ) {
-  if (building.complete) return null;
+  if (building.complete || building.isPlace) return null;
   return ScanFooter(
     route: route,
     building: building,

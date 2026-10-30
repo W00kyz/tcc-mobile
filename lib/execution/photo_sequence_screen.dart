@@ -21,7 +21,7 @@ Future<int> openPhotoSequence(
   required String routeId,
   required String executionId,
   required String buildingName,
-  required String floorLabel,
+  required String? floorLabel,
   required int? minimum,
 }) async {
   final taken = await Navigator.of(context).push<int>(

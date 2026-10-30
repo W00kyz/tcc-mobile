@@ -13,6 +13,7 @@ import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/scan_and_locate.dart';
+import 'package:route_monitor/routing/stop_completion.dart';
 import 'package:route_monitor/sync/sync_providers.dart' show syncWorkerProvider;
 import 'package:uuid/uuid.dart';
 
@@ -254,7 +255,7 @@ Future<void> checkOutFloor(
   RouteSummary route,
   FloorRow floor,
 ) async {
-  final stamped = _stampedStopIds(floor);
+  final stamped = _stampedStopIds(route, floor);
   if (stamped.isEmpty) return;
   final notify = homeNotifier(ref, context);
   final building = route.stops.firstWhere((s) => s.id == stamped.first);
@@ -274,10 +275,19 @@ Future<void> checkOutFloor(
   notify(AppStrings.floorCheckOutDone);
 }
 
-List<String> _stampedStopIds(FloorRow floor) => [
-  for (final slot in floor.slots)
-    if (slot.state == SlotState.stamped) slot.stopId,
-];
+/// The floor's stamped stops, leaving out any completed by location: they
+/// have no exit QR, so no floor exit may check them out.
+List<String> _stampedStopIds(RouteSummary route, FloorRow floor) {
+  final byLocation = {
+    for (final stop in route.stops)
+      if (stop.completion == StopCompletion.location) stop.id,
+  };
+  return [
+    for (final slot in floor.slots)
+      if (slot.state == SlotState.stamped && !byLocation.contains(slot.stopId))
+        slot.stopId,
+  ];
+}
 
 /// Whether [scan] is a verified QR of [floor], saying why not otherwise. A
 /// floor of a snapshot cached before the backend sent floor ids has nothing to

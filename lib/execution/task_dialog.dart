@@ -14,6 +14,7 @@ import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/floor_actions.dart';
 import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/stop_completion.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 // One task, tapped on the floor card before it is stamped: its details, the
@@ -143,21 +144,15 @@ String? _impedimentNoteOf(String draft) {
 bool _noteWillBeTrimmed(String draft) =>
     (observationToSend(draft)?.runes.length ?? 0) > _impedimentNoteLimit;
 
+/// "Building · floor" for a room's stop; just the place's name for an
+/// outdoor place, which has no floor.
+String _where(RouteStopSummary stop) =>
+    siteWithFloor(stop.siteName, stop.floorLabel);
+
 /// The task dialog's body. Pure input collection apart from the photos: it
 /// never writes a stamp or an impediment, it pops a [TaskDecision] and
 /// [showTaskDialog] writes it. The observation draft lives in memory only
 /// ([observationDraftProvider]) until that write.
-/// "Building · floor" for a room's stop; just the place's name for an
-/// outdoor place, which has no floor.
-String _where(RouteStopSummary stop) {
-  final floorLabel = stop.floorLabel;
-  if (floorLabel == null) return stop.siteName;
-  return AppStrings.buildingFloor(
-    stop.siteName,
-    floorDisplayLabel(floorLabel),
-  );
-}
-
 class TaskDialog extends ConsumerStatefulWidget {
   const TaskDialog({required this.route, required this.stop, super.key});
 
@@ -348,6 +343,9 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
   /// Why "Concluir tarefa" is closed, or null when it is open.
   String? _concludeHint(String? executionId) {
     if (!_progressKnown) return null;
+    // INTENTIONAL: a location stop has no floor check-in to ask for. Its
+    // conclusion by location is wired in the next tasks of the places spec.
+    if (widget.stop.completion == StopCompletion.location) return null;
     if (executionId == null) return AppStrings.taskNeedsFloorCheckIn;
     if (!widget.stop.requiresEvidence) return null;
     final count = ref.watch(

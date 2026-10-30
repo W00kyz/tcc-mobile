@@ -39,6 +39,23 @@ Widget host(
 );
 
 void main() {
+  testWidgets('a place slot, with no floor, captions no empty label', (
+    t,
+  ) async {
+    const place = CardSlot(
+      stopId: 'p1s1',
+      state: SlotState.pending,
+      floorLabel: '',
+      stampedAt: null,
+      pendingSync: false,
+      releaseReason: null,
+      stampRotationDeg: 0,
+    );
+    await t.pumpWidget(host(const StampSlot(slot: place)));
+
+    expect(find.text(''), findsNothing);
+  });
+
   testWidgets('released shows its reason on screen', (t) async {
     await t.pumpWidget(
       host(StampSlot(slot: slot(SlotState.released, reason: 'LEFT_CAMPUS'))),

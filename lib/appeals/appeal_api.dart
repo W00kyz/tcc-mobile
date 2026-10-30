@@ -17,7 +17,7 @@ class AppealableStop {
     routeStopId: json['route_stop_id'] as String,
     servicePointName: json['service_point_name'] as String,
     buildingName: json['building_name'] as String,
-    floorLabel: json['floor_label'] as String,
+    floorLabel: json['floor_label'] as String?,
     releaseReason: json['release_reason'] as String,
     deadline: DateTime.parse(json['deadline'] as String),
   );
@@ -25,7 +25,9 @@ class AppealableStop {
   final String routeStopId;
   final String servicePointName;
   final String buildingName;
-  final String floorLabel;
+
+  /// Null for a released stop of an outdoor place, which has no floor.
+  final String? floorLabel;
   final String releaseReason;
 
   /// The last instant the server accepts the appeal.

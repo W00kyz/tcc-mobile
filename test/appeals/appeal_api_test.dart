@@ -52,6 +52,24 @@ void main() {
     expect(stop.deadline, DateTime.utc(2026, 10, 23, 14));
   });
 
+  test('eligible parses a released place stop, which has no floor', () async {
+    final adapter = _FakeAdapter(
+      statusCode: 200,
+      body: [
+        {
+          ..._eligibleJson(),
+          'building_name': 'Praça central',
+          'floor_label': null,
+        },
+      ],
+    );
+
+    final stop = (await _api(adapter).eligible()).single;
+
+    expect(stop.buildingName, 'Praça central');
+    expect(stop.floorLabel, isNull);
+  });
+
   test('mine parses status and the manager review', () async {
     final adapter = _FakeAdapter(
       statusCode: 200,
