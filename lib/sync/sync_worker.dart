@@ -11,6 +11,8 @@ import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/blocked_scope.dart';
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/location_refusal.dart';
+import 'package:route_monitor/sync/location_rejection.dart';
 import 'package:route_monitor/sync/outbox_row_sender.dart';
 import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_error_class.dart';
@@ -20,7 +22,7 @@ import 'package:route_monitor/sync/sync_status.dart';
 export 'package:route_monitor/sync/sync_error_class.dart' show SyncErrorClass;
 
 /// Where one dispatch left its row.
-enum _Dispatched { synced, blocked, deferred }
+enum _Dispatched { synced, blocked, rejected, deferred }
 
 /// Drains the local outbox ([LocalWriteStore]) to the backend, FIFO per
 /// route (spec Ruling 6): rows for a route replay oldest-first, a soft
@@ -43,6 +45,7 @@ class SyncWorker {
     math.Random? random,
     void Function(DateTime scannedAt)? onScanDelivered,
     void Function(StopRelease release)? onStopReleased,
+    void Function(LocationRefusal refusal)? onLocationRefused,
     // A private field can't be an initializing formal with a public param
     // name, and `now` must stay public for callers to inject a fake clock.
     // ignore: prefer_initializing_formals
@@ -53,7 +56,10 @@ class SyncWorker {
        _onScanDelivered = onScanDelivered,
        // Same reason as `now` above: the param name stays public.
        // ignore: prefer_initializing_formals
-       _onStopReleased = onStopReleased;
+       _onStopReleased = onStopReleased,
+       // Same reason as `now` above: the param name stays public.
+       // ignore: prefer_initializing_formals
+       _onLocationRefused = onLocationRefused;
 
   final LocalWriteStore _store;
   final SyncMetaStore _syncMeta;
@@ -63,6 +69,11 @@ class SyncWorker {
     evidenceApi: _evidenceApi,
     stopProgress: _stopProgress,
     syncMeta: _syncMeta,
+  );
+  late final LocationRejection _rejection = LocationRejection(
+    store: _store,
+    stopProgress: _stopProgress,
+    onRefused: _onLocationRefused,
   );
   final StopProgressStore _stopProgress;
   final ExecutionApi _executionApi;
@@ -81,6 +92,11 @@ class SyncWorker {
   /// the appeal (spec 2026-10-20-alocacao-automatica §7.5). Reported once per
   /// stop, however many of its rows come back 409.
   final void Function(StopRelease release)? _onStopReleased;
+
+  /// A location completion the server refused — reported once, when its row
+  /// is marked `rejected`, so the app can tell the worker why the place is
+  /// pending again.
+  final void Function(LocationRefusal refusal)? _onLocationRefused;
 
   /// The drain pass in flight per route — the re-entrancy guard that keeps
   /// two triggers (foreground + regained connectivity) from interleaving.
@@ -162,7 +178,9 @@ class SyncWorker {
           continue;
         }
         final outcome = await _dispatch(row);
-        if (outcome == _Dispatched.blocked) {
+        // A rejected completion, like a blocked row, holds back what depends
+        // on it (its stop's other rows) — but never stops the pass.
+        if (outcome == _Dispatched.blocked || outcome == _Dispatched.rejected) {
           scope.add(row);
           continue;
         }
@@ -301,6 +319,10 @@ class SyncWorker {
         // The server had it already — and counted its scan then.
         await _store.markSynced(row.id);
         return _Dispatched.synced;
+      }
+      if (classification == SyncErrorClass.rejected) {
+        await _rejection.apply(row, error);
+        return _Dispatched.rejected;
       }
       if (classification == SyncErrorClass.awaitingAuth) {
         await _store.releaseClaim(row);

@@ -536,4 +536,93 @@ void main() {
       expect(seen.last, {'s1', 's5'});
     });
   });
+
+  group('location completion rows', () {
+    Future<void> enqueueRow(
+      String id,
+      PendingOpKind kind,
+      String executionId, {
+      PendingOpState state = PendingOpState.pending,
+    }) async {
+      await store.enqueue(
+        id: id,
+        kind: kind,
+        payload: {'execution_id': executionId},
+        routeId: 'route-A',
+        initialState: state,
+      );
+      // createdAt is epoch millis: keep each row in its own millisecond.
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+    }
+
+    test('released photos re-join the queue after every earlier row, in '
+        'capture order', () async {
+      await enqueueRow(
+        'p1',
+        PendingOpKind.evidencePhoto,
+        'e1',
+        state: PendingOpState.held,
+      );
+      await enqueueRow(
+        'p2',
+        PendingOpKind.evidencePhoto,
+        'e1',
+        state: PendingOpState.held,
+      );
+      await enqueueRow('completion', PendingOpKind.locationCompletion, 'e1');
+
+      await store.releaseHeldPhotos('e1');
+
+      final rows = await store.unsyncedForRoute('route-A');
+      expect(rows.map((r) => r.id), ['completion', 'p1', 'p2']);
+    });
+
+    test('discardUnsentEvidence drops the undelivered photos and notes of '
+        'one execution only', () async {
+      await enqueueRow(
+        'held',
+        PendingOpKind.evidencePhoto,
+        'e1',
+        state: PendingOpState.held,
+      );
+      await enqueueRow('pending', PendingOpKind.evidencePhoto, 'e1');
+      await enqueueRow(
+        'note',
+        PendingOpKind.evidenceNote,
+        'e1',
+        state: PendingOpState.failed,
+      );
+      await enqueueRow(
+        'blocked',
+        PendingOpKind.evidencePhoto,
+        'e1',
+        state: PendingOpState.blocked,
+      );
+      await enqueueRow(
+        'synced',
+        PendingOpKind.evidencePhoto,
+        'e1',
+        state: PendingOpState.synced,
+      );
+      await enqueueRow('other', PendingOpKind.evidencePhoto, 'e2');
+      await enqueueRow('completion', PendingOpKind.locationCompletion, 'e1');
+
+      expect(await store.discardUnsentEvidence('e1'), 4);
+
+      final left = await store.unsyncedForRoute('route-A');
+      expect(left.map((r) => r.id), ['other', 'completion']);
+      expect(await store.localPhotoCountFor('e1'), 1, reason: 'the synced one');
+    });
+
+    test('a rejected row is out of every queue and every work list', () async {
+      await enqueueRow('completion', PendingOpKind.locationCompletion, 'e1');
+
+      await store.markRejected('completion', 'OUT_OF_RADIUS');
+
+      expect(await store.unsyncedForRoute('route-A'), isEmpty);
+      expect(await store.blockedForRoute('route-A'), isEmpty);
+      expect(await store.dueForRoute('route-A', now: 1 << 50), isEmpty);
+      expect(await store.routeIdsWithWork(), isEmpty);
+    });
+  });
 }

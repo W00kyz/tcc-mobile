@@ -988,6 +988,19 @@ class _RecordingExecutionApi implements ExecutionApi {
   int? _failCheckInOnCall;
   DioException? _failWith;
 
+  @override
+  Future<DateTime?> completeByLocation({
+    required String executionId,
+    required String routeStopId,
+    required String idempotencyKey,
+    required double latitude,
+    required double longitude,
+    required DateTime completedAt,
+    double? accuracyM,
+    double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
+  }) => throw UnimplementedError();
+
   void failCheckInOnCallWith(int call, DioException error) {
     _failCheckInOnCall = call;
     _failWith = error;

@@ -125,11 +125,12 @@ Future<void> _carryOut(
   RouteStopSummary stop,
   TaskDecision decision,
 ) => switch (decision) {
-  TaskConcluded(:final observation) => concludeTask(
+  TaskConcluded(:final observation, :final fix) => concludeTask(
     ref,
     route,
     stop,
     observation: observation,
+    fix: fix,
   ),
   TaskImpossible(:final reason, :final note) => signalTaskImpossible(
     context,

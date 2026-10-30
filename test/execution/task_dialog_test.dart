@@ -622,8 +622,8 @@ void main() {
       expect(concludeButton(tester).onPressed, isNull);
     });
 
-    testWidgets('concluding writes no QR-style stamp (the completion write is '
-        'separate) and closes the dialog', (tester) async {
+    testWidgets('concluding queues the location completion with the gate '
+        'fix, writes no QR-style stamp and closes the dialog', (tester) async {
       gates.emit(ready);
       await openDialog(tester, stop: place);
 
@@ -631,8 +631,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(Dialog), findsNothing);
-      expect(await progress.progressFor('s1'), isNull);
-      expect(await store.unsyncedForRoute('r1'), isEmpty);
+      expect((await progress.progressFor('s1'))!.status, StopLocalStatus.done);
+      final row = (await store.unsyncedForRoute('r1')).single;
+      expect(row.kind, PendingOpKind.locationCompletion);
+      expect(row.payload['latitude'], -7.2);
+      expect(row.payload['longitude'], -35.9);
     });
 
     testWidgets('Concluir pops the exact fix that opened the gate', (

@@ -37,6 +37,19 @@ class _FakeExecutionApi implements ExecutionApi {
   _FakeExecutionApi(this.log);
 
   final List<String> log;
+
+  @override
+  Future<DateTime?> completeByLocation({
+    required String executionId,
+    required String routeStopId,
+    required String idempotencyKey,
+    required double latitude,
+    required double longitude,
+    required DateTime completedAt,
+    double? accuracyM,
+    double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
+  }) => throw UnimplementedError();
   Exception? checkInError;
   Exception? checkOutError;
   Exception? impedimentError;
@@ -185,6 +198,13 @@ class _FakeStopProgressStore implements StopProgressStore {
   final Map<String, StopProgressEntry> rows = {};
 
   @override
+  Future<void> upsertDone(String routeStopId, String executionId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> remove(String routeStopId) => throw UnimplementedError();
+
+  @override
   Future<void> upsertInProgress(String routeStopId, String executionId) async {
     calls.add('inProgress:$routeStopId');
     rows[routeStopId] = StopProgressEntry(
@@ -251,6 +271,14 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       throw UnimplementedError();
 
   final Map<String, PendingOperationRow> rows = {};
+
+  @override
+  Future<void> markRejected(String id, String error) =>
+      throw UnimplementedError();
+
+  @override
+  Future<int> discardUnsentEvidence(String executionId) =>
+      throw UnimplementedError();
 
   void seed(
     String id, {

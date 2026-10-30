@@ -153,6 +153,15 @@ abstract final class AppStrings {
   static const String taskSaveFailed =
       'Não foi possível salvar. Tente de novo.';
 
+  // --- a location completion the server refused ---
+  static const String locationRefusedPlaceFallback = 'este local';
+  static String locationRefusedOutOfRadius(String place, int meters) =>
+      'Conclusão recusada em $place: você estava a $meters m do local.';
+  static String locationRefusedTooFar(String place) =>
+      'Conclusão recusada em $place: você estava longe do local.';
+  static String locationRefusedNoLocation(String place) =>
+      'Conclusão recusada em $place: sem localização ativa.';
+
   // --- building sheet: header, floor card, scan footer ---
   static const String buildingSheetNext = 'Próximo ponto';
   static const String buildingSheetSelected = 'Prédio selecionado';
@@ -317,6 +326,8 @@ abstract final class AppStrings {
   static const String blockedSyncKindPhoto = 'Foto';
   static const String blockedSyncKindNote = 'Observação';
   static const String blockedSyncKindImpediment = 'Impedimento';
+  static const String blockedSyncKindLocationCompletion =
+      'Conclusão por localização';
 
   /// A `<kind> — <reference>` outbox-row label.
   static String blockedSyncRowLabel(String kind, String reference) =>

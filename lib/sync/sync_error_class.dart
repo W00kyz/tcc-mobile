@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:route_monitor/execution/execution_api.dart'
-    show AmbiguousRoomException;
+    show AmbiguousRoomException, LocationRefusedException;
 
 /// How the worker reacts to a failed dispatch (spec Ruling 6).
 enum SyncErrorClass {
@@ -14,6 +14,12 @@ enum SyncErrorClass {
 
   /// Permanent for this payload — block the row and halt the route's queue.
   hard,
+
+  /// The server refused a location completion for good (outside the radius,
+  /// or no position). The row is marked `rejected`, its stop goes back to
+  /// pending, and the route's queue keeps draining — nothing is wrong with
+  /// the session or the route, only with this one conclusion.
+  rejected,
 
   /// 401 even after the token refresh: the session must be renewed (a new
   /// login). Nothing is wrong with the row — leave it `pending`, untouched,
@@ -30,6 +36,9 @@ SyncErrorClass classifySyncError(Object error) {
   // RULING P5: a background drain cannot show a room picker, so an
   // unresolved-room check-in blocks that stop.
   if (error is AmbiguousRoomException) return SyncErrorClass.hard;
+  if (LocationRefusedException.fromError(error) != null) {
+    return SyncErrorClass.rejected;
+  }
   if (error is! DioException) return SyncErrorClass.hard;
 
   final response = error.response;

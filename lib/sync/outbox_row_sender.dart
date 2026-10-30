@@ -31,6 +31,7 @@ class OutboxRowSender {
       PendingOpKind.checkIn => _performCheckIn(payload),
       PendingOpKind.checkOut => _performCheckOut(payload),
       PendingOpKind.impediment => _performImpediment(payload),
+      PendingOpKind.locationCompletion => _performLocationCompletion(payload),
       PendingOpKind.evidencePhoto => _evidenceApi.uploadPhoto(
         executionId: payload['execution_id'] as String,
         bytes: base64Decode(payload['bytes_b64'] as String),
@@ -82,6 +83,28 @@ class OutboxRowSender {
     );
     await _stopProgress.markDone(response.result.routeStopId);
     return response.serverDate;
+  }
+
+  Future<DateTime?> _performLocationCompletion(
+    Map<String, dynamic> payload,
+  ) async {
+    final routeStopId = payload['route_stop_id'] as String;
+    final executionId = payload['execution_id'] as String;
+    final serverDate = await _executionApi.completeByLocation(
+      executionId: executionId,
+      routeStopId: routeStopId,
+      idempotencyKey: payload['idempotency_key'] as String,
+      latitude: (payload['latitude'] as num).toDouble(),
+      longitude: (payload['longitude'] as num).toDouble(),
+      accuracyM: (payload['accuracy_m'] as num?)?.toDouble(),
+      completedAt: DateTime.parse(payload['completed_at'] as String),
+      clientClockOffsetSeconds: await _syncMeta.getClockOffsetSeconds(),
+      complaintsSuggestions: payload['complaints_suggestions'] as String?,
+    );
+    // Already `done` since the tap; an upsert keeps it so even if the row
+    // was cleared meanwhile, which `markDone` (update-only) would not.
+    await _stopProgress.upsertDone(routeStopId, executionId);
+    return serverDate;
   }
 
   Future<DateTime?> _performImpediment(Map<String, dynamic> payload) async {

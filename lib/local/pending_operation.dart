@@ -12,6 +12,11 @@ enum PendingOpKind {
   evidencePhoto,
   evidenceNote,
   impediment,
+
+  /// A place stop concluded by the device position (`POST
+  /// /location-completions`). Its photos, held under the stop's
+  /// `locationExecutionId`, go out after it.
+  locationCompletion,
 }
 
 /// Drain state of a buffered write. `.name` is persisted in the `state` column.
@@ -31,7 +36,20 @@ enum PendingOpKind {
 /// it waits for its task to be stamped (`LocalWriteStore.releaseHeldPhotos`)
 /// or abandoned (`LocalWriteStore.discardHeldPhotos`). It is owed to the
 /// network eventually, so it counts as unsent, but it is never due.
-enum PendingOpState { pending, synced, failed, blocked, sending, held }
+///
+/// `rejected` is the server's final "no" to a location completion (outside
+/// the radius, or no position): terminal, never retried, and not blocking —
+/// unlike `blocked` it asks nothing of the worker, who just sees the stop
+/// pending again. It stays in the file as the record of what was refused.
+enum PendingOpState {
+  pending,
+  synced,
+  failed,
+  blocked,
+  sending,
+  held,
+  rejected,
+}
 
 /// A decoded `PendingOperations` row, free of any Drift type so callers
 /// (Task 17's `ExecutionRepository` and up) never import drift.

@@ -41,15 +41,19 @@ class BlockedScope {
   static String? _stopOf(PendingOperationRow row) => switch (row.kind) {
     PendingOpKind.checkIn ||
     PendingOpKind.checkOut ||
+    PendingOpKind.locationCompletion ||
     PendingOpKind.impediment => row.payload['route_stop_id'] as String?,
     PendingOpKind.evidencePhoto || PendingOpKind.evidenceNote => null,
   };
 
   /// The check-in's `execution_id` is the one its evidence carries; a
   /// check-out's `execution_id` is a throwaway id the backend ignores (see
-  /// `ExecutionRepository.checkOut`), so it links to nothing.
+  /// `ExecutionRepository.checkOut`), so it links to nothing. A location
+  /// completion is the row that creates its `execution_id` on the server, so
+  /// its photos wait behind it like a check-in's do.
   static String? _executionOf(PendingOperationRow row) => switch (row.kind) {
     PendingOpKind.checkIn ||
+    PendingOpKind.locationCompletion ||
     PendingOpKind.evidencePhoto ||
     PendingOpKind.evidenceNote => row.payload['execution_id'] as String?,
     PendingOpKind.checkOut || PendingOpKind.impediment => null,

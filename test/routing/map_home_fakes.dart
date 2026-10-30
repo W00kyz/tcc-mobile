@@ -282,23 +282,52 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
       _moveHeldPhotos(executionId, release: false);
 
   int _moveHeldPhotos(String executionId, {required bool release}) {
-    final held = _rows.values
-        .where(
-          (row) =>
-              row.kind == PendingOpKind.evidencePhoto &&
-              row.state == PendingOpState.held &&
-              row.payload['execution_id'] == executionId,
-        )
-        .toList();
+    final held =
+        _rows.values
+            .where(
+              (row) =>
+                  row.kind == PendingOpKind.evidencePhoto &&
+                  row.state == PendingOpState.held &&
+                  row.payload['execution_id'] == executionId,
+            )
+            .toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
     for (final row in held) {
       if (release) {
-        _setState(row.id, PendingOpState.pending);
+        _requeueAtTail(row);
       } else {
         _rows.remove(row.id);
       }
     }
     return held.length;
   }
+
+  /// Like the Drift store: a released photo joins the queue's tail.
+  void _requeueAtTail(PendingOperationRow row) {
+    final tail = _rows.values.fold<int>(
+      0,
+      (max, r) => r.createdAt > max ? r.createdAt : max,
+    );
+    _rows[row.id] = PendingOperationRow(
+      id: row.id,
+      kind: row.kind,
+      routeId: row.routeId,
+      payload: row.payload,
+      createdAt: tail + 1,
+      state: PendingOpState.pending,
+      lastError: null,
+      attempts: 0,
+      nextAttemptAt: null,
+    );
+  }
+
+  @override
+  Future<void> markRejected(String id, String error) async =>
+      _setState(id, PendingOpState.rejected, error: error);
+
+  @override
+  Future<int> discardUnsentEvidence(String executionId) =>
+      throw UnimplementedError();
 
   @override
   Future<int> localPhotoCountFor(String executionId) async => _rows.values
@@ -389,6 +418,19 @@ class FakeStopProgressStore implements StopProgressStore {
       status: StopLocalStatus.done,
     );
   }
+
+  @override
+  Future<void> upsertDone(String routeStopId, String executionId) async {
+    _rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
+      routeStopId: routeStopId,
+      executionId: executionId,
+      status: StopLocalStatus.done,
+    );
+  }
+
+  @override
+  Future<void> remove(String routeStopId) async => _rows.remove(routeStopId);
 
   @override
   Future<void> markStamped(String routeStopId, {String? observation}) async {

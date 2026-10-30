@@ -11,6 +11,7 @@ import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/routing/batch_card_model.dart' show SlotState;
 import 'package:route_monitor/routing/building_card_model.dart';
 import 'package:route_monitor/routing/home_notices.dart';
+import 'package:route_monitor/routing/location_service.dart' show Coordinates;
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/scan_and_locate.dart';
@@ -181,17 +182,21 @@ Future<List<RouteStopSummary>> _openCandidates(
 /// lets its held photos leave. Nothing is checked out until the floor's exit
 /// scan.
 ///
+/// A location stop is not stamped: it has no floor check-in nor exit scan, so
+/// it is concluded by [fix] (the live position the dialog's gate held) with a
+/// location completion, queued in SQLite before the stamp falls.
+///
 ///     await concludeTask(ref, route, stop, observation: 'trocada');
 Future<void> concludeTask(
   WidgetRef ref,
   RouteSummary route,
   RouteStopSummary stop, {
   String? observation,
+  Coordinates? fix,
 }) async {
-  // WARNING: a location stop is not concluded by a QR-style stamp (no floor
-  // check-in, no `checkout`); its completion is a separate write. Until that
-  // lands, concluding one records nothing rather than a wrong stamp.
-  if (stop.completion == StopCompletion.location) return;
+  if (stop.completion == StopCompletion.location) {
+    return _concludeByLocation(ref, route, stop, observation, fix);
+  }
   final entry = await ref.read(stopProgressStoreProvider).progressFor(stop.id);
   await ref
       .read(executionRepositoryProvider)
@@ -200,6 +205,43 @@ Future<void> concludeTask(
         routeStopId: stop.id,
         executionId: entry?.executionId,
         observation: observation,
+      );
+  ref
+    ..invalidate(stopProgressForProvider(stop.id))
+    ..invalidate(observationDraftProvider(stop.id))
+    ..read(lastStampedStopProvider.notifier).stamp(stop.id);
+}
+
+/// A place stop lacking its fix cannot be concluded: the gate that pops the
+/// dialog's decision always carries one, so this is a wiring bug, surfaced as
+/// the dialog's "could not save" notice rather than a wrong write.
+class MissingLocationFixException implements Exception {
+  const MissingLocationFixException(this.routeStopId);
+
+  final String routeStopId;
+
+  @override
+  String toString() =>
+      'MissingLocationFixException: place stop "$routeStopId" was concluded '
+      'without a position; expected the live fix of the location gate.';
+}
+
+Future<void> _concludeByLocation(
+  WidgetRef ref,
+  RouteSummary route,
+  RouteStopSummary stop,
+  String? observation,
+  Coordinates? fix,
+) async {
+  if (fix == null) throw MissingLocationFixException(stop.id);
+  await ref
+      .read(executionRepositoryProvider)
+      .concludeByLocation(
+        routeId: route.id,
+        routeStopId: stop.id,
+        fix: fix,
+        observation: observation,
+        placeName: stop.buildingName,
       );
   ref
     ..invalidate(stopProgressForProvider(stop.id))

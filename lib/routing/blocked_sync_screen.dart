@@ -108,10 +108,13 @@ String _rowLabel(PendingOperationRow row) {
     PendingOpKind.evidencePhoto => AppStrings.blockedSyncKindPhoto,
     PendingOpKind.evidenceNote => AppStrings.blockedSyncKindNote,
     PendingOpKind.impediment => AppStrings.blockedSyncKindImpediment,
+    PendingOpKind.locationCompletion =>
+      AppStrings.blockedSyncKindLocationCompletion,
   };
   final reference = switch (row.kind) {
     PendingOpKind.checkIn ||
     PendingOpKind.checkOut ||
+    PendingOpKind.locationCompletion ||
     // A ROUTE_REMAINDER impediment has a null route_stop_id and falls back
     // to the kind label alone.
     PendingOpKind.impediment => row.payload['route_stop_id'] as String?,

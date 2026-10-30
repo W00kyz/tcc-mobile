@@ -9,6 +9,7 @@ import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/monitoring/monitoring_providers.dart'
     show silenceWatchdogProvider;
 import 'package:route_monitor/sync/connectivity.dart';
+import 'package:route_monitor/sync/location_refusal.dart';
 import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -44,6 +45,25 @@ class StopReleaseAnnouncements extends Notifier<StopRelease?> {
   void announce(StopRelease release) => state = release;
 }
 
+/// The latest location completion the server refused — each new one replaces
+/// the last, so a listener hears every refusal (the home's "Conclusão
+/// recusada" notice, and the stop's card turning pending again). Null until
+/// the first.
+final locationRefusalAnnouncementsProvider =
+    NotifierProvider<LocationRefusalAnnouncements, LocationRefusal?>(
+      LocationRefusalAnnouncements.new,
+    );
+
+class LocationRefusalAnnouncements extends Notifier<LocationRefusal?> {
+  @override
+  LocationRefusal? build() => null;
+
+  // An event being announced, not a property being set (see
+  // StopReleaseAnnouncements).
+  // ignore: use_setters_to_change_properties
+  void announce(LocationRefusal refusal) => state = refusal;
+}
+
 /// The `connectivity_plus` seam the worker uses to skip a drain while the
 /// device is offline.
 final connectivityProvider = Provider<Connectivity>(
@@ -73,6 +93,11 @@ final syncWorkerProvider = Provider<SyncWorker>((ref) {
     onStopReleased: (release) {
       if (!ref.mounted) return;
       ref.read(stopReleaseAnnouncementsProvider.notifier).announce(release);
+    },
+    // Same rule as onScanDelivered.
+    onLocationRefused: (refusal) {
+      if (!ref.mounted) return;
+      ref.read(locationRefusalAnnouncementsProvider.notifier).announce(refusal);
     },
   );
   ref.onDispose(worker.dispose);
@@ -136,6 +161,7 @@ stopSyncChipProvider =
         switch (row.kind) {
           case PendingOpKind.checkIn:
           case PendingOpKind.checkOut:
+          case PendingOpKind.locationCompletion:
           case PendingOpKind.impediment:
             return row.payload['route_stop_id'] == routeStopId;
           case PendingOpKind.evidencePhoto:

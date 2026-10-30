@@ -25,6 +25,9 @@ enum ShotStatus { delivered, notSent, blocked }
 ShotStatus shotStatusFor(PendingOpState? state) => switch (state) {
   null || PendingOpState.synced => ShotStatus.delivered,
   PendingOpState.blocked => ShotStatus.blocked,
+  // Only a location completion is ever rejected, never a photo; reads as
+  // unsent should one be, since the server did not take it.
+  PendingOpState.rejected ||
   PendingOpState.pending ||
   PendingOpState.failed ||
   PendingOpState.sending ||

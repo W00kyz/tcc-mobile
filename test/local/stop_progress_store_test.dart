@@ -166,4 +166,21 @@ void main() {
     expect(entry!.status, StopLocalStatus.stamped);
     expect(entry.observation, 'pia');
   });
+
+  test('upsertDone writes a done row for a stop with no progress', () async {
+    await store.upsertDone('stop-1', 'exec-loc');
+
+    final entry = (await store.progressFor('stop-1'))!;
+    expect(entry.status, StopLocalStatus.done);
+    expect(entry.executionId, 'exec-loc');
+  });
+
+  test('remove puts the stop back to untouched, and is safe twice', () async {
+    await store.upsertDone('stop-1', 'exec-loc');
+
+    await store.remove('stop-1');
+    await store.remove('stop-1');
+
+    expect(await store.progressFor('stop-1'), isNull);
+  });
 }

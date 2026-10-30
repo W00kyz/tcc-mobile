@@ -27,6 +27,7 @@ import 'package:route_monitor/routing/released_cleanup.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/selected_building.dart';
+import 'package:route_monitor/sync/location_refusal_listener.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_snackbars.dart';
 import 'package:route_monitor/ui/app_theme.dart';
@@ -146,11 +147,8 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         if (!didPop) _clearSelection();
       },
       child: Scaffold(
-        // The "Recorrer" snackbar when a late write finds its stop released
-        // (spec §7.5).
-        body: ReleasedStopListener(
-          lane: _lane,
-          child: SyncSnackbars(
+        body: _listeners(
+          SyncSnackbars(
             routeId: route?.id,
             lane: _lane,
             // The full card when the batch's last stamp lands, and the day
@@ -183,6 +181,14 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
       ),
     );
   }
+
+  /// The snackbar listeners over [body]: the "Recorrer" offer when a late
+  /// write finds its stop released (spec §7.5), and "Conclusão recusada em …"
+  /// when the server refuses a place's completion (spec locais-externos §6).
+  Widget _listeners(Widget body) => ReleasedStopListener(
+    lane: _lane,
+    child: LocationRefusalListener(lane: _lane, child: body),
+  );
 
   /// No sheet over the map: the start bar shows instead, or the building
   /// sheet is hidden.

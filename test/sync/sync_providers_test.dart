@@ -298,6 +298,19 @@ class _AcceptingExecutionApi implements ExecutionApi {
   final Completer<void>? gate;
 
   @override
+  Future<DateTime?> completeByLocation({
+    required String executionId,
+    required String routeStopId,
+    required String idempotencyKey,
+    required double latitude,
+    required double longitude,
+    required DateTime completedAt,
+    double? accuracyM,
+    double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
+  }) => throw UnimplementedError();
+
+  @override
   Future<({CheckInResult result, DateTime? serverDate})> checkIn({
     required String executionId,
     required String qrPayload,

@@ -47,6 +47,15 @@ abstract class StopProgressStore {
 
   Future<void> markDone(String routeStopId);
 
+  /// Writes the stop `done` whether or not it has a row: a place stop is
+  /// concluded by location with no check-in, so nothing created its row yet.
+  /// [executionId] is the one its photos are held under.
+  Future<void> upsertDone(String routeStopId, String executionId);
+
+  /// Forgets the stop's local progress — it reads untouched (pending) again.
+  /// A no-op for a stop with no row.
+  Future<void> remove(String routeStopId);
+
   /// Null both for an untouched stop and for the accepted cold-start gap
   /// (Ruling 17): a stop that turned `IN_PROGRESS` before this table existed
   /// has no row to find.
@@ -101,6 +110,27 @@ class DriftStopProgressStore implements StopProgressStore {
         updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
       ),
     );
+  }
+
+  @override
+  Future<void> upsertDone(String routeStopId, String executionId) {
+    return _db
+        .into(_db.stopProgress)
+        .insertOnConflictUpdate(
+          StopProgressCompanion.insert(
+            routeStopId: routeStopId,
+            executionId: executionId,
+            localStatus: _statusColumn(StopLocalStatus.done),
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          ),
+        );
+  }
+
+  @override
+  Future<void> remove(String routeStopId) {
+    return (_db.delete(
+      _db.stopProgress,
+    )..where((row) => row.routeStopId.equals(routeStopId))).go();
   }
 
   @override

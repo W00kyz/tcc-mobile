@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:route_monitor/execution/evidence_capture.dart';
+import 'package:route_monitor/execution/location_execution_id.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/routing/location_service.dart' show Coordinates;
 import 'package:route_monitor/sync/sync_worker.dart';
 import 'package:uuid/uuid.dart';
 
@@ -240,6 +242,60 @@ class ExecutionRepository {
       if (executionId != null) await _store.releaseHeldPhotos(executionId);
     });
     unawaited(_syncWorker.syncRoute(routeId));
+  }
+
+  /// "Concluir tarefa" on a place stop: concludes it by the device position
+  /// [fix] — the live fix that opened the task dialog's gate — with no QR
+  /// and no check-out. Returns the completion's idempotency key.
+  ///
+  /// One transaction, in this order: (a) the `locationCompletion` row is
+  /// queued, (b) the stop is written `done` (the card stamps at once, like
+  /// `checkOut`), (c) the photos held under `locationExecutionId` are
+  /// released. They follow the completion in the outbox because release
+  /// re-queues them at its tail, and they must: that execution exists on the
+  /// server only once the completion lands. `completed_at` is the instant of
+  /// the tap, so a late sync still says when the work was done; a blank
+  /// [observation] is queued as null. [placeName] is kept for the notice the
+  /// worker gets if the server refuses (`LocationRefusal`).
+  ///
+  ///     await repository.concludeByLocation(
+  ///       routeId: 'r1', routeStopId: 's1', fix: fix, placeName: 'Praça');
+  Future<String> concludeByLocation({
+    required String routeId,
+    required String routeStopId,
+    required Coordinates fix,
+    double? accuracyM,
+    String? observation,
+    String? placeName,
+  }) async {
+    final key = _uuid.v4();
+    final executionId = locationExecutionId(routeStopId);
+    final note = observation?.trim();
+    final payload = <String, dynamic>{
+      'execution_id': executionId,
+      'route_stop_id': routeStopId,
+      'idempotency_key': key,
+      'latitude': fix.latitude,
+      'longitude': fix.longitude,
+      'accuracy_m': accuracyM,
+      // A String, never a DateTime — LocalWriteStore.enqueue jsonEncodes
+      // this map, which throws on a raw DateTime value.
+      'completed_at': DateTime.now().toUtc().toIso8601String(),
+      'complaints_suggestions': (note == null || note.isEmpty) ? null : note,
+      'place_name': placeName,
+    };
+    await _database.transaction(() async {
+      await _store.enqueue(
+        id: key,
+        kind: PendingOpKind.locationCompletion,
+        routeId: routeId,
+        payload: payload,
+      );
+      await _stopProgress.upsertDone(routeStopId, executionId);
+      await _store.releaseHeldPhotos(executionId);
+    });
+    unawaited(_syncWorker.syncRoute(routeId));
+    return key;
   }
 
   /// Reports one task impossible: enqueues a `STOP` impediment and drops the

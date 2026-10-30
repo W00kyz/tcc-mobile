@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/pending_operation.dart';
+import 'package:route_monitor/local/pending_operation_mapper.dart';
 
 export 'package:route_monitor/local/pending_operation.dart';
 
@@ -106,9 +107,23 @@ abstract class LocalWriteStore {
   /// blocked-rows list, spec Ruling 6).
   Future<void> resetToPending(String id);
 
+  /// A location completion the server refused for good: the row keeps
+  /// [error] and leaves every queue (see `PendingOpState.rejected`).
+  Future<void> markRejected(String id, String error);
+
   /// Moves every `held` photo of [executionId] to `pending`, so the next
   /// drain sends it; returns how many it released.
+  ///
+  /// IMPORTANT: released photos re-join the outbox at its tail, in capture
+  /// order. A photo is held from the moment it is taken, so by creation time
+  /// it would sort ahead of the location completion that creates its
+  /// execution on the server, and 404.
   Future<int> releaseHeldPhotos(String executionId);
+
+  /// Deletes the photos and notes of [executionId] the server never took
+  /// (`held`, `pending`, `failed`, `blocked`); returns how many. A refused
+  /// location completion leaves no execution for them to belong to.
+  Future<int> discardUnsentEvidence(String executionId);
 
   /// Deletes every `held` photo of [executionId] (the task was abandoned);
   /// returns how many it removed.
@@ -240,18 +255,57 @@ class DriftLocalWriteStore implements LocalWriteStore {
   }
 
   @override
+  Future<void> markRejected(String id, String error) =>
+      _setState(id, PendingOpState.rejected, error: error);
+
+  @override
   Future<int> releaseHeldPhotos(String executionId) async {
     final ids = await _heldPhotoIds(executionId);
     if (ids.isEmpty) return 0;
-    // Re-checked here: a row that left `held` since the read above (sent,
-    // deleted, blocked) must not be flipped back to `pending`.
-    final update = _db.update(_db.pendingOperations)
-      ..where(
-        (row) => row.id.isIn(ids) & row.state.equals(PendingOpState.held.name),
+    var tail = await _tailCreatedAt();
+    var released = 0;
+    for (final id in ids) {
+      // Re-checked per row: one that left `held` meanwhile stays where it is.
+      final update = _db.update(_db.pendingOperations)
+        ..where(
+          (row) =>
+              row.id.equals(id) & row.state.equals(PendingOpState.held.name),
+        );
+      released += await update.write(
+        PendingOperationsCompanion(
+          state: Value(PendingOpState.pending.name),
+          createdAt: Value(++tail),
+        ),
       );
-    return update.write(
-      PendingOperationsCompanion(state: Value(PendingOpState.pending.name)),
+    }
+    return released;
+  }
+
+  /// The larger of the table's newest `createdAt` and the clock.
+  Future<int> _tailCreatedAt() async {
+    final newest = _db.pendingOperations.createdAt.max();
+    final query = _db.selectOnly(_db.pendingOperations)..addColumns([newest]);
+    final stored = (await query.getSingle()).read(newest) ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return stored > now ? stored : now;
+  }
+
+  @override
+  Future<int> discardUnsentEvidence(String executionId) async {
+    final ids = await _evidenceIds(
+      executionId,
+      kinds: [PendingOpKind.evidencePhoto, PendingOpKind.evidenceNote],
+      states: [
+        PendingOpState.held,
+        PendingOpState.pending,
+        PendingOpState.failed,
+        PendingOpState.blocked,
+      ],
     );
+    if (ids.isEmpty) return 0;
+    return (_db.delete(
+      _db.pendingOperations,
+    )..where((row) => row.id.isIn(ids))).go();
   }
 
   @override
@@ -273,25 +327,37 @@ class DriftLocalWriteStore implements LocalWriteStore {
       );
     return query.watch().map(
       (rows) => {
-        for (final row in rows.map(_toRow))
+        for (final row in rows.map(pendingOperationRowOf))
           if (row.payload['scope'] == 'STOP')
             if (row.payload['route_stop_id'] case final String stopId) stopId,
       },
     );
   }
 
-  /// The ids of [executionId]'s `held` photos. The execution id lives inside
-  /// the JSON payload, so it is matched here rather than in SQL.
-  Future<List<String>> _heldPhotoIds(String executionId) async {
+  Future<List<String>> _heldPhotoIds(String executionId) => _evidenceIds(
+    executionId,
+    kinds: [PendingOpKind.evidencePhoto],
+    states: [PendingOpState.held],
+  );
+
+  /// The ids, oldest first, of [executionId]'s rows of [kinds] in [states].
+  /// The execution id lives inside the JSON payload, so it is matched here
+  /// rather than in SQL.
+  Future<List<String>> _evidenceIds(
+    String executionId, {
+    required List<PendingOpKind> kinds,
+    required List<PendingOpState> states,
+  }) async {
     final query = _db.select(_db.pendingOperations)
       ..where(
         (row) =>
-            row.kind.equals(PendingOpKind.evidencePhoto.name) &
-            row.state.equals(PendingOpState.held.name),
-      );
+            row.kind.isIn([for (final kind in kinds) kind.name]) &
+            row.state.isIn([for (final state in states) state.name]),
+      )
+      ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]);
     final rows = await query.get();
     return [
-      for (final row in rows.map(_toRow))
+      for (final row in rows.map(pendingOperationRowOf))
         if (row.payload['execution_id'] == executionId) row.id,
     ];
   }
@@ -370,7 +436,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
       )
       ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]);
     final rows = await query.get();
-    return rows.map(_toRow).toList();
+    return rows.map(pendingOperationRowOf).toList();
   }
 
   @override
@@ -381,7 +447,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
     // The execution id lives inside the JSON payload, so it is matched here
     // rather than in SQL; photos are few per device and day.
     return rows
-        .map(_toRow)
+        .map(pendingOperationRowOf)
         .where((row) => row.payload['execution_id'] == executionId)
         .length;
   }
@@ -396,7 +462,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
       )
       ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]);
     final rows = await query.get();
-    return rows.map(_toRow).toList();
+    return rows.map(pendingOperationRowOf).toList();
   }
 
   @override
@@ -410,7 +476,7 @@ class DriftLocalWriteStore implements LocalWriteStore {
       )
       ..orderBy([(row) => OrderingTerm.asc(row.createdAt)]);
     final rows = await query.get();
-    return rows.map(_toRow).toList();
+    return rows.map(pendingOperationRowOf).toList();
   }
 
   @override
@@ -426,20 +492,5 @@ class DriftLocalWriteStore implements LocalWriteStore {
       );
     final rows = await query.get();
     return rows.map((row) => row.read(routeId)!).toList();
-  }
-
-  PendingOperationRow _toRow(PendingOperation row) {
-    return PendingOperationRow(
-      id: row.id,
-      kind: PendingOpKind.values.byName(row.kind),
-      routeId: row.routeId,
-      payload: jsonDecode(row.payloadJson) as Map<String, dynamic>,
-      createdAt: row.createdAt,
-      state: PendingOpState.values.byName(row.state),
-      lastError: row.lastError,
-      attempts: row.attempts,
-      nextAttemptAt: row.nextAttemptAt,
-      releasedStopId: row.releasedStopId,
-    );
   }
 }

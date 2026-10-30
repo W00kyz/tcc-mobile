@@ -50,6 +50,56 @@ class AmbiguousRoomException implements Exception {
   final List<RoomCandidate> candidates;
 }
 
+/// The server's final refusal of a location completion: the position sent
+/// was outside the stop's radius (`OUT_OF_RADIUS`) or missing
+/// (`LOCATION_REQUIRED`). Replaying the same payload gets the same answer, so
+/// the sync worker takes the stop back to pending instead of retrying.
+///
+///     final refusal = LocationRefusedException.fromError(error);
+///     if (refusal != null) tell(refusal.distanceM);
+class LocationRefusedException implements Exception {
+  const LocationRefusedException({
+    required this.code,
+    required this.distanceM,
+    required this.radiusM,
+  });
+
+  /// [error] read as a location refusal: itself, or a 422 whose
+  /// `{"detail": {"code": ...}}` names one; null for anything else.
+  static LocationRefusedException? fromError(Object error) {
+    if (error is LocationRefusedException) return error;
+    if (error is! DioException || error.response?.statusCode != 422) {
+      return null;
+    }
+    final data = error.response?.data;
+    final detail = data is Map ? data['detail'] : null;
+    if (detail is! Map) return null;
+    final code = detail['code'];
+    if (code != codeOutOfRadius && code != codeLocationRequired) return null;
+    return LocationRefusedException(
+      code: code as String,
+      distanceM: (detail['distance_m'] as num?)?.toDouble(),
+      radiusM: (detail['radius_m'] as num?)?.toInt(),
+    );
+  }
+
+  static const String codeOutOfRadius = 'OUT_OF_RADIUS';
+  static const String codeLocationRequired = 'LOCATION_REQUIRED';
+
+  final String code;
+
+  /// How far from the place the device was; null without a position.
+  final double? distanceM;
+
+  /// The radius the server allows, in meters.
+  final int? radiusM;
+
+  @override
+  String toString() =>
+      'LocationRefusedException: $code (distance_m=$distanceM, '
+      'radius_m=$radiusM).';
+}
+
 /// The backend's response to a successful check-out (`app/api/checkouts.py`,
 /// `CheckOutResponse`).
 class CheckOutResult {
@@ -95,6 +145,24 @@ abstract class ExecutionApi {
     double? latitude,
     double? longitude,
     String? routeStopId,
+    double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
+  });
+
+  /// Concludes a place stop by the device position (`POST
+  /// /location-completions`); returns the response's `Date` header like the
+  /// evidence uploads do. A 422 `OUT_OF_RADIUS` / `LOCATION_REQUIRED` throws
+  /// [LocationRefusedException]; any other failure surfaces as the
+  /// `DioException`. [accuracyM] and [complaintsSuggestions] are left out of
+  /// the body when null.
+  Future<DateTime?> completeByLocation({
+    required String executionId,
+    required String routeStopId,
+    required String idempotencyKey,
+    required double latitude,
+    required double longitude,
+    required DateTime completedAt,
+    double? accuracyM,
     double? clientClockOffsetSeconds,
     String? complaintsSuggestions,
   });
@@ -220,6 +288,41 @@ class DioExecutionApi implements ExecutionApi {
     } on DioException catch (e) {
       final candidates = _ambiguousRoomCandidates(e);
       if (candidates != null) throw AmbiguousRoomException(candidates);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<DateTime?> completeByLocation({
+    required String executionId,
+    required String routeStopId,
+    required String idempotencyKey,
+    required double latitude,
+    required double longitude,
+    required DateTime completedAt,
+    double? accuracyM,
+    double? clientClockOffsetSeconds,
+    String? complaintsSuggestions,
+  }) async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/location-completions',
+        data: {
+          'route_stop_id': routeStopId,
+          'execution_id': executionId,
+          'idempotency_key': idempotencyKey,
+          'latitude': latitude,
+          'longitude': longitude,
+          'accuracy_m': ?accuracyM,
+          'completed_at': completedAt.toUtc().toIso8601String(),
+          'client_clock_offset_seconds': clientClockOffsetSeconds,
+          'complaints_suggestions': ?complaintsSuggestions,
+        },
+      );
+      return parseServerDate(response.headers);
+    } on DioException catch (e) {
+      final refusal = LocationRefusedException.fromError(e);
+      if (refusal != null) throw refusal;
       rethrow;
     }
   }

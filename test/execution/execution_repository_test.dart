@@ -4,10 +4,12 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/evidence_capture.dart';
 import 'package:route_monitor/execution/execution_repository.dart';
+import 'package:route_monitor/execution/location_execution_id.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
+import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -38,6 +40,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
 
   final Map<String, PendingOperationRow> _rows = {};
 
+  /// What the repository asked of the store, in order.
+  final List<String> calls = [];
+  int _tail = 0;
+
   @override
   Future<bool> enqueue({
     required String id,
@@ -49,12 +55,13 @@ class _FakeLocalWriteStore implements LocalWriteStore {
     // insertOrIgnore: a re-enqueue with an id already present is a no-op
     // (Etapa 5 behavior — the same-tap room-picker retry reuses the key).
     if (_rows.containsKey(id)) return false;
+    calls.add('enqueue:${kind.name}');
     _rows[id] = PendingOperationRow(
       id: id,
       kind: kind,
       routeId: routeId,
       payload: payload,
-      createdAt: _rows.length,
+      createdAt: _tail++,
       state: initialState,
       lastError: null,
       attempts: 0,
@@ -114,12 +121,45 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   @override
   Future<void> resetToPending(String id) => throw UnimplementedError();
 
+  /// Like the Drift store: released photos re-join the queue at its tail.
   @override
-  Future<int> releaseHeldPhotos(String executionId) =>
-      throw UnimplementedError();
+  Future<int> releaseHeldPhotos(String executionId) async {
+    calls.add('release:$executionId');
+    final held =
+        _rows.values
+            .where(
+              (row) =>
+                  row.state == PendingOpState.held &&
+                  row.payload['execution_id'] == executionId,
+            )
+            .toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    for (final row in held) {
+      _rows[row.id] = PendingOperationRow(
+        id: row.id,
+        kind: row.kind,
+        routeId: row.routeId,
+        payload: row.payload,
+        createdAt: _tail++,
+        state: PendingOpState.pending,
+        lastError: null,
+        attempts: 0,
+        nextAttemptAt: null,
+      );
+    }
+    return held.length;
+  }
 
   @override
   Future<int> discardHeldPhotos(String executionId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> markRejected(String id, String error) =>
+      throw UnimplementedError();
+
+  @override
+  Future<int> discardUnsentEvidence(String executionId) =>
       throw UnimplementedError();
 
   @override
@@ -157,6 +197,20 @@ class _FakeStopProgressStore implements StopProgressStore {
       status: StopLocalStatus.done,
     );
   }
+
+  @override
+  Future<void> upsertDone(String routeStopId, String executionId) async {
+    calls.add('upsertDone:$routeStopId:$executionId');
+    _rows[routeStopId] = StopProgressEntry(
+      updatedAt: DateTime(2026),
+      routeStopId: routeStopId,
+      executionId: executionId,
+      status: StopLocalStatus.done,
+    );
+  }
+
+  @override
+  Future<void> remove(String routeStopId) => throw UnimplementedError();
 
   @override
   Future<void> markStamped(String routeStopId, {String? observation}) =>
@@ -501,10 +555,46 @@ void main() {
         for (final row in await realStore.unsyncedForRoute('route-A'))
           (row.payload['execution_id'], row.state),
       ];
-      expect(states, [
-        ('exec-1', PendingOpState.pending),
-        ('exec-2', PendingOpState.held),
-      ]);
+      // Order is not the point here: a released photo re-joins the queue at
+      // its tail (`releaseHeldPhotos`), behind the one still held.
+      expect(
+        states,
+        unorderedEquals([
+          ('exec-1', PendingOpState.pending),
+          ('exec-2', PendingOpState.held),
+        ]),
+      );
+    });
+
+    test('concludeByLocation puts the completion ahead of the photos taken '
+        'before it, with the real store', () async {
+      final repository = repositoryWith(RecordingDayLogStore());
+      final executionId = locationExecutionId('stop-1');
+      await photoFor(repository, executionId);
+      await photoFor(repository, executionId);
+      await photoFor(repository, locationExecutionId('stop-2'));
+
+      await repository.concludeByLocation(
+        routeId: 'route-A',
+        routeStopId: 'stop-1',
+        fix: const Coordinates(latitude: -7.2, longitude: -35.9),
+      );
+
+      final rows = await realStore.unsyncedForRoute('route-A');
+      expect(
+        [for (final row in rows) (row.kind, row.state)],
+        [
+          (PendingOpKind.evidencePhoto, PendingOpState.held),
+          (PendingOpKind.locationCompletion, PendingOpState.pending),
+          (PendingOpKind.evidencePhoto, PendingOpState.pending),
+          (PendingOpKind.evidencePhoto, PendingOpState.pending),
+        ],
+      );
+      expect(rows[1].payload['execution_id'], executionId);
+      expect(
+        (await realProgress.progressFor('stop-1'))!.status,
+        StopLocalStatus.done,
+      );
     });
 
     test('impedeTask deletes the held photos and enqueues a STOP '
@@ -692,5 +782,97 @@ void main() {
         .timeout(const Duration(seconds: 1));
 
     expect(syncWorker.syncedRoutes, ['route-A']);
+  });
+
+  group('concludeByLocation', () {
+    final executionId = locationExecutionId('stop-1');
+    const fix = Coordinates(latitude: -7.215, longitude: -35.915);
+
+    Future<String> hold(String sha) => repository.addPhoto(
+      routeId: 'route-A',
+      executionId: executionId,
+      photo: CapturedPhoto(bytes: Uint8List.fromList([1]), sha256: sha),
+    );
+
+    Future<String> conclude({String? observation, double? accuracyM}) =>
+        repository.concludeByLocation(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          fix: fix,
+          accuracyM: accuracyM,
+          observation: observation,
+          placeName: 'Praça central',
+        );
+
+    test('offline: one completion row first, the photo rows after it, the '
+        'stop done locally', () async {
+      final photoA = await hold('a');
+      final photoB = await hold('b');
+      store.calls.clear();
+      final before = DateTime.now().toUtc();
+
+      final key = await conclude(observation: 'bebedouro solto');
+
+      final rows = await store.unsyncedForRoute('route-A');
+      expect(rows.map((r) => r.kind), [
+        PendingOpKind.locationCompletion,
+        PendingOpKind.evidencePhoto,
+        PendingOpKind.evidencePhoto,
+      ]);
+      expect(rows.skip(1).map((r) => r.id), [photoA, photoB]);
+      expect(
+        rows.skip(1).map((r) => r.state),
+        everyElement(PendingOpState.pending),
+      );
+      final completion = rows.first;
+      expect(completion.id, key);
+      expect(completion.state, PendingOpState.pending);
+      expect(completion.payload['execution_id'], executionId);
+      expect(completion.payload['route_stop_id'], 'stop-1');
+      expect(completion.payload['idempotency_key'], key);
+      expect(completion.payload['latitude'], -7.215);
+      expect(completion.payload['longitude'], -35.915);
+      expect(completion.payload['accuracy_m'], isNull);
+      expect(completion.payload['complaints_suggestions'], 'bebedouro solto');
+      expect(completion.payload['place_name'], 'Praça central');
+      final completedAt = DateTime.parse(
+        completion.payload['completed_at'] as String,
+      );
+      expect(completedAt.isUtc, isTrue);
+      expect(completedAt.isBefore(before), isFalse);
+      expect(
+        (await stopProgress.progressFor('stop-1'))!.status,
+        StopLocalStatus.done,
+      );
+      expect(store.calls, [
+        'enqueue:locationCompletion',
+        'release:$executionId',
+      ]);
+    });
+
+    test(
+      'a blank observation is queued as null, the accuracy as given',
+      () async {
+        final key = await conclude(observation: '  \n ', accuracyM: 12.5);
+
+        final completion = (await store.unsyncedForRoute('route-A')).single;
+        expect(completion.id, key);
+        expect(completion.payload['complaints_suggestions'], isNull);
+        expect(completion.payload['accuracy_m'], 12.5);
+      },
+    );
+
+    test('kicks the sync worker once and does not wait for it', () async {
+      await conclude();
+
+      expect(syncWorker.syncedRoutes, ['route-A']);
+    });
+
+    test('two conclusions of the same stop queue two keys', () async {
+      final first = await conclude();
+      final second = await conclude();
+
+      expect(first, isNot(second));
+    });
   });
 }
