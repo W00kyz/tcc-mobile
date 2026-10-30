@@ -187,11 +187,11 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
 
   /// The live gate of a location stop; `searching` until its first reading.
   LocationGate _gate() {
-    final stop = widget.stop;
-    final target = LatLng(stop.latitude, stop.longitude);
-    final reading = ref.watch(locationGateProvider(target)).value;
+    final reading = ref.watch(locationGateProvider(_gateTarget)).value;
     return reading ?? const LocationGate(GateState.searching);
   }
+
+  LatLng get _gateTarget => LatLng(widget.stop.latitude, widget.stop.longitude);
 
   /// The open execution of the task: set from the floor check-in until the
   /// stamp; null before the check-in and while the progress row loads. A
@@ -332,9 +332,11 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
   }
 
   List<Widget> _actions(FieldPalette p, String? executionId) {
+    // Read once per build: the button and its hint must agree on one reading.
+    final gate = _isLocationStop ? _gate() : null;
     final mayConclude =
         executionId != null &&
-        (!_isLocationStop || _gate().state == GateState.ready) &&
+        (gate == null || gate.state == GateState.ready) &&
         stopMayConclude(
           ref,
           widget.route.id,
@@ -342,7 +344,7 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
           executionId,
           watch: true,
         );
-    final hint = _concludeHint(executionId);
+    final hint = _concludeHint(executionId, gate);
     return [
       FilledButton(
         onPressed: mayConclude ? _conclude : null,
@@ -365,11 +367,11 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
   );
 
   /// Why "Concluir tarefa" is closed, or null when it is open.
-  String? _concludeHint(String? executionId) {
+  String? _concludeHint(String? executionId, LocationGate? gate) {
     if (!_progressKnown) return null;
     // INTENTIONAL: a location stop has no floor check-in to ask for: its
     // reason to stay closed is the gate first, then the photos.
-    final gateHint = _isLocationStop ? _gateHint(_gate()) : null;
+    final gateHint = gate == null ? null : _gateHint(gate);
     if (gateHint != null) return gateHint;
     if (executionId == null) return AppStrings.taskNeedsFloorCheckIn;
     if (!widget.stop.requiresEvidence) return null;
@@ -401,12 +403,18 @@ class _TaskDialogState extends ConsumerState<TaskDialog> {
     );
   }
 
-  void _conclude() => Navigator.of(context).pop(
-    TaskConcluded(
-      observationToSend(_observation.text),
-      fix: _isLocationStop ? _gate().fix : null,
-    ),
-  );
+  void _conclude() {
+    final observation = observationToSend(_observation.text);
+    if (!_isLocationStop) {
+      Navigator.of(context).pop(TaskConcluded(observation));
+      return;
+    }
+    // Re-read at the tap (not watched): an emission since the last build may
+    // have closed the gate, and the fix handed on must be a ready one.
+    final gate = ref.read(locationGateProvider(_gateTarget)).value;
+    if (gate == null || gate.state != GateState.ready) return;
+    Navigator.of(context).pop(TaskConcluded(observation, fix: gate.fix));
+  }
 
   /// The reason dialog over this one; a cancel there leaves the task open.
   Future<void> _signalImpossible() async {

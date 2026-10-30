@@ -149,6 +149,50 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Opens a bare [TaskDialog] for [stop] and collects what it pops, so a
+  /// test can read the [TaskDecision] itself.
+  Future<List<TaskDecision>> openAndCapture(
+    WidgetTester tester,
+    RouteStopSummary stop,
+  ) async {
+    final popped = <TaskDecision>[];
+    tester.view
+      ..physicalSize = const Size(420, 1400)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWithValue(db),
+          localWriteStoreProvider.overrideWithValue(store),
+          stopProgressStoreProvider.overrideWithValue(progress),
+          syncWorkerProvider.overrideWithValue(RecordingSyncWorker()),
+          executionRepositoryProvider.overrideWithValue(repository),
+          evidenceApiProvider.overrideWithValue(FakeEvidenceApi()),
+          locationGateSourceProvider.overrideWithValue(gates),
+        ],
+        child: MaterialApp(
+          theme: buildAppTheme(),
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                final decision = await showDialog<TaskDecision>(
+                  context: context,
+                  builder: (_) => TaskDialog(route: _route(stop), stop: stop),
+                );
+                if (decision != null) popped.add(decision);
+              },
+              child: const Text('go'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    return popped;
+  }
+
   Future<void> addPhotos(int n) async {
     for (var i = 0; i < n; i++) {
       await repository.addPhoto(
@@ -589,6 +633,40 @@ void main() {
       expect(find.byType(Dialog), findsNothing);
       expect(await progress.progressFor('s1'), isNull);
       expect(await store.unsyncedForRoute('r1'), isEmpty);
+    });
+
+    testWidgets('Concluir pops the exact fix that opened the gate', (
+      tester,
+    ) async {
+      const fix = Coordinates(latitude: -7.2001, longitude: -35.9002);
+      gates.emit(const LocationGate(GateState.ready, distanceM: 5, fix: fix));
+      final popped = await openAndCapture(tester, place);
+
+      await tester.tap(find.text(AppStrings.taskConclude));
+      await tester.pumpAndSettle();
+
+      final decision = popped.single as TaskConcluded;
+      expect(decision.fix?.latitude, -7.2001);
+      expect(decision.fix?.longitude, -35.9002);
+    });
+
+    testWidgets('a gate that closes right before the tap pops nothing', (
+      tester,
+    ) async {
+      gates.emit(ready);
+      final popped = await openAndCapture(tester, place);
+      expect(concludeButton(tester).onPressed, isNotNull);
+
+      // No frame between the emission and the tap: the button is still the
+      // one built for the ready gate.
+      gates.emit(const LocationGate(GateState.tooFar, distanceM: 300));
+      await tester.idle();
+      await tester.tap(find.text(AppStrings.taskConclude));
+      await tester.pumpAndSettle();
+
+      expect(popped, isEmpty);
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.text(AppStrings.taskGateTooFar(300, 80)), findsOneWidget);
     });
 
     testWidgets('Sinalizar impossibilidade drops the photos held for the '
