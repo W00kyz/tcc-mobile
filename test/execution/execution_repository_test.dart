@@ -246,6 +246,9 @@ class _WritesThenThrowsDayLog implements DayLogStore {
   }
 
   @override
+  Future<void> recordStopUndone(DateTime day) => throw UnimplementedError();
+
+  @override
   Future<void> recordDayOpened(DateTime day, {required bool serviceDay}) =>
       throw UnimplementedError();
 
@@ -807,6 +810,41 @@ void main() {
           observation: observation,
           placeName: 'Praça central',
         );
+
+    test('counts the stop in the day log exactly once', () async {
+      await conclude();
+
+      expect(dayLog.calls, [startsWith('stopDone:')]);
+    });
+
+    test('a failing day-log write leaves no completion row and no done '
+        'mark', () async {
+      final realDb = inMemoryDatabase();
+      addTearDown(realDb.close);
+      final realStore = DriftLocalWriteStore(realDb);
+      final realProgress = DriftStopProgressStore(realDb);
+      final failing = RecordingDayLogStore()
+        ..failStopDone = Exception('disk full');
+      final atomic = ExecutionRepository(
+        realStore,
+        realProgress,
+        syncWorker,
+        database: realDb,
+        dayLog: failing,
+      );
+
+      await expectLater(
+        atomic.concludeByLocation(
+          routeId: 'route-A',
+          routeStopId: 'stop-1',
+          fix: fix,
+        ),
+        throwsException,
+      );
+
+      expect(await realStore.unsyncedForRoute('route-A'), isEmpty);
+      expect(await realProgress.progressFor('stop-1'), isNull);
+    });
 
     test('offline: one completion row first, the photo rows after it, the '
         'stop done locally', () async {

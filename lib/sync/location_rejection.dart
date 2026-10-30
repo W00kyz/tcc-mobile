@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:developer' as developer;
 
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/location_refusal.dart';
@@ -27,6 +28,7 @@ class LocationRejection {
     required this.store,
     required this.stopProgress,
     required this.onRefused,
+    this.dayLog,
     this.atomically = runWritesPlainly,
   });
 
@@ -34,7 +36,11 @@ class LocationRejection {
   final StopProgressStore stopProgress;
   final void Function(LocationRefusal refusal)? onRefused;
 
-  /// Wraps the three writes of [apply]: the app database's transaction in
+  /// Where the completion was counted when the worker tapped; the refusal
+  /// takes that point back (the stop is pending again). Null: not counted.
+  final DayLogStore? dayLog;
+
+  /// Wraps the writes of [apply]: the app database's transaction in
   /// production, so a failure leaves the stop done with its photos and the
   /// row still to be retried, never half of a refusal.
   final AtomicWrites atomically;
@@ -54,8 +60,19 @@ class LocationRejection {
       await stopProgress.remove(routeStopId);
       await store.discardUnsentEvidence(row.payload['execution_id'] as String);
       await store.markRejected(row.id, refusal.toStoredError());
+      await _uncount(row);
     });
     _report(refusal);
+  }
+
+  /// The point `concludeByLocation` counted, on the local day of its
+  /// `completed_at`. Written last: the row is rejected only if this holds.
+  Future<void> _uncount(PendingOperationRow row) async {
+    final completedAt = DateTime.tryParse(
+      row.payload['completed_at'] as String? ?? '',
+    );
+    if (completedAt == null) return;
+    await dayLog?.recordStopUndone(completedAt.toLocal());
   }
 
   /// Best-effort: the row is rejected already, and a failing listener (e.g. a

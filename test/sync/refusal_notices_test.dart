@@ -130,6 +130,22 @@ void main() {
     expect(await notices().unannounced(), isEmpty);
   });
 
+  test('two refusals acknowledged together are both remembered', () async {
+    await outbox.completion('sA', 'Praça central');
+    await outbox.completion('sB', 'Jardim');
+    api.refusals['sA'] = outOfRadius;
+    api.refusals['sB'] = outOfRadius;
+    await backgroundDrain();
+    final shared = notices();
+
+    await Future.wait([
+      shared.acknowledge('done-sA'),
+      shared.acknowledge('done-sB'),
+    ]);
+
+    expect(await notices().unannounced(), isEmpty);
+  });
+
   test('acknowledgements of rows that are gone are forgotten', () async {
     await outbox.completion('sA', 'Praça central');
     await outbox.completion('sB', 'Jardim');

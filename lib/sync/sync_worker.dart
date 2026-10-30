@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/execution_api.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
@@ -46,6 +47,7 @@ class SyncWorker {
     void Function(DateTime scannedAt)? onScanDelivered,
     void Function(StopRelease release)? onStopReleased,
     void Function(LocationRefusal refusal)? onLocationRefused,
+    DayLogStore? dayLog,
     AtomicWrites atomically = runWritesPlainly,
     // A private field can't be an initializing formal with a public param
     // name, and `now` must stay public for callers to inject a fake clock.
@@ -63,6 +65,9 @@ class SyncWorker {
        _onLocationRefused = onLocationRefused,
        // Same reason as `now` above: the param name stays public.
        // ignore: prefer_initializing_formals
+       _dayLog = dayLog,
+       // Same reason as `now` above: the param name stays public.
+       // ignore: prefer_initializing_formals
        _atomically = atomically;
 
   final LocalWriteStore _store;
@@ -78,8 +83,10 @@ class SyncWorker {
     store: _store,
     stopProgress: _stopProgress,
     onRefused: _onLocationRefused,
+    dayLog: _dayLog,
     atomically: _atomically,
   );
+  final DayLogStore? _dayLog;
   final AtomicWrites _atomically;
   final StopProgressStore _stopProgress;
   final ExecutionApi _executionApi;

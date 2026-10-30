@@ -226,5 +226,17 @@ void main() {
       ),
       findsOneWidget,
     );
+
+    // Both were acknowledged: the next resume tells neither again.
+    await tester.pump(const Duration(seconds: 10));
+    await tester.pumpAndSettle();
+    await resume(tester);
+    expect(find.text(_message), findsNothing);
+    expect(
+      find.text(
+        'Conclusão recusada em Jardim: você estava a 137 m do local.',
+      ),
+      findsNothing,
+    );
   });
 }

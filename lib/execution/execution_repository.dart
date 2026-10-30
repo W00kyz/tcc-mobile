@@ -270,6 +270,7 @@ class ExecutionRepository {
   }) async {
     final key = _uuid.v4();
     final executionId = locationExecutionId(routeStopId);
+    final completedAt = DateTime.now();
     final note = observation?.trim();
     final payload = <String, dynamic>{
       'execution_id': executionId,
@@ -280,12 +281,16 @@ class ExecutionRepository {
       'accuracy_m': accuracyM,
       // A String, never a DateTime — LocalWriteStore.enqueue jsonEncodes
       // this map, which throws on a raw DateTime value.
-      'completed_at': DateTime.now().toUtc().toIso8601String(),
+      'completed_at': completedAt.toUtc().toIso8601String(),
       'complaints_suggestions': (note == null || note.isEmpty) ? null : note,
       'place_name': placeName,
     };
+    // IMPORTANT: the day log's point lands in the same transaction as the
+    // completion row and the DONE mark, like `checkOut`'s — a place-only
+    // worker would otherwise never have a day to count. A server refusal
+    // takes it back (`LocationRejection`).
     await _database.transaction(() async {
-      await _store.enqueue(
+      final queued = await _store.enqueue(
         id: key,
         kind: PendingOpKind.locationCompletion,
         routeId: routeId,
@@ -293,6 +298,7 @@ class ExecutionRepository {
       );
       await _stopProgress.upsertDone(routeStopId, executionId);
       await _store.releaseHeldPhotos(executionId);
+      if (queued) await _dayLog.recordStopDone(completedAt);
     });
     unawaited(_syncWorker.syncRoute(routeId));
     return key;

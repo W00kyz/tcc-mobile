@@ -25,9 +25,23 @@ class RefusalNotices {
     ];
   }
 
+  /// The acknowledgement in flight: each one waits for it, so two refusals
+  /// told together cannot both read the set before either writes it back.
+  Future<void> _lastAcknowledge = Future<void>.value();
+
   /// Marks [operationId] as told. Ids of rows no longer rejected (a discarded
-  /// stop) are dropped, so the set cannot grow without bound.
-  Future<void> acknowledge(String operationId) async {
+  /// stop) are dropped, so the set cannot grow without bound. Calls run one
+  /// after the other.
+  Future<void> acknowledge(String operationId) {
+    // INTENTIONAL: a failed earlier call must not fail the next one.
+    final next = _lastAcknowledge
+        .catchError((Object _) {})
+        .then((_) => _mergeAcknowledged(operationId));
+    _lastAcknowledge = next;
+    return next;
+  }
+
+  Future<void> _mergeAcknowledged(String operationId) async {
     final acknowledged = await _syncMeta.getAcknowledgedRefusals();
     final live = {for (final row in await _store.rejectedCompletions()) row.id};
     await _syncMeta.setAcknowledgedRefusals(

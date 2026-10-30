@@ -105,8 +105,10 @@ final syncWorkerProvider = Provider<SyncWorker>((ref) {
       if (!ref.mounted) return;
       ref.read(stopReleaseAnnouncementsProvider.notifier).announce(release);
     },
-    // Same rule as onScanDelivered.
     atomically: database.transaction,
+    // A refused location completion takes its day-log point back.
+    dayLog: ref.watch(dayLogStoreProvider),
+    // Same rule as onScanDelivered.
     onLocationRefused: (refusal) {
       if (!ref.mounted) return;
       ref.read(locationRefusalAnnouncementsProvider.notifier).announce(refusal);

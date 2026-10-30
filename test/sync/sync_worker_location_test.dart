@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/location_execution_id.dart';
 import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/location_refusal.dart';
@@ -151,6 +152,73 @@ void main() {
 
       expect(await store.routeIdsWithWork(), isEmpty);
     });
+  });
+
+  test('a refusal takes the stop back out of the day log', () async {
+    final dayLog = DriftDayLogStore(db);
+    final completedAt = DateTime.parse('2026-10-31T12:00:00.000Z').toLocal();
+    await seedCompletion('sA', 'Praça central');
+    await dayLog.recordStopDone(completedAt);
+    await dayLog.recordStopDone(completedAt);
+    api.refusals['sA'] = const LocationRefusedException(
+      code: 'OUT_OF_RADIUS',
+      distanceM: 90,
+      radiusM: 50,
+    );
+    final counting = locationWorker(db, api, log, dayLog: dayLog);
+
+    await counting.syncRoute('r1');
+
+    expect((await dayLog.all()).single.pointsDone, 1);
+  });
+
+  test('a refusal never takes the day log below zero', () async {
+    final dayLog = DriftDayLogStore(db);
+    await seedCompletion('sA', 'Praça central');
+    api.refusals['sA'] = const LocationRefusedException(
+      code: 'OUT_OF_RADIUS',
+      distanceM: 90,
+      radiusM: 50,
+    );
+
+    await locationWorker(db, api, log, dayLog: dayLog).syncRoute('r1');
+
+    expect(await dayLog.all(), isEmpty);
+  });
+
+  test('concluding the same stop again after a refusal is delivered, not '
+      'held by a blocked scope', () async {
+    await seedCompletion('sA', 'Praça central');
+    api.refusals['sA'] = const LocationRefusedException(
+      code: 'OUT_OF_RADIUS',
+      distanceM: 90,
+      radiusM: 50,
+    );
+    await worker.syncRoute('r1');
+    log.clear();
+    api.refusals.remove('sA');
+    // The worker walks to the place and concludes again: same v5
+    // execution_id, a new idempotency key, new photos.
+    await outbox.seed('done-sA-again', PendingOpKind.locationCompletion, {
+      'execution_id': execA,
+      'route_stop_id': 'sA',
+      'idempotency_key': 'done-sA-again',
+      'latitude': -7.2,
+      'longitude': -35.9,
+      'accuracy_m': null,
+      'completed_at': '2026-10-31T12:05:00.000Z',
+      'complaints_suggestions': null,
+      'place_name': 'Praça central',
+    });
+    await progress.upsertDone('sA', execA);
+    await seedPhoto('photo-A-again', execA);
+
+    await worker.syncRoute('r1');
+
+    expect(log, ['completion:sA', 'photo:photo-A-again']);
+    expect(await stateOf('done-sA-again'), PendingOpState.synced);
+    expect(await stateOf('photo-A-again'), PendingOpState.synced);
+    expect(await store.blockedForRoute('r1'), isEmpty);
   });
 
   test('a refusal without a location says the location was off', () async {

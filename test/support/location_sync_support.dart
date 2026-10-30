@@ -6,6 +6,7 @@ import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/location_execution_id.dart';
 import 'package:route_monitor/local/app_database.dart';
+import 'package:route_monitor/local/day_log_store.dart';
 import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
@@ -80,6 +81,7 @@ SyncWorker locationWorker(
   LocalWriteStore? store,
   EvidenceApi? photos,
   void Function(LocationRefusal refusal)? onLocationRefused,
+  DayLogStore? dayLog,
 }) => SyncWorker(
   store ?? DriftLocalWriteStore(db),
   DriftStopProgressStore(db),
@@ -89,6 +91,7 @@ SyncWorker locationWorker(
   photos ?? PhotoApi(log),
   NoReleasedStops(),
   onLocationRefused: onLocationRefused,
+  dayLog: dayLog,
   atomically: (writes) => db.transaction(writes),
 );
 

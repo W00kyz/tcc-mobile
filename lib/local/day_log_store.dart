@@ -40,6 +40,11 @@ abstract class DayLogStore {
   /// transaction, so it is rolled back with it.
   Future<void> recordStopDone(DateTime day);
 
+  /// Takes back one stop of [day]'s count — a location completion the
+  /// server refused, so the stop is pending again. Never below zero; a day
+  /// with no row stays unrecorded.
+  Future<void> recordStopUndone(DateTime day);
+
   /// One more batch card completed on [day]; [clean] when nothing was left
   /// to send at that moment.
   Future<void> recordCardCompleted(DateTime day, {required bool clean});
@@ -67,6 +72,22 @@ class DriftDayLogStore implements DayLogStore {
       DayLogCompanion.insert(day: dayKey(day), pointsDone: const Value(1)),
       (old) => DayLogCompanion.custom(
         pointsDone: old.pointsDone + const Constant(1),
+      ),
+    );
+  }
+
+  @override
+  Future<void> recordStopUndone(DateTime day) {
+    // One guarded statement, never read-then-write (the background drain
+    // shares the file): the `> 0` keeps the count from going negative.
+    final update = _db.update(_db.dayLog)
+      ..where(
+        (row) =>
+            row.day.equals(dayKey(day)) & row.pointsDone.isBiggerThanValue(0),
+      );
+    return update.write(
+      DayLogCompanion.custom(
+        pointsDone: _db.dayLog.pointsDone - const Constant(1),
       ),
     );
   }

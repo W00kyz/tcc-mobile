@@ -25,6 +25,11 @@ class RecordingDayLogStore implements DayLogStore {
   }
 
   @override
+  Future<void> recordStopUndone(DateTime day) async {
+    calls.add('stopUndone:${dayKey(day)}');
+  }
+
+  @override
   Future<void> recordCardCompleted(DateTime day, {required bool clean}) async {
     calls.add('cardCompleted:${dayKey(day)}:$clean');
   }
