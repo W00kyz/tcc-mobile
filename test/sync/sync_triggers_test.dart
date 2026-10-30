@@ -10,6 +10,8 @@ import 'package:route_monitor/monitoring/monitoring_providers.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/sync/background_sync.dart';
+import 'package:route_monitor/sync/location_refusal.dart';
+import 'package:route_monitor/sync/refusal_notices.dart';
 import 'package:route_monitor/sync/sync_progress.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_status.dart';
@@ -87,6 +89,15 @@ class _IgnoringForegroundTracker implements AppForegroundTracker {
   Future<void> left() async {}
 }
 
+/// No refusal waits: these tests never reach the device database.
+class _NoRefusals implements RefusalNotices {
+  @override
+  Future<List<LocationRefusal>> unannounced() async => const [];
+
+  @override
+  Future<void> acknowledge(String operationId) async {}
+}
+
 void main() {
   late FakeConnectivity connectivity;
   late _RecordingSyncWorker worker;
@@ -107,6 +118,7 @@ void main() {
           appForegroundTrackerProvider.overrideWithValue(
             _IgnoringForegroundTracker(),
           ),
+          refusalNoticesProvider.overrideWithValue(_NoRefusals()),
         ],
         child: SyncTriggers(child: child ?? const SizedBox.shrink()),
       ),
@@ -129,6 +141,7 @@ void main() {
         appForegroundTrackerProvider.overrideWithValue(
           _IgnoringForegroundTracker(),
         ),
+        refusalNoticesProvider.overrideWithValue(_NoRefusals()),
         routeRepositoryProvider.overrideWithValue(routeRepository),
         if (monitoringApi != null)
           monitoringApiProvider.overrideWithValue(monitoringApi),

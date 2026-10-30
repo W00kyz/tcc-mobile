@@ -191,7 +191,7 @@ class DriftReleasedStopStore implements ReleasedStopStore {
   ) => _db.customUpdate(
     'DELETE FROM pending_operations '
     'WHERE released_stop_id = ?1 '
-    'OR (kind IN (?2, ?3, ?4) '
+    'OR (kind IN (?2, ?3, ?4, ?8) '
     r"AND json_extract(payload_json, '$.route_stop_id') = ?1) "
     'OR (kind IN (?5, ?6) '
     r"AND json_extract(payload_json, '$.execution_id') "
@@ -204,6 +204,7 @@ class DriftReleasedStopStore implements ReleasedStopStore {
       Variable.withString(PendingOpKind.evidencePhoto.name),
       Variable.withString(PendingOpKind.evidenceNote.name),
       Variable.withString(jsonEncode(executions.toList())),
+      Variable.withString(PendingOpKind.locationCompletion.name),
     ],
     updates: {_db.pendingOperations},
     updateKind: UpdateKind.delete,

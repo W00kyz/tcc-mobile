@@ -46,6 +46,7 @@ class SyncWorker {
     void Function(DateTime scannedAt)? onScanDelivered,
     void Function(StopRelease release)? onStopReleased,
     void Function(LocationRefusal refusal)? onLocationRefused,
+    AtomicWrites atomically = runWritesPlainly,
     // A private field can't be an initializing formal with a public param
     // name, and `now` must stay public for callers to inject a fake clock.
     // ignore: prefer_initializing_formals
@@ -59,7 +60,10 @@ class SyncWorker {
        _onStopReleased = onStopReleased,
        // Same reason as `now` above: the param name stays public.
        // ignore: prefer_initializing_formals
-       _onLocationRefused = onLocationRefused;
+       _onLocationRefused = onLocationRefused,
+       // Same reason as `now` above: the param name stays public.
+       // ignore: prefer_initializing_formals
+       _atomically = atomically;
 
   final LocalWriteStore _store;
   final SyncMetaStore _syncMeta;
@@ -74,7 +78,9 @@ class SyncWorker {
     store: _store,
     stopProgress: _stopProgress,
     onRefused: _onLocationRefused,
+    atomically: _atomically,
   );
+  final AtomicWrites _atomically;
   final StopProgressStore _stopProgress;
   final ExecutionApi _executionApi;
   final EvidenceApi _evidenceApi;
@@ -314,7 +320,7 @@ class SyncWorker {
     } catch (error) {
       final release = StopRelease.fromError(error);
       if (release != null) return _park(row, release);
-      final classification = classifySyncError(error);
+      final classification = classifySyncError(error, kind: row.kind);
       if (classification == SyncErrorClass.alreadyApplied) {
         // The server had it already — and counted its scan then.
         await _store.markSynced(row.id);

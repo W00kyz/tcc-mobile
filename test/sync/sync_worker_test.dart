@@ -253,6 +253,15 @@ class _FakeSyncMetaStore implements SyncMetaStore {
 
   bool appInForeground = false;
 
+  Set<String> acknowledgedRefusals = {};
+
+  @override
+  Future<Set<String>> getAcknowledgedRefusals() async => acknowledgedRefusals;
+
+  @override
+  Future<void> setAcknowledgedRefusals(Set<String> operationIds) async =>
+      acknowledgedRefusals = operationIds;
+
   @override
   Future<bool> getAppInForeground() async => appInForeground;
 
@@ -271,6 +280,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
       throw UnimplementedError();
 
   final Map<String, PendingOperationRow> rows = {};
+
+  @override
+  Future<List<PendingOperationRow>> rejectedCompletions() =>
+      throw UnimplementedError();
 
   @override
   Future<void> markRejected(String id, String error) =>

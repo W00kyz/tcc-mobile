@@ -46,6 +46,10 @@ class _FakeLocalWriteStore implements LocalWriteStore {
   final List<PendingOperationRow> rows;
 
   @override
+  Future<List<PendingOperationRow>> rejectedCompletions() =>
+      throw UnimplementedError();
+
+  @override
   Future<void> markRejected(String id, String error) =>
       throw UnimplementedError();
 

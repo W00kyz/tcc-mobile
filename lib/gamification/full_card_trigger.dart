@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/execution/execution_providers.dart'
     show dayLogStoreProvider, localWriteStoreProvider;
+import 'package:route_monitor/execution/location_execution_id.dart';
 import 'package:route_monitor/gamification/full_card_sheet.dart';
 import 'package:route_monitor/gamification/gamification_providers.dart';
 import 'package:route_monitor/gamification/streak.dart';
@@ -140,16 +141,28 @@ class _FullCardTriggerState extends ConsumerState<FullCardTrigger> {
       (row) => row.state != PendingOpState.held,
     );
     final blocked = await store.blockedForRoute(routeId);
-    final otherPending = pending.where((row) => !_isCheckOutOf(row, ownExit));
+    final otherPending = pending.where((row) => !_isOwnExitWrite(row, ownExit));
     await dayLog.recordCardCompleted(
       now,
       clean: blocked.isEmpty && otherPending.isEmpty,
     );
   }
 
-  static bool _isCheckOutOf(PendingOperationRow row, Set<String> stopIds) =>
-      row.kind == PendingOpKind.checkOut &&
-      stopIds.contains(row.payload['route_stop_id']);
+  /// A write the stops of the own exit just made: their check-outs, and the
+  /// location completion of a place stop with the photos and notes released
+  /// with it (held under `locationExecutionId`).
+  static bool _isOwnExitWrite(PendingOperationRow row, Set<String> stopIds) {
+    final ownExecutions = {for (final id in stopIds) locationExecutionId(id)};
+    return switch (row.kind) {
+      PendingOpKind.checkOut || PendingOpKind.locationCompletion =>
+        stopIds.contains(row.payload['route_stop_id']),
+      PendingOpKind.evidencePhoto ||
+      PendingOpKind.evidenceNote => ownExecutions.contains(
+        row.payload['execution_id'],
+      ),
+      PendingOpKind.checkIn || PendingOpKind.impediment => false,
+    };
+  }
 
   /// Skipped for a day that is not today: offline, `myDayProvider` serves
   /// the last cached day, and its `service_day` belongs to that date. A day

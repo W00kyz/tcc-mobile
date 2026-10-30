@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:route_monitor/appeals/appeal_providers.dart'
     show appealEligibleProvider;
+import 'package:route_monitor/execution/execution_providers.dart'
+    show stopProgressForProvider;
 import 'package:route_monitor/monitoring/monitoring_providers.dart'
     show notificationsProvider, unreadCountProvider;
 import 'package:route_monitor/routing/route_providers.dart' show myDayProvider;
@@ -91,12 +93,38 @@ class _SyncTriggersState extends ConsumerState<SyncTriggers>
   /// they don't need the online gate. The appeals badge likewise: the server
   /// may have released points while the app was away (spec §7.5).
   void _sync() {
-    unawaited(ref.read(syncWorkerProvider).syncAll());
+    _refreshLocalState();
+    unawaited(_announceMissedRefusals());
+    unawaited(_syncThenRefresh());
     unawaited(_invalidateRoutesIfOnline());
     ref
       ..invalidate(unreadCountProvider)
       ..invalidate(notificationsProvider)
       ..invalidate(appealEligibleProvider);
+  }
+
+  Future<void> _syncThenRefresh() async {
+    await ref.read(syncWorkerProvider).syncAll();
+    if (mounted) _refreshLocalState();
+  }
+
+  /// The stops' local status and sync chips are cached per stop: another
+  /// isolate's drain (the background one) rewrites them in SQLite — a
+  /// refused completion takes its stop back to pending — without this one
+  /// hearing, so a resume or a finished drain reads them again.
+  void _refreshLocalState() => ref
+    ..invalidate(stopProgressForProvider)
+    ..invalidate(stopSyncChipProvider);
+
+  /// Hands the home the refusals the background drain applied while the app
+  /// was away: the rejected rows not yet acknowledged, told once each.
+  Future<void> _announceMissedRefusals() async {
+    final refusals = await ref.read(refusalNoticesProvider).unannounced();
+    if (!mounted) return;
+    final announcements = ref.read(
+      locationRefusalAnnouncementsProvider.notifier,
+    );
+    refusals.forEach(announcements.announce);
   }
 
   Future<void> _invalidateRoutesIfOnline() async {

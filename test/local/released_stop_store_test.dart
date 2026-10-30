@@ -181,6 +181,38 @@ void main() {
     );
 
     test(
+      "deletes a place stop's location completion that was never parked, "
+      'with its photos, and nothing of another stop',
+      () async {
+        for (final stop in ['p1', 'p2']) {
+          await progress.upsertDone(stop, 'exec-$stop');
+          await outbox.enqueue(
+            id: 'done-$stop',
+            kind: PendingOpKind.locationCompletion,
+            routeId: 'r1',
+            payload: {
+              'execution_id': 'exec-$stop',
+              'route_stop_id': stop,
+              'completed_at': _checkOutAt,
+            },
+          );
+          await outbox.enqueue(
+            id: 'photo-$stop',
+            kind: PendingOpKind.evidencePhoto,
+            routeId: 'r1',
+            payload: {'execution_id': 'exec-$stop', 'bytes_b64': 'AAAA'},
+          );
+        }
+
+        await released.discardStop('p1');
+
+        final left = await outbox.unsyncedForRoute('r1');
+        expect(left.map((row) => row.id).toSet(), {'done-p2', 'photo-p2'});
+        expect(await progress.progressFor('p1'), isNull);
+      },
+    );
+
+    test(
       'finds the evidence of an execution whose check-in row is already gone, '
       'through the stop progress',
       () async {

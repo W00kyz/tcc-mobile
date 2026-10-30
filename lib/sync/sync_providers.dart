@@ -10,6 +10,7 @@ import 'package:route_monitor/monitoring/monitoring_providers.dart'
     show silenceWatchdogProvider;
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/location_refusal.dart';
+import 'package:route_monitor/sync/refusal_notices.dart';
 import 'package:route_monitor/sync/stop_release.dart';
 import 'package:route_monitor/sync/sync_status.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
@@ -64,6 +65,15 @@ class LocationRefusalAnnouncements extends Notifier<LocationRefusal?> {
   void announce(LocationRefusal refusal) => state = refusal;
 }
 
+/// The refusals of location completions not told to the worker yet —
+/// including the ones the background drain applied on another isolate.
+final refusalNoticesProvider = Provider<RefusalNotices>(
+  (ref) => RefusalNotices(
+    ref.watch(localWriteStoreProvider),
+    ref.watch(syncMetaStoreProvider),
+  ),
+);
+
 /// The `connectivity_plus` seam the worker uses to skip a drain while the
 /// device is offline.
 final connectivityProvider = Provider<Connectivity>(
@@ -74,6 +84,7 @@ final connectivityProvider = Provider<Connectivity>(
 /// kicks `syncRoute` after every enqueue; foreground/connectivity triggers
 /// call it too.
 final syncWorkerProvider = Provider<SyncWorker>((ref) {
+  final database = ref.watch(appDatabaseProvider);
   final worker = SyncWorker(
     ref.watch(localWriteStoreProvider),
     ref.watch(stopProgressStoreProvider),
@@ -95,6 +106,7 @@ final syncWorkerProvider = Provider<SyncWorker>((ref) {
       ref.read(stopReleaseAnnouncementsProvider.notifier).announce(release);
     },
     // Same rule as onScanDelivered.
+    atomically: database.transaction,
     onLocationRefused: (refusal) {
       if (!ref.mounted) return;
       ref.read(locationRefusalAnnouncementsProvider.notifier).announce(refusal);

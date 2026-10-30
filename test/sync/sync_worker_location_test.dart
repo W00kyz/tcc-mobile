@@ -1,155 +1,75 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
-import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:route_monitor/execution/evidence_api.dart';
 import 'package:route_monitor/execution/execution_api.dart';
 import 'package:route_monitor/execution/location_execution_id.dart';
 import 'package:route_monitor/local/app_database.dart';
 import 'package:route_monitor/local/local_write_store.dart';
-import 'package:route_monitor/local/released_stop_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
-import 'package:route_monitor/local/sync_meta_store.dart';
 import 'package:route_monitor/sync/location_refusal.dart';
 import 'package:route_monitor/sync/sync_worker.dart';
 
-import '../support/fake_connectivity.dart';
 import '../support/in_memory_database.dart';
+import '../support/location_sync_support.dart';
 
-/// Answers each location completion from [refusals] (by stop id) or accepts
-/// it; every call lands in [log].
-class _LocationApi implements ExecutionApi {
-  _LocationApi(this.log);
+/// An evidence API whose uploads all fail with [error].
+class _PhotoRefusedApi extends PhotoApi {
+  _PhotoRefusedApi(super.log, this.error);
 
-  final List<String> log;
-  final Map<String, Exception> refusals = {};
-
-  @override
-  Future<DateTime?> completeByLocation({
-    required String executionId,
-    required String routeStopId,
-    required String idempotencyKey,
-    required double latitude,
-    required double longitude,
-    required DateTime completedAt,
-    double? accuracyM,
-    double? clientClockOffsetSeconds,
-    String? complaintsSuggestions,
-  }) async {
-    log.add('completion:$routeStopId');
-    final refusal = refusals[routeStopId];
-    if (refusal != null) throw refusal;
-    return null;
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
-}
-
-class _PhotoApi implements EvidenceApi {
-  _PhotoApi(this.log);
-
-  final List<String> log;
+  final Exception error;
 
   @override
   Future<DateTime?> uploadPhoto({
-    required String executionId,
     required Uint8List bytes,
+    required String executionId,
     required String sha256,
     required DateTime capturedAt,
     required String idempotencyKey,
-  }) async {
-    log.add('photo:$idempotencyKey');
-    return null;
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+  }) async => throw error;
 }
 
-class _NoReleasedStops implements ReleasedStopStore {
+/// A store whose final write of a rejection fails.
+class _RejectFailsStore extends DriftLocalWriteStore {
+  // The super parameter is private (`_db`): it cannot share its name.
+  // ignore: matching_super_parameters
+  _RejectFailsStore(super.db);
+
   @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+  Future<void> markRejected(String id, String error) =>
+      throw StateError('disk full');
 }
 
 void main() {
   late AppDatabase db;
   late DriftLocalWriteStore store;
   late DriftStopProgressStore progress;
-  late _LocationApi api;
+  late LocationApi api;
   late List<String> log;
   late List<LocationRefusal> refusals;
   late SyncWorker worker;
-  var clock = 0;
+  late LocationOutbox outbox;
 
   final execA = locationExecutionId('sA');
   final execB = locationExecutionId('sB');
 
   setUp(() {
-    clock = 0;
     db = inMemoryDatabase();
     addTearDown(db.close);
     store = DriftLocalWriteStore(db);
     progress = DriftStopProgressStore(db);
+    outbox = LocationOutbox(db);
     log = [];
     refusals = [];
-    api = _LocationApi(log);
-    worker = SyncWorker(
-      store,
-      progress,
-      DriftSyncMetaStore(db),
-      FakeConnectivity(isOnline: true),
-      api,
-      _PhotoApi(log),
-      _NoReleasedStops(),
-      onLocationRefused: refusals.add,
-    );
+    api = LocationApi(log);
+    worker = locationWorker(db, api, log, onLocationRefused: refusals.add);
   });
 
-  /// One row at a fixed `createdAt`, so the FIFO order is the test's.
-  Future<void> seed(
-    String id,
-    PendingOpKind kind,
-    Map<String, dynamic> payload, {
-    PendingOpState state = PendingOpState.pending,
-  }) => db
-      .into(db.pendingOperations)
-      .insert(
-        PendingOperationsCompanion.insert(
-          id: id,
-          kind: kind.name,
-          routeId: 'r1',
-          payloadJson: jsonEncode(payload),
-          createdAt: clock++,
-          state: Value(state.name),
-        ),
-      );
-
-  Future<void> seedCompletion(String stopId, String place) async {
-    await seed('done-$stopId', PendingOpKind.locationCompletion, {
-      'execution_id': locationExecutionId(stopId),
-      'route_stop_id': stopId,
-      'idempotency_key': 'done-$stopId',
-      'latitude': -7.2,
-      'longitude': -35.9,
-      'accuracy_m': null,
-      'completed_at': '2026-10-31T12:00:00.000Z',
-      'complaints_suggestions': null,
-      'place_name': place,
-    });
-    await progress.upsertDone(stopId, locationExecutionId(stopId));
-  }
+  Future<void> seedCompletion(String stopId, String place) =>
+      outbox.completion(stopId, place);
 
   Future<void> seedPhoto(String id, String executionId) =>
-      seed(id, PendingOpKind.evidencePhoto, {
-        'execution_id': executionId,
-        'bytes_b64': 'AAAA',
-        'sha256': 'h',
-        'captured_at': '2026-10-31T11:59:00.000Z',
-        'idempotency_key': id,
-      });
+      outbox.photo(id, executionId);
 
   Future<PendingOperationRow?> rowOf(String id) async =>
       (await store.unsyncedForRoute('r1')).where((r) => r.id == id).firstOrNull;
@@ -291,5 +211,60 @@ void main() {
     expect(await stateOf('done-sA'), PendingOpState.synced);
     expect((await progress.progressFor('sA'))!.status, StopLocalStatus.done);
     expect(refusals, isEmpty);
+  });
+
+  test('a rejection is atomic: when its last write fails, the stop is still '
+      'done and its photos are still there', () async {
+    await seedCompletion('sA', 'Praça central');
+    await seedPhoto('photo-A1', execA);
+    api.refusals['sA'] = const LocationRefusedException(
+      code: 'OUT_OF_RADIUS',
+      distanceM: 90,
+      radiusM: 50,
+    );
+    final failing = locationWorker(
+      db,
+      api,
+      log,
+      store: _RejectFailsStore(db),
+      onLocationRefused: refusals.add,
+    );
+
+    await expectLater(failing.syncRoute('r1'), throwsStateError);
+
+    expect((await progress.progressFor('sA'))!.status, StopLocalStatus.done);
+    expect(await stateOf('photo-A1'), PendingOpState.pending);
+    expect(refusals, isEmpty);
+  });
+
+  test('a 422 OUT_OF_RADIUS on a photo row is blocked, not rejected', () async {
+    await seedCompletion('sA', 'Praça central');
+    await seedPhoto('photo-A1', execA);
+    final options = RequestOptions(path: '/x');
+    final failing = locationWorker(
+      db,
+      api,
+      log,
+      onLocationRefused: refusals.add,
+      photos: _PhotoRefusedApi(
+        log,
+        DioException(
+          requestOptions: options,
+          response: Response<dynamic>(
+            requestOptions: options,
+            statusCode: 422,
+            data: {
+              'detail': {'code': 'OUT_OF_RADIUS'},
+            },
+          ),
+        ),
+      ),
+    );
+
+    await failing.syncRoute('r1');
+
+    expect(await stateOf('photo-A1'), PendingOpState.blocked);
+    expect(refusals, isEmpty);
+    expect((await progress.progressFor('sA'))!.status, StopLocalStatus.done);
   });
 }

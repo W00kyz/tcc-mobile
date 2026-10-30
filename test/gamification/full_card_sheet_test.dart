@@ -1,7 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:route_monitor/execution/evidence_capture.dart';
+import 'package:route_monitor/execution/execution_providers.dart';
+import 'package:route_monitor/execution/location_execution_id.dart';
 import 'package:route_monitor/gamification/full_card_sheet.dart';
 import 'package:route_monitor/l10n/strings.dart';
 import 'package:route_monitor/local/day_log_store.dart';
@@ -9,12 +14,14 @@ import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/floor_actions.dart';
+import 'package:route_monitor/routing/location_service.dart';
 import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
 import '../routing/map_home_harness.dart';
+import '../routing/place_fixtures.dart';
 import '../support/fake_day_log_store.dart';
 import '../support/fake_route_repository.dart';
 
@@ -295,6 +302,105 @@ void main() {
         dayLog.calls.where((c) => c.startsWith('cardCompleted')),
         [endsWith(':true')],
       );
+    });
+
+    group('a batch ending on a place stop', () {
+      /// Concludes place `p1` (the batch's last stop) by location, with a
+      /// photo held for it first; [prepare] seeds the outbox before.
+      Future<RecordingDayLogStore> concludePlace(
+        WidgetTester tester, {
+        Future<void> Function(InMemoryLocalWriteStore store)? prepare,
+      }) async {
+        final store = InMemoryLocalWriteStore();
+        await prepare?.call(store);
+        final dayLog = RecordingDayLogStore();
+        final route = routeWith(
+          currentBatch: 2,
+          stops: [
+            stopIn(id: 's1', batchNumber: 2, status: 'DONE'),
+            placeStopIn(id: 'p1', batchNumber: 2, orderIndex: 2),
+          ],
+        );
+        await pumpHome(
+          tester,
+          homeWith(
+            repositoryWith(route),
+            localWriteStore: store,
+            syncWorker: RecordingSyncWorker(),
+            dayLogStore: dayLog,
+          ),
+        );
+        final ref = tester.element(find.byType(MapHomeScreen)) as WidgetRef;
+        await ref
+            .read(executionRepositoryProvider)
+            .addPhoto(
+              routeId: 'r1',
+              executionId: locationExecutionId('p1'),
+              photo: CapturedPhoto(bytes: Uint8List.fromList([1]), sha256: 'h'),
+            );
+        await concludeTask(
+          ref,
+          route,
+          route.stops[1],
+          fix: const Coordinates(latitude: -7.215, longitude: -35.915),
+        );
+        await tester.pumpAndSettle();
+        return dayLog;
+      }
+
+      testWidgets('records a clean card: its own completion and photos are '
+          'not old debt', (tester) async {
+        final dayLog = await concludePlace(tester);
+
+        expect(
+          dayLog.calls.where((c) => c.startsWith('cardCompleted')),
+          [endsWith(':true')],
+        );
+      });
+
+      testWidgets("another stop's unsent completion still makes it not "
+          'clean', (tester) async {
+        final dayLog = await concludePlace(
+          tester,
+          prepare: (store) async {
+            await store.enqueue(
+              id: 'old-completion',
+              kind: PendingOpKind.locationCompletion,
+              routeId: 'r1',
+              payload: const {
+                'route_stop_id': 'p0',
+                'execution_id': 'exec-p0',
+              },
+            );
+          },
+        );
+
+        expect(
+          dayLog.calls.where((c) => c.startsWith('cardCompleted')),
+          [endsWith(':false')],
+        );
+      });
+
+      testWidgets("another stop's unsent photo still makes it not clean", (
+        tester,
+      ) async {
+        final dayLog = await concludePlace(
+          tester,
+          prepare: (store) async {
+            await store.enqueue(
+              id: 'old-photo',
+              kind: PendingOpKind.evidencePhoto,
+              routeId: 'r1',
+              payload: {'execution_id': locationExecutionId('p0')},
+            );
+          },
+        );
+
+        expect(
+          dayLog.calls.where((c) => c.startsWith('cardCompleted')),
+          [endsWith(':false')],
+        );
+      });
     });
 
     testWidgets('a blocked row makes the card not clean', (tester) async {

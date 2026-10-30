@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:route_monitor/execution/execution_api.dart'
     show AmbiguousRoomException, LocationRefusedException;
+import 'package:route_monitor/local/pending_operation.dart';
 
 /// How the worker reacts to a failed dispatch (spec Ruling 6).
 enum SyncErrorClass {
@@ -31,12 +32,18 @@ enum SyncErrorClass {
 
 /// Sorts one failed dispatch into a [SyncErrorClass] (spec Ruling 6).
 ///
-///     if (classifySyncError(error) == SyncErrorClass.soft) retryLater();
-SyncErrorClass classifySyncError(Object error) {
+/// [kind] is the row's: only a location completion can be `rejected` — the
+/// same 422 on any other row is a payload the server will never take.
+///
+///     if (classifySyncError(error, kind: row.kind) == SyncErrorClass.soft) {
+///       retryLater();
+///     }
+SyncErrorClass classifySyncError(Object error, {required PendingOpKind kind}) {
   // RULING P5: a background drain cannot show a room picker, so an
   // unresolved-room check-in blocks that stop.
   if (error is AmbiguousRoomException) return SyncErrorClass.hard;
-  if (LocationRefusedException.fromError(error) != null) {
+  if (kind == PendingOpKind.locationCompletion &&
+      LocationRefusedException.fromError(error) != null) {
     return SyncErrorClass.rejected;
   }
   if (error is! DioException) return SyncErrorClass.hard;

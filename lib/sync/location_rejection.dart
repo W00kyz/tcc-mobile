@@ -5,6 +5,13 @@ import 'package:route_monitor/local/local_write_store.dart';
 import 'package:route_monitor/local/stop_progress_store.dart';
 import 'package:route_monitor/sync/location_refusal.dart';
 
+/// Runs [writes] as one all-or-nothing unit (a database transaction).
+typedef AtomicWrites = Future<void> Function(Future<void> Function() writes);
+
+/// The [AtomicWrites] of a worker given no transaction (tests with fake
+/// stores): the writes simply run in order.
+Future<void> runWritesPlainly(Future<void> Function() writes) => writes();
+
 /// What the sync worker does when the server refuses a location completion
 /// for good (outside the radius, or no position): the stop goes back to
 /// pending, its photos — which would 404 against an execution the server
@@ -20,29 +27,35 @@ class LocationRejection {
     required this.store,
     required this.stopProgress,
     required this.onRefused,
+    this.atomically = runWritesPlainly,
   });
 
   final LocalWriteStore store;
   final StopProgressStore stopProgress;
   final void Function(LocationRefusal refusal)? onRefused;
 
-  /// Applies the refusal [error] of [row] (a `locationCompletion`).
-  ///
-  /// IMPORTANT: the row is marked LAST. A crash before it leaves the row
-  /// claimed, so the next pass asks again, gets the same refusal and finishes
-  /// the job — every step here is repeatable.
+  /// Wraps the three writes of [apply]: the app database's transaction in
+  /// production, so a failure leaves the stop done with its photos and the
+  /// row still to be retried, never half of a refusal.
+  final AtomicWrites atomically;
+
+  /// Applies the refusal [error] of [row] (a `locationCompletion`): the
+  /// stop pending again, its undelivered evidence dropped, the row marked
+  /// `rejected` — one transaction. The notice goes out after it commits.
   Future<void> apply(PendingOperationRow row, Object error) async {
     final routeStopId = row.payload['route_stop_id'] as String;
-    await stopProgress.remove(routeStopId);
-    await store.discardUnsentEvidence(row.payload['execution_id'] as String);
-    await store.markRejected(row.id, error.toString());
-    _report(
-      LocationRefusal.of(
-        error,
-        routeStopId: routeStopId,
-        placeName: row.payload['place_name'] as String?,
-      )!,
-    );
+    final refusal = LocationRefusal.of(
+      error,
+      operationId: row.id,
+      routeStopId: routeStopId,
+      placeName: row.payload['place_name'] as String?,
+    )!;
+    await atomically(() async {
+      await stopProgress.remove(routeStopId);
+      await store.discardUnsentEvidence(row.payload['execution_id'] as String);
+      await store.markRejected(row.id, refusal.toStoredError());
+    });
+    _report(refusal);
   }
 
   /// Best-effort: the row is rejected already, and a failing listener (e.g. a

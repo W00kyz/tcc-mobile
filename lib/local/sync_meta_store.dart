@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:route_monitor/local/app_database.dart';
 
 /// Flat key/value bookkeeping for the sync worker (spec Ruling 9). Values are
@@ -17,6 +19,13 @@ abstract class SyncMetaStore {
   Future<bool> getAppInForeground();
 
   Future<void> setAppInForeground({required bool inForeground});
+
+  /// The ids of the rejected location completions the worker was already told
+  /// about (`RefusalNotices`): the background drain rejects them on another
+  /// isolate, so "already told" has to live in the file the isolates share.
+  Future<Set<String>> getAcknowledgedRefusals();
+
+  Future<void> setAcknowledgedRefusals(Set<String> operationIds);
 }
 
 class DriftSyncMetaStore implements SyncMetaStore {
@@ -29,6 +38,9 @@ class DriftSyncMetaStore implements SyncMetaStore {
   /// `'1'` / `'0'`. A row in SQLite rather than memory: the background drain
   /// runs on another isolate (or another engine) and shares only the file.
   static const _appInForegroundKey = 'app_in_foreground';
+
+  /// A JSON list of operation ids.
+  static const _acknowledgedRefusalsKey = 'acknowledged_refusals';
 
   @override
   Future<double?> getClockOffsetSeconds() async {
@@ -47,6 +59,17 @@ class DriftSyncMetaStore implements SyncMetaStore {
   @override
   Future<void> setAppInForeground({required bool inForeground}) =>
       _set(_appInForegroundKey, inForeground ? '1' : '0');
+
+  @override
+  Future<Set<String>> getAcknowledgedRefusals() async {
+    final raw = await _get(_acknowledgedRefusalsKey);
+    if (raw == null) return {};
+    return {for (final id in jsonDecode(raw) as List<dynamic>) id as String};
+  }
+
+  @override
+  Future<void> setAcknowledgedRefusals(Set<String> operationIds) =>
+      _set(_acknowledgedRefusalsKey, jsonEncode(operationIds.toList()));
 
   Future<String?> _get(String key) async {
     final row = await (_db.select(

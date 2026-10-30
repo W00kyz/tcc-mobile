@@ -99,6 +99,15 @@ class InMemorySyncMetaStore implements SyncMetaStore {
 
   bool appInForeground = false;
 
+  Set<String> acknowledgedRefusals = {};
+
+  @override
+  Future<Set<String>> getAcknowledgedRefusals() async => acknowledgedRefusals;
+
+  @override
+  Future<void> setAcknowledgedRefusals(Set<String> operationIds) async =>
+      acknowledgedRefusals = operationIds;
+
   @override
   Future<bool> getAppInForeground() async => appInForeground;
 
@@ -320,6 +329,14 @@ class InMemoryLocalWriteStore implements LocalWriteStore {
       nextAttemptAt: null,
     );
   }
+
+  @override
+  Future<List<PendingOperationRow>> rejectedCompletions() async => [
+    for (final row in _rows.values)
+      if (row.kind == PendingOpKind.locationCompletion &&
+          row.state == PendingOpState.rejected)
+        row,
+  ];
 
   @override
   Future<void> markRejected(String id, String error) async =>
