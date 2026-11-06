@@ -59,8 +59,8 @@ A leitura de QR Code **não funciona em emulador** e o GPS só funciona simulado
 dispositivo Android físico, com o backend alcançável na LAN ou por túnel — o endereço
 base é configuração de build, nunca fixo em código.
 
-Regra de horário: o botão de iniciar a rota fica desabilitado fora de seg–sex, 07:00–17:00,
-com cronômetro nos 5 minutos antes de abrir o expediente; a hora do servidor e a abertura do expediente vêm de `GET /routes/me`
+Regra de horário: o botão de iniciar a rota fica desabilitado fora de seg–sex, por padrão
+07:00–17:00 (configurável em `system_settings`), com cronômetro nos 5 minutos antes de abrir o expediente; a hora do servidor e a abertura do expediente vêm de `GET /routes/me`
 (`server_time`, `start_opens_at`, configurados em `system_settings`). O banco de testes manual a anula só pelos próprios dados (sem flag no
 código); para ele, `--dart-define=CAMPUS_TILES_ASSET=assets/tambor.pmtiles` e
 `CAMPUS_CENTER=<lat>,<lng>` são opcionais e trocam o mapa embarcado e o centro (sem eles, o campus).
