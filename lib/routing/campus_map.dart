@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:pmtiles/pmtiles.dart';
+import 'package:route_monitor/api/env.dart';
 import 'package:route_monitor/routing/approach_walk.dart';
 import 'package:route_monitor/routing/batch_card_model.dart';
 import 'package:route_monitor/routing/building_card_model.dart';
@@ -211,8 +212,9 @@ LegKind _legKind(SlotState? destination) => switch (destination) {
 const double kPinLabelMinZoom = 15.5;
 
 /// Where the map opens when there is nothing to fit (no route yet): the
-/// UFCG Campina Grande campus.
-const LatLng kCampusCenter = LatLng(-7.2167, -35.9097);
+/// UFCG Campina Grande campus. A build with `CAMPUS_CENTER` opens elsewhere
+/// (see `lib/api/env.dart`).
+const LatLng kCampusCenter = kDefaultCampusCenter;
 
 /// The bundled offline base map plus the day's building pins and trajectory
 /// (redesign §6.3).
@@ -313,7 +315,7 @@ class CampusMap extends StatelessWidget {
   MapOptions _options(FieldPalette p) {
     final points = _allPoints;
     return MapOptions(
-      initialCenter: kCampusCenter,
+      initialCenter: campusCenterFromEnvironment(),
       initialZoom: 16,
       initialCameraFit: points.isEmpty ? null : _fitTo(points, overlayPadding),
       minZoom: 12,
@@ -461,7 +463,10 @@ class CampusTiles {
 
 /// Loads and wires the bundled offline base map.
 ///
-/// `assets/campus.pmtiles` is read as bytes (`rootBundle.load`) and opened
+/// The archive is `assets/campus.pmtiles`, or the `CAMPUS_TILES_ASSET` build
+/// define (test address, see `lib/api/env.dart`); the style never names the
+/// archive file, only its `campus` source, so any archive works with it.
+/// It is read as bytes (`rootBundle.load`) and opened
 /// in-memory with [PmTilesArchive.fromBytes] — the pmtiles package's
 /// path/URL constructors cannot see an asset. `assets/campus-style.json` is a
 /// MapLibre style whose single `campus` vector source is filled in here by
@@ -474,7 +479,7 @@ class CampusTiles {
 Future<CampusTiles> loadCampusTiles() async {
   final styleText = await rootBundle.loadString('assets/campus-style.json');
   final styleJson = json.decode(styleText) as Map<String, dynamic>;
-  final archiveBytes = await rootBundle.load('assets/campus.pmtiles');
+  final archiveBytes = await rootBundle.load(campusTilesAssetFromEnvironment());
   final archive = await PmTilesArchive.fromBytes(
     archiveBytes.buffer.asUint8List(
       archiveBytes.offsetInBytes,
