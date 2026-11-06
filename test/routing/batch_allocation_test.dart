@@ -201,6 +201,7 @@ void main() {
       final cases = <Exception, AllocationOutcome>{
         const NotAServiceDayException(): AllocationOutcome.notAServiceDay,
         const WorkdayOverException(): AllocationOutcome.workdayOver,
+        const WorkdayNotStartedException(): AllocationOutcome.workdayNotStarted,
         const OutsideCampusException(): AllocationOutcome.outsideCampus,
         // A retry after a lost "pool empty" answer (B3 carry-over).
         const RouteDoneException(): AllocationOutcome.poolEmpty,

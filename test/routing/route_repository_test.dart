@@ -75,6 +75,9 @@ Map<String, dynamic> _myDayPayload({Map<String, dynamic>? route}) => {
   'position_report_interval_seconds': 60,
   'location_silence_warning_minutes': 30,
   'location_silence_release_minutes': 45,
+  'server_time': '2026-10-20T11:00:00Z',
+  'start_opens_at': null,
+  'workday_over': false,
 };
 
 Dio _dioAnswering(
@@ -465,6 +468,7 @@ void main() {
       final cases = <String, TypeMatcher<Object>>{
         'NOT_A_SERVICE_DAY': isA<NotAServiceDayException>(),
         'WORKDAY_OVER': isA<WorkdayOverException>(),
+        'WORKDAY_NOT_STARTED': isA<WorkdayNotStartedException>(),
         'OUTSIDE_CAMPUS': isA<OutsideCampusException>(),
         'ROUTE_DONE': isA<RouteDoneException>(),
       };

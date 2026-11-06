@@ -193,6 +193,14 @@ abstract final class AppStrings {
   static const String routeOutsideCampus =
       'Você precisa estar no campus para iniciar.';
   static const String routeWorkdayOver = 'O expediente de hoje já terminou.';
+  static const String routeStartNotOpenYet = 'O expediente ainda não abriu.';
+  static const String routeFinishedButton = 'Rota finalizada';
+  static String routeStartCountdown(Duration left) {
+    final minutes = left.inMinutes.toString().padLeft(2, '0');
+    final seconds = (left.inSeconds % 60).toString().padLeft(2, '0');
+    return 'Abre em $minutes:$seconds';
+  }
+
   static const String routeNoMorePoints = 'Não há mais pontos agora.';
   static const String routeCheckAgainButton = 'Verificar de novo';
   static const String routeStartFailed =
@@ -579,7 +587,7 @@ abstract final class AppStrings {
   static const String profileTooltip = 'Abrir perfil';
   static const String collectionChip = 'Coleta de localização ativa';
   static const String dayNoService = 'Hoje não tem serviço para você';
-  static const String dayResumeButton = 'Retomar';
+  static const String dayResumeButton = 'Continuar rota';
   static const String dayDoneTitle = 'Dia concluído';
   static const String retryButton = 'Tentar de novo';
 

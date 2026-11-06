@@ -26,6 +26,9 @@ enum AllocationOutcome {
   poolEmpty,
   notAServiceDay,
   workdayOver,
+
+  /// A first start before the workday opens (`WORKDAY_NOT_STARTED`).
+  workdayNotStarted,
   outsideCampus,
   offline,
   locationUnavailable,
@@ -304,6 +307,7 @@ class BatchAllocation extends Notifier<NextBatchState> {
   static AllocationOutcome? _outcomeOf(Exception error) => switch (error) {
     NotAServiceDayException() => AllocationOutcome.notAServiceDay,
     WorkdayOverException() => AllocationOutcome.workdayOver,
+    WorkdayNotStartedException() => AllocationOutcome.workdayNotStarted,
     OutsideCampusException() => AllocationOutcome.outsideCampus,
     RouteDoneException() => AllocationOutcome.poolEmpty,
     OfflineException() => AllocationOutcome.offline,

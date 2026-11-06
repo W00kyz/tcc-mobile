@@ -1193,6 +1193,7 @@ class _RecordingRouteRepository implements RouteRepository {
     positionIntervalSeconds: 60,
     silenceWarningMinutes: 30,
     silenceReleaseMinutes: 45,
+    serverTime: DateTime.utc(2026, 10, 20, 11),
   );
 
   @override

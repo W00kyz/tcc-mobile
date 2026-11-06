@@ -49,6 +49,8 @@ MyDay myDayWith(RouteSummary? route, {bool serviceDay = true}) => MyDay(
   positionIntervalSeconds: 60,
   silenceWarningMinutes: 30,
   silenceReleaseMinutes: 45,
+  // A workday already open: nothing holds the start button back.
+  serverTime: DateTime.utc(2026, 10, 20, 11),
 );
 
 /// In-memory [RouteRepository]: serves [day], records every allocation call

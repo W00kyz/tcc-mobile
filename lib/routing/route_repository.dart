@@ -231,8 +231,14 @@ class RouteSummary {
       ?.releaseReason;
 }
 
-/// `GET /routes/me`: the worker's day — today's route, if any, and the
-/// location limits the app works with (spec §7.3).
+/// `GET /routes/me`: the worker's day — today's route, if any, the location
+/// limits the app works with (spec §7.3) and when the workday opens.
+///
+/// [serverTime] is the server clock at [MyDay.fromJson]'s `receivedAt`;
+/// [serverOffset] (`serverTime - receivedAt`) lets the app read the server
+/// clock later without trusting the device one:
+///
+///     final serverNow = DateTime.now().toUtc() + day.serverOffset;
 class MyDay {
   const MyDay({
     required this.serviceDay,
@@ -240,10 +246,18 @@ class MyDay {
     required this.positionIntervalSeconds,
     required this.silenceWarningMinutes,
     required this.silenceReleaseMinutes,
+    required this.serverTime,
+    this.startOpensAt,
+    this.workdayOver = false,
+    this.serverOffset = Duration.zero,
   });
 
-  factory MyDay.fromJson(Map<String, dynamic> json) {
+  /// [receivedAt] is when the body arrived (default: now, UTC) — injected so
+  /// a test can pin the offset to the server clock.
+  factory MyDay.fromJson(Map<String, dynamic> json, {DateTime? receivedAt}) {
     final route = json['route'];
+    final serverTime = DateTime.parse(json['server_time'] as String).toUtc();
+    final startOpensAt = json['start_opens_at'] as String?;
     return MyDay(
       serviceDay: json['service_day'] as bool,
       route: route == null
@@ -252,6 +266,14 @@ class MyDay {
       positionIntervalSeconds: json['position_report_interval_seconds'] as int,
       silenceWarningMinutes: json['location_silence_warning_minutes'] as int,
       silenceReleaseMinutes: json['location_silence_release_minutes'] as int,
+      serverTime: serverTime,
+      startOpensAt: startOpensAt == null
+          ? null
+          : DateTime.parse(startOpensAt).toUtc(),
+      workdayOver: json['workday_over'] as bool,
+      serverOffset: serverTime.difference(
+        (receivedAt ?? DateTime.now()).toUtc(),
+      ),
     );
   }
 
@@ -262,6 +284,19 @@ class MyDay {
   final int positionIntervalSeconds;
   final int silenceWarningMinutes;
   final int silenceReleaseMinutes;
+
+  /// The server clock (UTC) when this answer was built.
+  final DateTime serverTime;
+
+  /// When a first start is accepted (UTC); null when nothing holds it back
+  /// (already open, no service today, or the workday is over).
+  final DateTime? startOpensAt;
+
+  /// True only on a service day past the end of the workday.
+  final bool workdayOver;
+
+  /// `serverTime - receivedAt`: add it to the device clock for the server's.
+  final Duration serverOffset;
 }
 
 /// `POST /routes/start` and `POST /routes/{id}/next-batch`: the route with
@@ -297,6 +332,16 @@ final class WorkdayOverException implements Exception {
   String toString() =>
       'WorkdayOverException: allocation refused with WORKDAY_OVER; expected '
       'a request before the end of the workday.';
+}
+
+/// 409 `WORKDAY_NOT_STARTED`: a first start before the workday opens.
+final class WorkdayNotStartedException implements Exception {
+  const WorkdayNotStartedException();
+
+  @override
+  String toString() =>
+      'WorkdayNotStartedException: allocation refused with '
+      'WORKDAY_NOT_STARTED; expected a first start after the workday opens.';
 }
 
 /// 409 `OUTSIDE_CAMPUS`: the position sent lies outside the campus.
@@ -458,6 +503,7 @@ class DioRouteRepository implements RouteRepository {
     return switch (apiErrorCode(error)) {
       'NOT_A_SERVICE_DAY' => const NotAServiceDayException(),
       'WORKDAY_OVER' => const WorkdayOverException(),
+      'WORKDAY_NOT_STARTED' => const WorkdayNotStartedException(),
       'OUTSIDE_CAMPUS' => const OutsideCampusException(),
       'ROUTE_DONE' => const RouteDoneException(),
       _ => null,

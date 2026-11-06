@@ -291,6 +291,7 @@ String? _startOutcomeMessage(AllocationOutcome outcome) => switch (outcome) {
   AllocationOutcome.poolEmpty => AppStrings.routeNoMorePoints,
   AllocationOutcome.notAServiceDay => AppStrings.routeNotServiceDay,
   AllocationOutcome.workdayOver => AppStrings.routeWorkdayOver,
+  AllocationOutcome.workdayNotStarted => AppStrings.routeStartNotOpenYet,
   AllocationOutcome.outsideCampus => AppStrings.routeOutsideCampus,
   AllocationOutcome.offline => AppStrings.routeStartOffline,
   AllocationOutcome.locationUnavailable => AppStrings.routeLocationUnavailable,
