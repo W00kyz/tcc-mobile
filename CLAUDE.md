@@ -54,12 +54,13 @@ Os dois são obrigatórios: faltando qualquer um, o app sobe até a primeira tel
 precisa de rede ou de leitura de QR e falha ali com um `StateError` claro, em vez de
 falhar em silêncio.
 
-QR Code e GPS **não funcionam em emulador**. Toda mudança nesses caminhos precisa de
+A leitura de QR Code **não funciona em emulador** e o GPS só funciona simulado
+(`adb emu geo fix <lng> <lat>`, longitude primeiro). Toda mudança nesses caminhos precisa de
 dispositivo Android físico, com o backend alcançável na LAN ou por túnel — o endereço
 base é configuração de build, nunca fixo em código.
 
 Regra de horário: o botão de iniciar a rota fica desabilitado fora de seg–sex, 07:00–17:00,
-com cronômetro nos últimos 5 minutos; a hora do servidor e a abertura do expediente vêm de `GET /routes/me`
+com cronômetro nos 5 minutos antes de abrir o expediente; a hora do servidor e a abertura do expediente vêm de `GET /routes/me`
 (`server_time`, `start_opens_at`, configurados em `system_settings`). O banco de testes manual a anula só pelos próprios dados (sem flag no
 código); para ele, `--dart-define=CAMPUS_TILES_ASSET=assets/tambor.pmtiles` e
 `CAMPUS_CENTER=<lat>,<lng>` são opcionais e trocam o mapa embarcado e o centro (sem eles, o campus).
