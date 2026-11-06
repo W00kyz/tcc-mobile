@@ -202,7 +202,6 @@ abstract final class AppStrings {
   }
 
   static const String routeNoMorePoints = 'Não há mais pontos agora.';
-  static const String routeCheckAgainButton = 'Verificar de novo';
   static const String routeStartFailed =
       'Não foi possível iniciar a rota. Tente novamente.';
   static const String routeNextBatchOffline =

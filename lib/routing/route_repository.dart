@@ -250,11 +250,17 @@ class MyDay {
     this.startOpensAt,
     this.workdayOver = false,
     this.serverOffset = Duration.zero,
+    this.fromSnapshot = false,
   });
 
   /// [receivedAt] is when the body arrived (default: now, UTC) — injected so
-  /// a test can pin the offset to the server clock.
-  factory MyDay.fromJson(Map<String, dynamic> json, {DateTime? receivedAt}) {
+  /// a test can pin the offset to the server clock. [fromSnapshot] marks a
+  /// day re-read from the device's saved copy.
+  factory MyDay.fromJson(
+    Map<String, dynamic> json, {
+    DateTime? receivedAt,
+    bool fromSnapshot = false,
+  }) {
     final route = json['route'];
     final serverTime = DateTime.parse(json['server_time'] as String).toUtc();
     final startOpensAt = json['start_opens_at'] as String?;
@@ -274,6 +280,7 @@ class MyDay {
       serverOffset: serverTime.difference(
         (receivedAt ?? DateTime.now()).toUtc(),
       ),
+      fromSnapshot: fromSnapshot,
     );
   }
 
@@ -297,6 +304,11 @@ class MyDay {
 
   /// `serverTime - receivedAt`: add it to the device clock for the server's.
   final Duration serverOffset;
+
+  /// True when read from the saved copy while offline: [serverOffset] and
+  /// the opening hours are then stale, so the start button trusts none of
+  /// it and leaves the verdict to the server.
+  final bool fromSnapshot;
 }
 
 /// `POST /routes/start` and `POST /routes/{id}/next-batch`: the route with
@@ -445,7 +457,10 @@ class DioRouteRepository implements RouteRepository {
   /// a crash offline (final review M-4). The next online fetch replaces it.
   static MyDay? _parseSnapshot(String cached) {
     try {
-      return MyDay.fromJson(jsonDecode(cached) as Map<String, dynamic>);
+      return MyDay.fromJson(
+        jsonDecode(cached) as Map<String, dynamic>,
+        fromSnapshot: true,
+      );
       // A missing or mistyped field fails the `as` casts in fromJson with a
       // TypeError; a corrupt string fails jsonDecode.
       // ignore: avoid_catching_errors

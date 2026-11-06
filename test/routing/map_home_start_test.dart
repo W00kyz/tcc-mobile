@@ -284,7 +284,7 @@ void main() {
       },
     );
 
-    testWidgets('a paused route explains why and "Retomar" resumes it', (
+    testWidgets('a paused route explains why and "Continuar rota" resumes it', (
       tester,
     ) async {
       final paused = routeWith(
@@ -320,76 +320,28 @@ void main() {
       expect(repository.allocationCalls, ['start']);
     });
 
-    Finder checkAgainButton() =>
-        find.widgetWithText(FilledButton, AppStrings.routeCheckAgainButton);
-
-    testWidgets('a finished route says the day is done and offers to check '
-        'again', (tester) async {
+    testWidgets('a finished route says the day is done and cannot be '
+        'reopened', (tester) async {
       final done = routeWith(
         status: 'DONE',
         stops: [stopWith(id: 's1', status: 'DONE')],
       );
-      await pumpHome(tester, homeWith(repositoryWith(done)));
+      final repository = repositoryWith(done);
+      await pumpHome(tester, homeWith(repository));
 
+      final finished = find.widgetWithText(
+        FilledButton,
+        AppStrings.routeFinishedButton,
+      );
       expect(find.text(AppStrings.dayDoneTitle), findsOneWidget);
-      expect(checkAgainButton(), findsOneWidget);
+      expect(tester.widget<FilledButton>(finished).onPressed, isNull);
       expect(
         find.widgetWithText(FilledButton, AppStrings.routeStartButton),
         findsNothing,
       );
-    });
-
-    testWidgets('"Verificar de novo" takes the points released since', (
-      tester,
-    ) async {
-      // Spec §1: a colleague's point went back to the pool after this route
-      // ran out; asking again reopens the route with it.
-      final done = routeWith(
-        status: 'DONE',
-        stops: [stopWith(id: 's1', status: 'DONE')],
-      );
-      final reopened = routeWith(
-        currentBatch: 2,
-        stops: [
-          stopWith(id: 's1', status: 'DONE'),
-          stopWith(
-            id: 's2',
-            orderIndex: 2,
-            batchNumber: 2,
-            servicePointName: 'Sala 205',
-          ),
-        ],
-      );
-      final repository = repositoryWith(done);
-      repository.allocate = () {
-        repository.day = myDayWith(reopened);
-        return AllocationResult(route: reopened, poolEmpty: false);
-      };
-      await pumpHome(tester, homeWith(repository));
-
-      await tester.tap(checkAgainButton());
+      await tester.tap(finished, warnIfMissed: false);
       await tester.pumpAndSettle();
-
-      expect(repository.allocationCalls, ['start']);
-      expect(checkAgainButton(), findsNothing);
-      await tapPin(tester, 'b1');
-      expect(slotOf('s2'), findsOneWidget);
-    });
-
-    testWidgets('"Verificar de novo" with the pool still empty says so', (
-      tester,
-    ) async {
-      final done = routeWith(status: 'DONE', stops: const []);
-      final repository = repositoryWith(done)
-        ..allocate = () => AllocationResult(route: done, poolEmpty: true);
-      await pumpHome(tester, homeWith(repository));
-
-      await tester.tap(checkAgainButton());
-      await tester.pumpAndSettle();
-
-      expect(repository.allocationCalls, ['start']);
-      expect(find.text(AppStrings.routeNoMorePoints), findsOneWidget);
-      expect(checkAgainButton(), findsOneWidget);
+      expect(repository.allocationCalls, isEmpty);
     });
   });
 

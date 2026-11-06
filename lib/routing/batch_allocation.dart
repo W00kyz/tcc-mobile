@@ -20,8 +20,7 @@ import 'package:route_monitor/sync/sync_status.dart';
 enum AllocationOutcome {
   allocated,
 
-  /// Nothing to hand out right now (the route is DONE until points go back
-  /// to the pool — "Verificar de novo" asks again). Also what `ROUTE_DONE`
+  /// Nothing to hand out right now (the pool ran out). Also what `ROUTE_DONE`
   /// (a route of a past day) is shown as.
   poolEmpty,
   notAServiceDay,

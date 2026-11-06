@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,6 +12,7 @@ import 'package:route_monitor/routing/batch_allocation.dart';
 import 'package:route_monitor/routing/home_notices.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
+import 'package:route_monitor/routing/start_availability.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/ui/app_theme.dart';
 
@@ -26,41 +29,59 @@ class NoServicePanel extends StatelessWidget {
       const _Panel(title: AppStrings.dayNoService);
 }
 
-/// What the start bar says: its button and, on a paused route, why.
-typedef StartBarContent = ({String label, String? caption});
+/// What the start bar says: its button label, whether it can be pressed (and
+/// the countdown on it), and the caption over it — why the route paused, or
+/// why the button is off.
+typedef StartBarContent = ({
+  String label,
+  String? caption,
+  StartAvailability availability,
+});
 
 /// The start bar a day shows instead of a sheet — no route yet on a service
-/// day ("Iniciar rota"), or a paused route ("Retomar" under its reason) —
-/// else null (a sheet shows).
+/// day ("Iniciar rota"), or a paused route ("Continuar rota" under its
+/// reason) — else null (a sheet shows). The button is disabled out of
+/// working hours (spec §2), with the reason as caption.
 ///
-///     final bar = startBarOf(day); // (label: 'Retomar', caption: 'Motivo: …')
-StartBarContent? startBarOf(MyDay? day) {
+///     final bar = startBarOf(day, deviceNow: DateTime.now());
+///     // (label: 'Continuar rota', caption: 'Motivo: …', availability: …)
+StartBarContent? startBarOf(MyDay? day, {required DateTime deviceNow}) {
   if (day == null) return null;
   final route = day.route;
-  if (route == null) {
-    return day.serviceDay
-        ? (label: AppStrings.routeStartButton, caption: null)
-        : null;
-  }
-  if (route.status != 'PAUSED') return null;
+  final label = switch (route?.status) {
+    null when day.serviceDay => AppStrings.routeStartButton,
+    'PAUSED' => AppStrings.dayResumeButton,
+    _ => null,
+  };
+  if (label == null) return null;
+  final availability = startAvailability(day, deviceNow: deviceNow);
   return (
-    label: AppStrings.dayResumeButton,
-    caption: pausedCaption(route.latestReleaseReason),
+    label: label,
+    caption: availability.hint ?? pausedCaption(route?.latestReleaseReason),
+    availability: availability,
   );
 }
 
 /// Before the route starts and while it is paused: no sheet over the map,
 /// only the start button anchored at the bottom — a 56dp pill with a 16dp
 /// gutter, above the system bar. "Iniciar rota" asks for the first batch,
-/// "Retomar" resumes a paused route with a new one; [caption] (why it was
-/// paused) reads in a muted chip just above the pill.
+/// "Continuar rota" resumes a paused route with a new one; both are off (the
+/// pill greyed, or counting down to the opening) when the server would
+/// refuse. [caption] (why it was paused, or why it is off) reads in a muted
+/// chip just above the pill.
 ///
 ///     StartDayBar(label: AppStrings.dayResumeButton, caption: 'Motivo: …')
 class StartDayBar extends StatelessWidget {
-  const StartDayBar({required this.label, this.caption, super.key});
+  const StartDayBar({
+    required this.label,
+    this.caption,
+    this.availability = _alwaysOn,
+    super.key,
+  });
 
   final String label;
   final String? caption;
+  final StartAvailability availability;
 
   @override
   Widget build(BuildContext context) {
@@ -86,11 +107,21 @@ class StartDayBar extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (text != null) _StartBarCaption(text: text),
-        StartDayButton(label: label),
+        StartDayButton(
+          label: label,
+          enabled: availability.enabled,
+          countdown: availability.countdown,
+        ),
       ],
     );
   }
 }
+
+const StartAvailability _alwaysOn = (
+  enabled: true,
+  countdown: null,
+  hint: null,
+);
 
 /// The start bar's caption: over the map, so on a paper chip with a rule
 /// hairline rather than bare text on the tiles.
@@ -130,9 +161,8 @@ String? pausedCaption(String? releaseReason) => releaseReason == null
         AppStrings.releaseReasonLabel(releaseReason),
       );
 
-/// "Dia concluído" + the day's count + "Verificar de novo". Not final before
-/// the workday ends: points released later go back to the pool, and
-/// "Verificar de novo" asks for them (spec §1).
+/// "Dia concluído" + the day's count + a disabled "Rota finalizada": a
+/// finished route is not reopened from the app (spec §2).
 class DonePanel extends StatelessWidget {
   const DonePanel({required this.doneToday, super.key});
 
@@ -142,7 +172,10 @@ class DonePanel extends StatelessWidget {
   Widget build(BuildContext context) => _Panel(
     title: AppStrings.dayDoneTitle,
     lines: [AppStrings.dayDoneSummary(doneToday)],
-    action: const StartDayButton(label: AppStrings.routeCheckAgainButton),
+    action: const StartDayButton(
+      label: AppStrings.routeFinishedButton,
+      enabled: false,
+    ),
   );
 }
 
@@ -220,18 +253,28 @@ class _Panel extends StatelessWidget {
   }
 }
 
-/// The "Iniciar rota" / "Retomar" / "Verificar de novo" button: on a day
+/// The "Iniciar rota" / "Continuar rota" / "Rota finalizada" button: on a day
 /// with no route yet, under a paused route (where it resumes the route with
-/// a new batch) or on a route the pool ran out for, where points released
-/// since (a colleague went silent, say) reopen it (spec §1). The outcome of
-/// a refused start is shown as a snackbar; a successful one reloads the day,
-/// which replaces the panel.
+/// a new batch), or disabled — [enabled] false — out of working hours and on
+/// a finished route. With a [countdown] (the last 5 minutes before the
+/// opening) it reads "Abre em 04:32", ticking each second, and reloads the
+/// day at zero. The outcome of a refused start is shown as a snackbar; a
+/// successful one reloads the day, which replaces the panel.
 ///
 ///     const StartDayButton(label: AppStrings.dayResumeButton)
+///     const StartDayButton(label: 'Iniciar rota', enabled: false,
+///         countdown: Duration(minutes: 4, seconds: 32))
 class StartDayButton extends ConsumerStatefulWidget {
-  const StartDayButton({required this.label, super.key});
+  const StartDayButton({
+    required this.label,
+    this.enabled = true,
+    this.countdown,
+    super.key,
+  });
 
   final String label;
+  final bool enabled;
+  final Duration? countdown;
 
   @override
   ConsumerState<StartDayButton> createState() => _StartDayButtonState();
@@ -239,14 +282,60 @@ class StartDayButton extends ConsumerStatefulWidget {
 
 class _StartDayButtonState extends ConsumerState<StartDayButton> {
   bool _starting = false;
+  Timer? _ticker;
+
+  /// When the countdown ends, on the injected clock: the remaining time is
+  /// read from it, so a suspended app does not resume with a stale count.
+  late DateTime _deadline;
+  Duration? _left;
+
+  @override
+  void initState() {
+    super.initState();
+    _startCountdown();
+  }
+
+  @override
+  void didUpdateWidget(StartDayButton old) {
+    super.didUpdateWidget(old);
+    if (old.countdown != widget.countdown) _startCountdown();
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  void _startCountdown() {
+    _ticker?.cancel();
+    final countdown = widget.countdown;
+    _left = countdown;
+    if (countdown == null) return;
+    _deadline = ref.read(startClockProvider)().add(countdown);
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  void _tick() {
+    final left = _deadline.difference(ref.read(startClockProvider)());
+    if (left > Duration.zero) return setState(() => _left = left);
+    _ticker?.cancel();
+    setState(() => _left = Duration.zero);
+    // The opening has come: the day says whether the button may start now.
+    ref.invalidate(myDayProvider);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final left = _left;
+    final countingDown = widget.countdown != null && left != null;
     return FilledButton(
       // Disabled while a request is out; the server would hand the
       // same batch back to a double tap anyway.
-      onPressed: _starting ? null : _start,
-      child: Text(widget.label),
+      onPressed: widget.enabled && !_starting ? _start : null,
+      child: Text(
+        countingDown ? AppStrings.routeStartCountdown(left) : widget.label,
+      ),
     );
   }
 

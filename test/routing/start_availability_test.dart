@@ -15,6 +15,7 @@ MyDay _day({
   DateTime? startOpensAt,
   bool workdayOver = false,
   Duration serverOffset = Duration.zero,
+  bool fromSnapshot = false,
 }) => MyDay(
   serviceDay: serviceDay,
   route: route,
@@ -25,10 +26,45 @@ MyDay _day({
   startOpensAt: startOpensAt,
   workdayOver: workdayOver,
   serverOffset: serverOffset,
+  fromSnapshot: fromSnapshot,
 );
 
 void main() {
   group('startAvailability', () {
+    test('a_day_from_the_offline_snapshot_is_enabled_without_a_hint', () {
+      // Its offset and opening are stale: the server's 409 decides.
+      for (final stale in [
+        _day(fromSnapshot: true, startOpensAt: _opensAt),
+        _day(fromSnapshot: true, workdayOver: true),
+      ]) {
+        final result = startAvailability(stale, deviceNow: _serverNow);
+
+        expect(result.enabled, isTrue);
+        expect(result.countdown, isNull);
+        expect(result.hint, isNull);
+      }
+    });
+
+    test('untilCountdown_is_the_wait_for_the_5_minute_window', () {
+      final wait = untilCountdown(
+        _day(startOpensAt: _opensAt),
+        deviceNow: DateTime.utc(2026, 11, 2, 9, 50),
+      );
+
+      expect(wait, const Duration(minutes: 5));
+    });
+
+    test('untilCountdown_is_null_inside_the_window_or_without_opening', () {
+      final inside = untilCountdown(
+        _day(startOpensAt: _opensAt),
+        deviceNow: _serverNow,
+      );
+      final noOpening = untilCountdown(_day(), deviceNow: _serverNow);
+
+      expect(inside, isNull);
+      expect(noOpening, isNull);
+    });
+
     test(
       'disabled_without_countdown_when_opening_is_more_than_5_minutes_away',
       () {

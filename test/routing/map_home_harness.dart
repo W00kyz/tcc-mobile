@@ -30,6 +30,7 @@ import 'package:route_monitor/routing/map_home_screen.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/selected_building.dart';
+import 'package:route_monitor/routing/start_availability.dart';
 import 'package:route_monitor/sync/connectivity.dart';
 import 'package:route_monitor/sync/sync_notifications.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
@@ -75,6 +76,7 @@ Widget homeWith(
   SyncNotificationTaps? notificationTaps,
   DayLogStore? dayLogStore,
   ApproachApi? approachApi,
+  DateTime Function()? startClock,
 }) {
   final progress = stopProgressStore ?? FakeStopProgressStore();
   final store = localWriteStore ?? InMemoryLocalWriteStore();
@@ -112,6 +114,7 @@ Widget homeWith(
       connectivityProvider.overrideWithValue(
         connectivity ?? FakeConnectivity(isOnline: true),
       ),
+      if (startClock != null) startClockProvider.overrideWithValue(startClock),
       stopProgressStoreProvider.overrideWithValue(progress),
       evidenceApiProvider.overrideWithValue(evidenceApi ?? FakeEvidenceApi()),
       localWriteStoreProvider.overrideWithValue(store),

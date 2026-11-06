@@ -84,48 +84,56 @@ void main() {
       );
     });
 
-    testWidgets('a paused route shows why and "Retomar", with no sheet', (
-      tester,
-    ) async {
-      final paused = routeWith(
-        status: 'PAUSED',
-        stops: [
-          stopIn(id: 's1', status: 'RELEASED', releaseReason: 'LEFT_CAMPUS'),
-        ],
-      );
-      await pumpHome(tester, homeWith(repositoryWith(paused)));
+    testWidgets(
+      'a paused route shows why and "Continuar rota", with no sheet',
+      (
+        tester,
+      ) async {
+        final paused = routeWith(
+          status: 'PAUSED',
+          stops: [
+            stopIn(id: 's1', status: 'RELEASED', releaseReason: 'LEFT_CAMPUS'),
+          ],
+        );
+        await pumpHome(tester, homeWith(repositoryWith(paused)));
 
-      expect(
-        find.text(
-          AppStrings.routePausedReason(
-            AppStrings.releaseReasonLabel('LEFT_CAMPUS'),
+        expect(
+          find.text(
+            AppStrings.routePausedReason(
+              AppStrings.releaseReasonLabel('LEFT_CAMPUS'),
+            ),
           ),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.widgetWithText(FilledButton, AppStrings.dayResumeButton),
-        findsOneWidget,
-      );
-      expect(find.byType(DraggableScrollableSheet), findsNothing);
-    });
+          findsOneWidget,
+        );
+        expect(
+          find.widgetWithText(FilledButton, AppStrings.dayResumeButton),
+          findsOneWidget,
+        );
+        expect(find.byType(DraggableScrollableSheet), findsNothing);
+      },
+    );
 
-    testWidgets('a done route shows "Dia concluído" and "Verificar de novo"', (
-      tester,
-    ) async {
-      final done = routeWith(
-        status: 'DONE',
-        stops: [stopIn(id: 's1', status: 'DONE')],
-      );
-      await pumpHome(tester, homeWith(repositoryWith(done)));
+    testWidgets(
+      'a done route shows "Dia concluído" and a disabled "Rota finalizada"',
+      (
+        tester,
+      ) async {
+        final done = routeWith(
+          status: 'DONE',
+          stops: [stopIn(id: 's1', status: 'DONE')],
+        );
+        await pumpHome(tester, homeWith(repositoryWith(done)));
 
-      expect(find.text(AppStrings.dayDoneTitle), findsOneWidget);
-      expect(find.text(AppStrings.dayDoneSummary(1)), findsOneWidget);
-      expect(
-        find.widgetWithText(FilledButton, AppStrings.routeCheckAgainButton),
-        findsOneWidget,
-      );
-    });
+        expect(find.text(AppStrings.dayDoneTitle), findsOneWidget);
+        expect(find.text(AppStrings.dayDoneSummary(1)), findsOneWidget);
+        final finished = find.widgetWithText(
+          FilledButton,
+          AppStrings.routeFinishedButton,
+        );
+        expect(finished, findsOneWidget);
+        expect(tester.widget<FilledButton>(finished).onPressed, isNull);
+      },
+    );
 
     testWidgets('a load error offers "Tentar de novo" over the map', (
       tester,

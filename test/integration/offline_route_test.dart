@@ -508,7 +508,7 @@ void main() {
         expect(parked.single.releasedStopId, _stop1);
         final held = await fixture.store.unsyncedForRoute(_routeId);
         expect(held.single.kind, PendingOpKind.checkOut);
-        // A paused day draws no sync slot (only "Retomar" and why): the
+        // A paused day draws no sync slot (only "Continuar rota" and why): the
         // blocked-sync screen is out of reach, so /recursos is the way out.
         expect(find.text(AppStrings.dayResumeButton), findsOneWidget);
         expect(find.byTooltip(AppStrings.routeSyncBlockedBanner), findsNothing);

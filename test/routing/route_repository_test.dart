@@ -385,6 +385,17 @@ void main() {
 
       expect(day.route!.id, 'r1');
       expect(day.route!.stops, hasLength(4));
+      expect(day.fromSnapshot, isTrue);
+    });
+
+    test('an online fetch is not marked as a snapshot', () async {
+      final day = await DioRouteRepository(
+        _dioAnswering(200, _myDayPayload(route: _routePayload())),
+        cache: InMemoryRouteSnapshotCache(),
+        userId: 'u1',
+      ).fetchMyDay();
+
+      expect(day.fromSnapshot, isFalse);
     });
 
     test("another user's snapshot is never served", () async {

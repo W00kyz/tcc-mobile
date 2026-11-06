@@ -27,6 +27,7 @@ import 'package:route_monitor/routing/released_cleanup.dart';
 import 'package:route_monitor/routing/route_providers.dart';
 import 'package:route_monitor/routing/route_repository.dart';
 import 'package:route_monitor/routing/selected_building.dart';
+import 'package:route_monitor/routing/start_availability.dart';
 import 'package:route_monitor/sync/location_refusal_listener.dart';
 import 'package:route_monitor/sync/sync_providers.dart';
 import 'package:route_monitor/sync/sync_snackbars.dart';
@@ -80,6 +81,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   /// As last built, like [_startBar].
   bool _sheetHidden = false;
 
+  /// Fires when the start button's countdown window opens, to rebuild the
+  /// bar from the "not open yet" caption to the ticking button.
+  Timer? _countdownOpens;
+
   /// The pins last drawn, so the stamp listener finds the stop's building.
   List<DayBuilding> _buildings = const [];
 
@@ -99,6 +104,7 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
 
   @override
   void dispose() {
+    _countdownOpens?.cancel();
     _laneSlot.detach(_lane);
     _map.dispose();
     _sheet.dispose();
@@ -116,7 +122,10 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         if (stopId != null) _onStamped(stopId);
       });
     final dayAsync = ref.watch(myDayProvider);
-    _startBar = startBarOf(dayAsync.value);
+    final day = dayAsync.value;
+    final now = ref.read(startClockProvider)();
+    _startBar = startBarOf(day, deviceNow: now);
+    _rebuildWhenCountdownOpens(day, now);
     // Watched here so the automatic next-batch pull lives as long as the
     // screen does (spec §6.4), and its offline panel shows in the sheet.
     final nextBatch = ref.watch(batchAllocationProvider);
@@ -180,6 +189,17 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
         ),
       ),
     );
+  }
+
+  /// Nothing else rebuilds the home while the clock alone moves the start
+  /// button from "O expediente ainda não abriu." to its countdown.
+  void _rebuildWhenCountdownOpens(MyDay? day, DateTime now) {
+    _countdownOpens?.cancel();
+    final wait = day == null ? null : untilCountdown(day, deviceNow: now);
+    if (wait == null) return;
+    _countdownOpens = Timer(wait, () {
+      if (mounted) setState(() {});
+    });
   }
 
   /// The snackbar listeners over [body]: the "Recorrer" offer when a late
@@ -374,13 +394,16 @@ class _MapHomeScreenState extends ConsumerState<MapHomeScreen> {
   ) {
     final start = _startBar;
     if (start != null) {
-      return StartDayBar(label: start.label, caption: start.caption);
+      return StartDayBar(
+        label: start.label,
+        caption: start.caption,
+        availability: start.availability,
+      );
     }
     final route = day.route;
     if (route == null) return _panelSheet(const NoServicePanel());
     return switch (route.status) {
-      // Not final before the workday ends: points released later go back to
-      // the pool, and "Verificar de novo" asks for them (spec §1).
+      // Final: a finished route is not reopened from the app (spec §2).
       'DONE' => _panelSheet(DonePanel(doneToday: dayDoneCount(route, local))),
       _ => _buildingSheet(route, buildings, pinned, nextBatch),
     };

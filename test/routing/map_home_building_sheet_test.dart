@@ -87,7 +87,9 @@ void main() {
     expect(rect.right, width - 16);
   });
 
-  testWidgets('a paused route says why just above "Retomar"', (tester) async {
+  testWidgets('a paused route says why just above "Continuar rota"', (
+    tester,
+  ) async {
     final paused = routeWith(
       status: 'PAUSED',
       stops: [
