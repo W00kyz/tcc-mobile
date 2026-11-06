@@ -304,9 +304,15 @@ class _StartDayButtonState extends ConsumerState<StartDayButton> {
     super.didUpdateWidget(old);
     final was = old.countdown;
     final now = widget.countdown;
-    if (was == null && now != null) return _startCountdown();
-    if (was != null && now == null) return _stopCountdown();
-    if (now != null) _followCountdown(now);
+    if (now == null) {
+      if (was != null) _stopCountdown();
+    } else if (was == null || !(_ticker?.isActive ?? false)) {
+      // Also when the tick already hit zero and the reloaded day still has
+      // time left: the ticker is dead, but the countdown is not over.
+      _startCountdown();
+    } else {
+      _followCountdown(now);
+    }
   }
 
   @override
@@ -334,11 +340,18 @@ class _StartDayButtonState extends ConsumerState<StartDayButton> {
   /// The countdown went away on a rebuild: the clock crossed zero (the
   /// opening has come, same as in [_tick]) or the day changed under it.
   /// Only a live ticker reloads, so the tick and a rebuild never both do.
+  /// This runs while building, where Riverpod cannot be invalidated: the
+  /// reload waits for the end of the frame, on the scope's container so it
+  /// still goes out if this button is gone by then.
   void _stopCountdown() {
     final ticking = _ticker?.isActive ?? false;
     _ticker?.cancel();
     final crossed = !ref.read(startClockProvider)().isBefore(_deadline);
-    if (ticking && crossed) ref.invalidate(myDayProvider);
+    if (!ticking || !crossed) return;
+    final container = ProviderScope.containerOf(context);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => container.invalidate(myDayProvider),
+    );
   }
 
   void _tick() {

@@ -217,16 +217,20 @@ void main() {
       await tester.pump();
       expect(reloads, 1);
 
-      // A rebuild every 300 ms: the 1 s tick never gets the chance to see
-      // zero before a rebuild does.
+      // One rebuild still inside the window, then one that sees the clock
+      // past zero at t = 600 ms — strictly before the 1 s tick is due, so
+      // only the rebuild can reload the day.
       await rebuildEvery(
         tester,
         const Duration(milliseconds: 300),
         _opensAt,
-        times: 12,
+        times: 1,
       );
+      now = _opensAt.add(const Duration(seconds: 1));
+      countdown.value = null;
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(seconds: 5));
 
-      expect(now.isAfter(_opensAt), isTrue);
       expect(reloads, 2);
       expect(_isEnabled(tester, AppStrings.routeStartButton), isTrue);
     });
@@ -255,6 +259,32 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
 
       expect(reloads, 2);
+    });
+
+    testWidgets('resumes_ticking_when_the_reloaded_day_still_has_time_left', (
+      tester,
+    ) async {
+      now = DateTime.utc(2026, 11, 2, 9, 59, 57);
+      await pumpButton(tester, const Duration(seconds: 3));
+      await tester.pump();
+
+      // The tick alone reaches zero and reloads the day (reloads == 2)...
+      now = _opensAt;
+      await tester.pump(const Duration(seconds: 3));
+      expect(reloads, 2);
+
+      // ...and the reloaded day, with a fresh server offset, still has a
+      // fraction of a second to go: the button must keep counting.
+      countdown.value = const Duration(milliseconds: 700);
+      await tester.pump();
+      now = now.add(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      expect(reloads, 3);
+
+      // Once per zero: nothing keeps ticking afterwards.
+      countdown.value = null;
+      await tester.pump(const Duration(seconds: 5));
+      expect(reloads, 3);
     });
   });
 }
