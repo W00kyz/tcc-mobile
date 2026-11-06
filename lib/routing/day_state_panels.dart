@@ -295,10 +295,18 @@ class _StartDayButtonState extends ConsumerState<StartDayButton> {
     _startCountdown();
   }
 
+  /// The parent recomputes [StartDayButton.countdown] from the clock on
+  /// every rebuild, so only the null/non-null edges start or stop the
+  /// ticker: restarting it per rebuild would keep a 1 s tick from ever
+  /// firing under frequent rebuilds.
   @override
   void didUpdateWidget(StartDayButton old) {
     super.didUpdateWidget(old);
-    if (old.countdown != widget.countdown) _startCountdown();
+    final was = old.countdown;
+    final now = widget.countdown;
+    if (was == null && now != null) return _startCountdown();
+    if (was != null && now == null) return _stopCountdown();
+    if (now != null) _followCountdown(now);
   }
 
   @override
@@ -314,6 +322,23 @@ class _StartDayButtonState extends ConsumerState<StartDayButton> {
     if (countdown == null) return;
     _deadline = ref.read(startClockProvider)().add(countdown);
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+  }
+
+  /// A rebuild's fresher countdown (a reloaded day moves the opening)
+  /// re-aims the deadline without touching the ticker.
+  void _followCountdown(Duration countdown) {
+    _left = countdown;
+    _deadline = ref.read(startClockProvider)().add(countdown);
+  }
+
+  /// The countdown went away on a rebuild: the clock crossed zero (the
+  /// opening has come, same as in [_tick]) or the day changed under it.
+  /// Only a live ticker reloads, so the tick and a rebuild never both do.
+  void _stopCountdown() {
+    final ticking = _ticker?.isActive ?? false;
+    _ticker?.cancel();
+    final crossed = !ref.read(startClockProvider)().isBefore(_deadline);
+    if (ticking && crossed) ref.invalidate(myDayProvider);
   }
 
   void _tick() {
